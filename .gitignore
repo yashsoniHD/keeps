@@ -1,0 +1,27 @@
+# Secrets / env
+.env
+.env.*
+!.env.example
+*-service-account.json
+serviceAccountKey.json
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+backend/venv/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# OS / editor
+.DS_Store
+*.swp
