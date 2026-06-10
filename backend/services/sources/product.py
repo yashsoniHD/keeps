@@ -109,6 +109,40 @@ def _looks_blocked(status: int, html: str) -> bool:
     return "captcha" in low or "robot check" in low or "automated access" in low
 
 
+def _strip_nav_markdown(md: str) -> str:
+    """Reader output on shop pages is dominated by nav/footer link lists. Drop lines
+    that are mostly markdown links or images; keep prose, prices, specs.
+    (Measured: 426 KB Nykaa page → 12 KB of pure product content.)"""
+    out = []
+    for ln in md.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith(("[![", "![")):
+            continue
+        links = s.count("](")
+        if links and len(re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)) < 25 * links:
+            continue
+        out.append(s)
+    return "\n".join(out)
+
+
+async def _jina_reader(url: str) -> str | None:
+    """Tier 2a: r.jina.ai renders JS and returns markdown — free (rate-limited) without
+    a key. Catches SPA shops (Nykaa etc.) that serve an empty JS shell to datacenter IPs."""
+    headers = {"X-Return-Format": "markdown"}
+    if settings.JINA_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.JINA_API_KEY}"
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+        if resp.status_code == 200 and len(resp.text) > 500:
+            return _strip_nav_markdown(resp.text)
+    except httpx.HTTPError as e:
+        print(f"[product] jina reader failed: {e}")
+    return None
+
+
 async def _firecrawl(url: str) -> str | None:
     """Tier 2: Firecrawl scrape → markdown. Requires FIRECRAWL_API_KEY."""
     if not settings.FIRECRAWL_API_KEY:
@@ -134,16 +168,6 @@ async def acquire(url: str) -> ContentBundle:
         print(f"[product] fetch error for {url}: {e}")
 
     blocked = not html or _looks_blocked(status, html)
-
-    if blocked:
-        md = await _firecrawl(url)
-        if md:
-            return ContentBundle(
-                kind="text", text=md[:28000],
-                metadata={"title": md.splitlines()[0][:120] if md else url,
-                          "platform": "product", "tier": "firecrawl"},
-                strategy="product_firecrawl",
-            )
 
     soup = BeautifulSoup(html, "html.parser") if html else BeautifulSoup("", "html.parser")
     json_ld = _extract_json_ld(soup)
@@ -171,6 +195,20 @@ async def acquire(url: str) -> ContentBundle:
         text_parts.append(og["description"])
     if body_text:
         text_parts.append(body_text)
+
+    # Escalate when the direct fetch was blocked OR merely thin (SPA shops serve a JS
+    # shell with og:title but no price/specs/body — looks "ok" but extracts nothing).
+    thin = not json_ld and not site_fields.get("price") and len(body_text) < 800
+    if blocked or thin:
+        md = (await _jina_reader(url)) or (await _firecrawl(url))
+        if md:
+            return ContentBundle(
+                kind="text", text=md[:28000],
+                images=images,
+                metadata={"title": title if title != "Untitled product" else md.splitlines()[0][:120],
+                          "platform": "product", "tier": "reader"},
+                strategy="product_reader",
+            )
 
     if not json_ld and not site_fields and not body_text:
         # Tier 3: og:meta only (or nothing).

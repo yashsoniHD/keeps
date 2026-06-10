@@ -49,6 +49,8 @@ class Settings:
 
     # Optional Firecrawl API key for bot-protected product pages (tier 2 fallback).
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY", "")
+    # Optional Jina Reader key (r.jina.ai works keyless at low volume; key raises limits).
+    JINA_API_KEY: str = os.getenv("JINA_API_KEY", "")
 
     # Imagen covers DEFERRED for MVP. Covers come from og:image → thumbnail → gradient.
     ENABLE_IMAGEN: bool = os.getenv("ENABLE_IMAGEN", "false").lower() == "true"
