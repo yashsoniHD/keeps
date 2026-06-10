@@ -12,14 +12,29 @@ in capturing, it's in the structured note being better than the source and easy 
 **Target user:** someone who already saves links constantly (recipes, articles, products, travel)
 and loses them in a graveyard of tabs/bookmarks they never reopen.
 
-**Retention hook (MVP scope):** good in-feed search + a genuinely real-time feed. The capture flow is
-the easy part; *coming back* is the product. Anything that does not serve re-discovery is post-MVP.
+**Retention hook:** a genuinely real-time feed (MVP), then weekly digest email (Phase 3) and
+full-text search (Phase 4). The capture flow is the easy part; *coming back* is the product.
 
-**Post-MVP retention/growth backlog:** resurfacing/reminders, user-owned collections, public
-server-rendered share pages (SEO + viral loop), iOS share-sheet shortcut.
+**Phased build order (binding — see the plan doc):** the work is sequenced so the core bet,
+monetization, retention, and growth each get de-risked in turn:
 
-> Open risk to validate cheaply before scaling: that AI re-structuring is genuinely more useful than
-> the source (run the extraction on ~20 real URLs and judge the output by hand first).
+| Phase | What | Gate |
+|-------|------|------|
+| 0 | Validate AI output on 20–30 real URLs | Blocks everything |
+| 1 | Core backend + frontend | Working capture-to-note |
+| 2 | PWA share target + iOS shortcut/PAT | Capture is a reflex |
+| 3 | Paywall + weekly digest email | Before public launch |
+| 4 | Typesense search + public notes | First month of usage |
+| 5 | Expo native share extension | After web validation |
+
+Hard rules: **don't skip Phase 0; don't launch publicly before Phase 3.**
+
+**Still deferred (post-Phase-5):** resurfacing/reminders, user-owned collections, Android native app,
+Imagen-generated covers at scale.
+
+> **Phase 0 is a real gate, not a formality.** Before building, run the extraction on 20–30 real URLs
+> (recipes, products, articles, a paywalled article, a captioned video) and judge the output by hand.
+> If it isn't clearly better than the source, fix the prompt before writing production code.
 
 ---
 
@@ -27,15 +42,18 @@ server-rendered share pages (SEO + viral loop), iOS share-sheet shortcut.
 
 | Item | Value |
 |------|-------|
-| GCP Project ID | _TODO: set after `gcloud projects create`_ |
-| GCP Region | `us-central1` |
-| Firebase Project | _same as GCP project_ |
+| GCP Project ID | `weekly-updates-automation` (shared project — user's choice; Firestore + Firebase Auth were pre-enabled) |
+| GCP Region | `us-central1` (infra) · **Gemini uses the `global` endpoint** (3.x models 404 on regional) |
+| Firebase Project | `weekly-updates-automation` |
 | Cloud Run service | `clip-note-api` |
 | Cloud Tasks queue | `clip-note-jobs` |
-| Cloud Storage bucket | `clip-note-media` |
-| Firebase Hosting URL | _TODO: after `firebase deploy`_ |
-| Cloud Run URL | _TODO: after first deploy_ |
-| GCP Service Account | `clip-note-sa@<PROJECT>.iam.gserviceaccount.com` |
+| Cloud Storage bucket | `clip-note-media-weekly-updates-automation` |
+| Firebase Hosting URL | https://weekly-updates-automation.web.app |
+| Cloud Run URL | https://clip-note-api-674775099277.us-central1.run.app |
+| GCP Service Account | `clip-note-sa@weekly-updates-automation.iam.gserviceaccount.com` |
+| Firebase web app | "Clip Note" `1:674775099277:web:5a3293c1c0b570e392bfc4` |
+| Models | `gemini-3.5-flash` (extraction) · `gemini-3.1-flash-lite` (categorization) |
+| Billing budget | "Clip Note credits guard" ₹30,000 (50/80/100% alerts) |
 | Distill reference app | `/Users/yashsoni/dev/distill` |
 | Lovable frontend source | `/Users/yashsoni/Downloads/Clip Note` |
 
@@ -69,7 +87,7 @@ User pastes URL
 [Cloud Tasks calls /api/process/{job_id}]  (OIDC-authenticated; idempotent — no-op if already completed)
   → Update job {status: "processing"}
   → Detect: video URL → yt-dlp (transcript-first)  OR  webpage → BeautifulSoup
-  → Cover image: og:image → yt-dlp thumbnail → first <img> → Imagen 3 (visual content types only)
+  → Cover image: og:image → yt-dlp thumbnail → first <img> → gradient placeholder  (Imagen 3 deferred: ENABLE_IMAGEN=false)
   → Gemini → {content_type, title, ai_summary, cover_image_prompt, data{}}   (structured data only — no HTML)
   → Write Firestore: notes/{note_id}
   → Update job {status: "completed", note_id}
@@ -85,30 +103,45 @@ User pastes URL
 - **Single Cloud Run service** — handles both fast ingest path and Cloud Tasks worker endpoint; **OIDC token (not a shared secret)** on `/api/process` keeps it private even though the service allows unauthenticated front-end calls
 - **Structured data, not stored HTML** — Gemini returns a structured `data` map; React templates render it (`RecipeNote`, `ItineraryNote`, `ProductNote`, `SummaryNote`, and a `GenericNote` fallback for AI-invented types). This keeps the design restylable, cheaper (fewer output tokens), consistent, and free of `dangerouslySetInnerHTML`. **Do not have the model emit HTML.**
 - **Dynamic note types** — Gemini invents `content_type` slugs, matched/normalized against the user's existing `categories` array (`users/{uid}.categories`) — no full-collection scan per ingest; `GenericNote` renders any type without a dedicated template
-- **Imagen 3 fallback (visual types only)** — covers come from og:image → video thumbnail → first `<img>`; Imagen is called **only** when none found *and* the content type is visual (recipe, product, travel…). Non-visual notes get a generated gradient placeholder. Imagen is the exception, not the default — it is a real cost line.
+- **Imagen 3 fallback — DEFERRED for MVP (`ENABLE_IMAGEN=false`).** Covers come from og:image → video thumbnail → first `<img>` → gradient placeholder. The Imagen code path stays in place (visual types only, called only when no cover is found) but is gated off by config; turn it on only after validating users care about generated covers. Imagen is the exception, not the default — it is a real cost line.
 - **Cost guardrails are mandatory** — budget is ~₹30k (~$360 ≈ a few thousand notes *total*). Per-user daily ingest cap + per-user note cap + a global daily kill-switch counter, enforced in `/api/ingest`. Set a GCP billing budget alert. Transcript-first video handling (below) keeps the most expensive path cheap.
 
 ---
 
 ## Current State
 
-**Status: Planning complete — ready to build**
+**Status: Phase 0 passed + Phase 1 deployed (2026-06-10)**
 
-Nothing has been built yet. The plan is fully designed and approved. Next session starts at Phase 1 (project setup).
+The app is live: https://weekly-updates-automation.web.app → Cloud Run API → Cloud Tasks worker →
+Firestore. Phase 0 validated 20/20 real URLs (report: `phase0/REPORT.md`); the user explicitly
+passed the gate.
 
-### What exists
-- `/Users/yashsoni/Downloads/Clip Note` — Lovable frontend (TanStack Start, beautiful design, mock data only, Supabase references to remove)
-- `/Users/yashsoni/dev/distill/backend` — FastAPI reference backend (Gemini + yt-dlp + scraper; uses Supabase — to be adapted)
-- `/Users/yashsoni/.claude/plans/i-am-building-the-curried-axolotl.md` — full spec
+### Architecture notes that supersede older sections of this file
+- **Source-aware content resolver** (`backend/services/sources/`) replaced the binary
+  video-vs-webpage split: YouTube → direct Gemini URL analysis (no download); Instagram/FB/TikTok
+  → yt-dlp → GCS → `gs://` URI; Reddit → RSS-first (`.json` is bot-blocked); Amazon/products →
+  tiered scrape (mobile UA + JSON-LD + selectors; Firecrawl tier never needed so far); generic
+  web → JSON-LD-first scrape.
+- **Models:** `gemini-3.5-flash` + `gemini-3.1-flash-lite` on the **`global` endpoint** (3.x 404s
+  on us-central1). Gemini 3.x thinks by default — never set tight `max_output_tokens` (thoughts
+  consume it and `response.text` comes back None). Vertex requires explicit `mimeType` on
+  `FileData` even for YouTube URLs.
+- **Anti-generic + anti-fabrication prompts** (`backend/services/gemini.py`): per-type
+  `TYPE_PROMPTS` (incl. `workout`), composer building blocks for invented slugs, classifier rules
+  (no `general`; discussion threads are never plan-types), hard NEVER-FABRICATE rule.
+- **Datacenter-IP findings (verified on deployed worker):** Instagram downloads work cookie-less;
+  YouTube's yt-dlp *probe* is bot-blocked → non-fatal, falls back to oEmbed + direct Gemini path.
+- **IAM gotcha:** `clip-note-sa` needs `roles/iam.serviceAccountUser` **on itself** to enqueue
+  OIDC-signed Cloud Tasks (tokenCreator is not enough). Baked into `infra/setup.sh`.
+- Frontend is a **vanilla Vite SPA** (TanStack Start/SSR was stripped for Firebase Hosting);
+  templates: Recipe/Itinerary/Product/Summary/**Workout** + GenericNote
+  (facts/sections/steps/table/checklist/quotes blocks); open-slug design system in
+  `frontend/src/lib/note-meta.ts`.
 
-### What needs to be built (in order)
-- [ ] GCP project bootstrap (`infra/setup.sh`)
-- [ ] Backend: build from scratch (Distill is reference only — it had reliability issues), on Firebase + Cloud Tasks + Imagen
-- [ ] Frontend: copy from Lovable, remove Lovable branding, add Firebase auth + Firestore
-- [ ] Wire capture flow end-to-end
-- [ ] Deploy backend to Cloud Run
-- [ ] Deploy frontend to Firebase Hosting
-- [ ] End-to-end verification (8 test cases in spec)
+### Next (per the phase table)
+- [ ] Phase 2: PWA share target + iOS shortcut/PAT (capture as a reflex)
+- [ ] Phase 3: paywall + weekly digest — **required before public launch**
+- [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
 ---
 
@@ -168,13 +201,16 @@ clip-note/
 
 ```
 users/{uid}           display_name, email, photo_url, categories[], created_at
+                      plan ("free"|"pro"), stripe_customer_id     # added in Phase 3
 notes/{note_id}       user_id, content_type, title, ai_summary,
-                      source_url, source_domain, cover_image_url,
-                      data (flexible map), created_at, updated_at
-jobs/{job_id}         user_id, url, status, note_id, error,
+                      source_url, source_domain, source ("web"|"shortcut"|"pwa"),
+                      cover_image_url, data (flexible map), created_at, updated_at
+                      is_public (default false)                   # added in Phase 4
+jobs/{job_id}         user_id, url, content, source, status, note_id, error,
                       attempt_count, created_at, updated_at
 usage/{uid}-{date}    user_id, date, ingest_count        # per-user daily rate limit
 system/usage-{date}   date, note_count                   # global daily kill-switch
+shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used_at  # Phase 2 (PAT)
 ```
 
 `users/{uid}.categories` is the source of truth for a user's note types (kept current with
