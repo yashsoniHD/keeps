@@ -53,7 +53,10 @@ Rules, in priority order:
    essays, news articles, opinion pieces, talks. NEVER use "summary" for anything
    with steps, items, specs, exercises, or places.
 4. NEVER return "general", "misc", "other", or "video" — invent a specific new slug instead
-   (e.g. "book-recommendations", "home-decor-ideas", "career-advice")."""
+   (e.g. "book-recommendations", "home-decor-ideas", "career-advice").
+5. Discussion threads, Q&A, comment collections, and anecdote threads are NOT plans.
+   A forum thread about workouts is "fitness-discussion", not "workout". Only classify as
+   recipe/workout/itinerary when the source actually CONTAINS that artifact."""
 
 
 _SHARED_RULES = """You are a note extraction engine. The user saves links and never wants to
@@ -73,6 +76,9 @@ Extraction rules:
 - If the content shows something visually but never says it aloud, extract what is SHOWN.
 - Strip sponsorships, intros, calls-to-action, filler.
 - Never leave a schema field empty if the information exists anywhere in the source.
+- NEVER FABRICATE. If the source does not state a value, omit the field — do not estimate,
+  average, or invent plausible-sounding numbers/items to fill the schema. A sparse but
+  truthful note beats a complete-looking invented one.
 - If JSON-LD ground truth is provided, treat it as authoritative for exact values."""
 
 

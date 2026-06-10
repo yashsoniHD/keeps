@@ -232,6 +232,11 @@ async def main():
         print(f"        → {row['strategy']} | {row['category']} | {row['verdict']} | {row['elapsed']:.1f}s")
         rows.append(row)
 
+    if only:
+        # Partial re-runs must not clobber the full report.
+        print("\n(--only run: REPORT.md not rewritten)")
+        return
+
     # REPORT.md
     lines = [
         "# Phase 0 Validation Report", "",
