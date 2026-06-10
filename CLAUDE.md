@@ -139,7 +139,10 @@ passed the gate.
   `frontend/src/lib/note-meta.ts`.
 
 ### Next (per the phase table)
-- [ ] Phase 2: PWA share target + iOS shortcut/PAT (capture as a reflex)
+- [x] Phase 2 (2026-06-10): PWA share target (`/share` route, manifest, SW, icons) + iOS
+      shortcut PATs (`cn_<id>.<secret>`, bcrypt; `require_user` accepts Firebase JWT or PAT;
+      Settings → "Capture from your phone"). Feed UX: delete, source filter, layout toggle,
+      responsive 1–4 col grid.
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
