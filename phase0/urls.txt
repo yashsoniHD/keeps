@@ -1,0 +1,39 @@
+# Phase 0 test set — one URL per line; '#' lines are comments.
+# Filled by Claude; user's real links appended at the bottom.
+
+# --- YouTube: direct Gemini analysis (visuals + audio) ---
+https://www.youtube.com/watch?v=NU4h4GC-Fgg
+https://www.youtube.com/watch?v=Xw5b9prgVkU
+https://www.youtube.com/watch?v=a03U45jFxOI
+# over-cap (6h lecture) → must take the transcript path, not direct video:
+https://www.youtube.com/watch?v=JxgmHe2NyeY
+
+# --- Instagram reels: yt-dlp → GCS → Gemini ---
+https://www.instagram.com/reel/DYGzlp4sKJQ/
+https://www.instagram.com/reel/DIEMAERyzi-/
+https://www.instagram.com/reel/DJlEdTnzWeh/
+
+# --- Amazon.in products: tiered product strategy ---
+https://www.amazon.in/Apple-Bluetooth-Headphones-Personalised-Effortless/dp/B0DGJLL7V1
+https://www.amazon.in/realme-Wireless-Playtime-Resistant-SlateGrey/dp/B0F5GV3Y87
+https://www.amazon.in/Noise-AirWaveTM-Technology-Neodymium-Detachable/dp/B0CFYJ8HRS
+
+# --- Reddit: RSS/JSON path ---
+https://www.reddit.com/r/Fitness/comments/1mrnmc2/gym_story_saturday/
+
+# --- Recipe pages: JSON-LD schema.org/Recipe expected ---
+https://www.indianhealthyrecipes.com/paneer-butter-masala/
+https://www.recipetineats.com/butter-chicken/
+
+# --- Articles (prose → summary) ---
+https://waitbutwhy.com/2015/01/artificial-intelligence-revolution-1.html
+https://jamesclear.com/habit-stacking
+
+# --- Travel guide ---
+https://www.nomadicmatt.com/travel-blogs/japan-travel-tips/
+
+# --- User's real links (appended) ---
+https://www.instagram.com/reel/DXOfVzQE08M/?igsh=MWl5MnRrN2Y3M2R2eA==
+https://www.instagram.com/reel/DZUuq_FTJoI/?igsh=MTk0Z3F5ZGthMzFocQ==
+https://youtube.com/shorts/6p1wXbGJHws?si=gIN6kI4ddIdajERs
+https://www.nykaaman.com/puma-ferrari-sptwr-style-unisex-white-backpack/p/13640653
