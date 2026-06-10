@@ -35,6 +35,11 @@ for ROLE in \
     --member="serviceAccount:$SA" --role="$ROLE" --condition=None --quiet >/dev/null
 done
 
+# The service enqueues Cloud Tasks with OIDC tokens signed as this same SA — that
+# requires actAs on itself (serviceAccountUser; tokenCreator alone is NOT enough).
+gcloud iam service-accounts add-iam-policy-binding "$SA" \
+  --member="serviceAccount:$SA" --role="roles/iam.serviceAccountUser" --quiet >/dev/null
+
 # Cloud Tasks queue (retries are bounded; the worker marks permanent failures itself)
 gcloud tasks queues create clip-note-jobs \
   --location=us-central1 \

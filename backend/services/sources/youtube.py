@@ -7,6 +7,7 @@ transcript used as fallback for videos over the duration cap.
 """
 import asyncio
 import json as _json
+import re
 
 import httpx
 import yt_dlp
@@ -67,11 +68,43 @@ def _extract_transcript(info: dict) -> str | None:
     return text[:28000] if text else None
 
 
+_VIDEO_ID_RE = re.compile(
+    r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|shorts/|embed/|live/))([\w-]{11})"
+)
+
+
+async def _oembed(url: str) -> dict:
+    """Metadata fallback when the yt-dlp probe is bot-blocked (datacenter IPs):
+    YouTube's public oEmbed endpoint needs no auth and is not bot-gated."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get("https://www.youtube.com/oembed",
+                                params={"url": url, "format": "json"})
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def acquire(url: str) -> ContentBundle:
-    info = await asyncio.to_thread(_probe, url)
+    # The probe supplies duration (for the over-cap transcript fallback) and rich
+    # metadata — but it is NOT load-bearing: Gemini ingests the URL directly. YouTube
+    # bot-blocks yt-dlp on datacenter IPs, so a failed probe degrades to oEmbed
+    # metadata + the direct path (duration unknown → cost is bounded by user caps).
+    try:
+        info = await asyncio.to_thread(_probe, url)
+    except Exception as e:
+        print(f"[youtube] probe blocked/failed ({str(e)[:120]}); falling back to oEmbed")
+        info = {}
+        try:
+            oe = await _oembed(url)
+            info = {"title": oe.get("title"), "uploader": oe.get("author_name")}
+        except Exception as e2:
+            print(f"[youtube] oEmbed also failed: {e2}")
+        vid = m.group(1) if (m := _VIDEO_ID_RE.search(url)) else None
+        if vid:
+            info.setdefault("thumbnail", f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg")
+
     duration = int(info.get("duration") or 0)
     metadata = {
-        "title": info.get("title", "Untitled"),
+        "title": info.get("title") or "Untitled",
         "author": info.get("uploader") or info.get("creator"),
         "platform": "youtube",
         "duration": duration,
