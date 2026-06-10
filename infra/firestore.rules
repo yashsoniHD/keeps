@@ -16,6 +16,10 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow write: if false;
     }
+    // Personal Access Tokens (iOS shortcut): backend only — never client-readable.
+    match /shortcut_tokens/{tokenId} {
+      allow read, write: if false;
+    }
     // Rate-limit counters and global kill switch: backend only.
     match /usage/{docId} {
       allow read, write: if false;

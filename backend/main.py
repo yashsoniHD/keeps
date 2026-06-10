@@ -40,8 +40,10 @@ from routers.ingest import router as ingest_router      # noqa: E402
 from routers.process import router as process_router    # noqa: E402
 from routers.notes import router as notes_router        # noqa: E402
 from routers.jobs import router as jobs_router          # noqa: E402
+from routers.tokens import router as tokens_router      # noqa: E402
 
 app.include_router(ingest_router, prefix="/api")
 app.include_router(process_router, prefix="/api")
 app.include_router(notes_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
+app.include_router(tokens_router, prefix="/api")

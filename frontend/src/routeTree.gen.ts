@@ -9,11 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ShareRouteImport } from './routes/share'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
 
+const ShareRoute = ShareRouteImport.update({
+  id: '/share',
+  path: '/share',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/share': typeof ShareRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/share': typeof ShareRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
 }
 export interface FileRoutesById {
@@ -52,25 +60,34 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/share': typeof ShareRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/settings' | '/notes/$noteId'
+  fullPaths: '/' | '/login' | '/settings' | '/share' | '/notes/$noteId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/settings' | '/notes/$noteId'
-  id: '__root__' | '/' | '/login' | '/settings' | '/notes/$noteId'
+  to: '/' | '/login' | '/settings' | '/share' | '/notes/$noteId'
+  id: '__root__' | '/' | '/login' | '/settings' | '/share' | '/notes/$noteId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
+  ShareRoute: typeof ShareRoute
   NotesNoteIdRoute: typeof NotesNoteIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/share': {
+      id: '/share'
+      path: '/share'
+      fullPath: '/share'
+      preLoaderRoute: typeof ShareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -106,6 +123,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
+  ShareRoute: ShareRoute,
   NotesNoteIdRoute: NotesNoteIdRoute,
 }
 export const routeTree = rootRouteImport

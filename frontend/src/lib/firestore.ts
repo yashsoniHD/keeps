@@ -5,6 +5,7 @@ import {
   orderBy,
   limit,
   getDoc,
+  deleteDoc,
   doc,
   onSnapshot,
   type Unsubscribe,
@@ -33,6 +34,12 @@ export async function getNote(noteId: string): Promise<Note | null> {
   const snap = await getDoc(doc(db, "notes", noteId));
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as Note;
+}
+
+// Security rules allow owners to delete their own notes, so this needs no API call —
+// and the onSnapshot feed removes the card instantly.
+export async function deleteNote(noteId: string): Promise<void> {
+  await deleteDoc(doc(db, "notes", noteId));
 }
 
 export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): Unsubscribe {
