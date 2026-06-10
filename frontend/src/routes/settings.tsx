@@ -1,6 +1,6 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { LogOut, Trash2, Smartphone, Copy, Check, X } from "lucide-react";
+import { ArrowLeft, LogOut, Trash2, Smartphone, Copy, Check, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import {
   deleteAllNotes,
@@ -53,6 +53,13 @@ function Settings() {
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl px-4 py-8 md:px-6">
+        <Link
+          to="/"
+          className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Notes
+        </Link>
         <h1 className="font-serif text-3xl text-ink">Settings</h1>
 
         <section className="mt-8 rounded-3xl border border-border bg-card p-6">

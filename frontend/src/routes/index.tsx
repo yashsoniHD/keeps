@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Search, Sparkles, Plus, LayoutGrid, List, Globe, ChevronDown } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Search, Sparkles, Plus, LayoutGrid, List, Globe, ChevronDown, Settings } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { watchNotes, deleteNote } from "@/lib/firestore";
 import { noteLabel } from "@/lib/note-meta";
@@ -84,15 +84,25 @@ function Feed() {
               </span>
               <span className="font-serif text-2xl text-ink">Clipnote</span>
             </div>
-            <button
-              type="button"
-              onClick={toggleLayout}
-              aria-label={layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"}
-              title={layout === "standard" ? "Condensed view" : "Card view"}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
-            >
-              {layout === "standard" ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleLayout}
+                aria-label={layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"}
+                title={layout === "standard" ? "Condensed view" : "Card view"}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+              >
+                {layout === "standard" ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+              </button>
+              <Link
+                to="/settings"
+                aria-label="Settings"
+                title="Settings"
+                className="hidden h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink md:inline-flex"
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
