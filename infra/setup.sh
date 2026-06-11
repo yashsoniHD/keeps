@@ -24,11 +24,13 @@ gcloud iam service-accounts create clip-note-sa \
 
 SA="clip-note-sa@${PROJECT}.iam.gserviceaccount.com"
 
+# storage.objectUser = object CRUD without bucket-IAM administration (least privilege;
+# objectAdmin would let a compromised service rewrite bucket ACLs).
 for ROLE in \
   roles/aiplatform.user \
   roles/datastore.user \
   roles/cloudtasks.enqueuer \
-  roles/storage.objectAdmin \
+  roles/storage.objectUser \
   roles/firebase.sdkAdminServiceAgent \
   roles/iam.serviceAccountTokenCreator; do
   gcloud projects add-iam-policy-binding "$PROJECT" \
@@ -40,14 +42,35 @@ done
 gcloud iam service-accounts add-iam-policy-binding "$SA" \
   --member="serviceAccount:$SA" --role="roles/iam.serviceAccountUser" --quiet >/dev/null
 
-# Cloud Tasks queue (retries are bounded; the worker marks permanent failures itself)
+# Cloud Tasks queue (retries are bounded; the worker marks permanent failures itself.
+# max-backoff keeps transient retries minutes — not the unbounded 1h default — apart)
 gcloud tasks queues create clip-note-jobs \
   --location=us-central1 \
   --max-attempts=3 \
-  --min-backoff=10s || true
+  --min-backoff=10s \
+  --max-backoff=600s || true
 
 # Media bucket (created already during Phase 0; idempotent)
 gcloud storage buckets create "gs://clip-note-media-${PROJECT}" --location=us-central1 || true
+
+# --- Data safety + observability (applied to the live project 2026-06-11) ---
+
+# Firestore: point-in-time recovery (7-day version retention) + daily backups, 30-day retention.
+gcloud firestore databases update --database='(default)' --enable-pitr || true
+gcloud firestore backups schedules create --database='(default)' \
+  --recurrence=daily --retention=30d || true
+
+# Uptime check on the worker's /health endpoint.
+gcloud monitoring uptime create "Clip Note API health" \
+  --resource-type=uptime-url \
+  --resource-labels=host="clip-note-api-674775099277.us-central1.run.app",project_id="$PROJECT" \
+  --path=/health --protocol=https --period=15 --timeout=10 || true
+
+# Alert policies (ERROR logs + queue depth) live in infra/alerts/*.json:
+#   gcloud beta monitoring channels create --display-name="Clip Note alerts (email)" \
+#     --type=email --channel-labels=email_address=<you>
+#   gcloud alpha monitoring policies create --policy-from-file=infra/alerts/<file>.json
+# Cloud Run runtime flags (applied live): --max-instances=10 (cost ceiling), 1Gi, timeout 600s.
 
 echo ""
 echo "Done. Project: $PROJECT  SA: $SA"
