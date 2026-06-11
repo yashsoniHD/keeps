@@ -15,7 +15,7 @@ from google.oauth2 import id_token
 
 from config import settings
 from services import sources
-from services.firebase import add_user_category, get_db, get_user_categories
+from services.firebase import add_user_category, firestore_safe, get_db, get_user_categories
 from services.gemini import gemini_service
 
 router = APIRouter(tags=["process"])
@@ -94,7 +94,7 @@ async def process_job(job_id: str, request: Request):
             "source_domain": source_domain,
             "source": source,
             "cover_image_url": cover_image_url,
-            "data": extracted.data,
+            "data": firestore_safe(extracted.data),
             "acquisition": bundle.strategy,
             "created_at": now,
             "updated_at": now,

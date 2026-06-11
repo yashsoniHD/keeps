@@ -44,6 +44,26 @@ async def get_user_categories(uid: str) -> list[str]:
     return sorted(snap.to_dict().get("categories", []))
 
 
+def firestore_safe(value):
+    """Makes an arbitrary Gemini-built structure storable in Firestore.
+
+    Firestore rejects arrays nested directly inside arrays ("invalid nested
+    entity") — and the composer prompt's table block is exactly that:
+    rows: [[cell, cell], …]. The model's output shape stays natural; inner
+    arrays get wrapped as {"cells": [...]} at the write boundary, and the
+    GenericNote template renders both shapes. Applies recursively so any
+    AI-invented nesting can't kill the note write.
+    """
+    if isinstance(value, dict):
+        return {str(k): firestore_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [
+            {"cells": firestore_safe(list(v))} if isinstance(v, (list, tuple)) else firestore_safe(v)
+            for v in value
+        ]
+    return value
+
+
 async def add_user_category(uid: str, slug: str) -> None:
     """Adds a content_type slug to users/{uid}.categories (idempotent via ArrayUnion)."""
     await get_db().collection("users").document(uid).set(

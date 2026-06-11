@@ -6,9 +6,15 @@ interface GenericData {
   facts?: { label: string; value: string }[];
   sections?: { heading: string; items: string[] }[];
   steps?: string[];
-  table?: { columns: string[]; rows: string[][] };
+  // Firestore can't store arrays-in-arrays, so the backend wraps each row as
+  // {cells: [...]} at the write boundary (services/firebase.py firestore_safe).
+  table?: { columns: string[]; rows: (string[] | { cells: string[] })[] };
   checklist?: string[];
   quotes?: { text: string; attribution?: string }[];
+}
+
+function rowCells(row: string[] | { cells: string[] }): string[] {
+  return Array.isArray(row) ? row : (row.cells ?? []);
 }
 
 // Renders the building blocks the composer prompt emits for AI-invented types,
@@ -62,7 +68,7 @@ export function GenericNote({ note }: { note: Note }) {
             <tbody className="divide-y divide-border">
               {(data.table.rows ?? []).map((row, i) => (
                 <tr key={i}>
-                  {row.map((cell, j) => (
+                  {rowCells(row).map((cell, j) => (
                     <td key={j} className="px-4 py-3 text-ink">
                       {cell}
                     </td>
