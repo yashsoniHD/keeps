@@ -6,10 +6,10 @@ verbatim as ground truth. Articles often embed schema.org/Article with author/da
 """
 import json
 
-import httpx
 from bs4 import BeautifulSoup
 
 from models.note import ContentBundle
+from services.net_guard import guarded_async_client
 
 _HEADERS = {
     "User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
@@ -48,7 +48,7 @@ def _walk_json_ld(soup: BeautifulSoup) -> dict | None:
 
 
 async def acquire(url: str) -> ContentBundle:
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+    async with guarded_async_client(timeout=20.0, follow_redirects=True) as client:
         resp = await client.get(url, headers=_HEADERS)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")

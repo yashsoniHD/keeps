@@ -14,6 +14,10 @@ import yt_dlp
 
 from config import settings
 from models.note import ContentBundle
+from services.net_guard import assert_public_url
+
+import logging
+log = logging.getLogger("clipnote.sources")
 
 _DOMAINS = ("youtube.com", "youtu.be", "music.youtube.com")
 
@@ -49,6 +53,9 @@ def _extract_transcript(info: dict) -> str | None:
     if not pick or not pick.get("url"):
         return None
     try:
+        # Subtitle URL comes from yt-dlp's probe, not directly from the user — but it
+        # still derives from user input, so it gets the same SSRF check.
+        assert_public_url(pick["url"])
         raw = httpx.get(pick["url"], timeout=15.0).text
     except Exception:
         return None
@@ -91,13 +98,13 @@ async def acquire(url: str) -> ContentBundle:
     try:
         info = await asyncio.to_thread(_probe, url)
     except Exception as e:
-        print(f"[youtube] probe blocked/failed ({str(e)[:120]}); falling back to oEmbed")
+        log.info("probe blocked/failed (%s); falling back to oEmbed", str(e)[:120])
         info = {}
         try:
             oe = await _oembed(url)
             info = {"title": oe.get("title"), "uploader": oe.get("author_name")}
         except Exception as e2:
-            print(f"[youtube] oEmbed also failed: {e2}")
+            log.warning("oEmbed also failed: %s", e2)
         vid = m.group(1) if (m := _VIDEO_ID_RE.search(url)) else None
         if vid:
             info.setdefault("thumbnail", f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg")

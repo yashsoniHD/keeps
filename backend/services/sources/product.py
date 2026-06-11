@@ -16,6 +16,10 @@ from bs4 import BeautifulSoup
 
 from config import settings
 from models.note import ContentBundle
+from services.net_guard import guarded_async_client
+
+import logging
+log = logging.getLogger("clipnote.sources")
 
 _PRODUCT_DOMAINS = (
     "amazon.", "amzn.", "flipkart.com", "myntra.com", "ajio.com",
@@ -151,7 +155,7 @@ async def _jina_reader(url: str) -> str | None:
                 return None
             return _strip_nav_markdown(resp.text)
     except httpx.HTTPError as e:
-        print(f"[product] jina reader failed: {e}")
+        log.warning("jina reader failed: %s", e, extra={"url": url})
     return None
 
 
@@ -173,14 +177,14 @@ async def _firecrawl(url: str) -> str | None:
 async def acquire(url: str) -> ContentBundle:
     html, status, final_url = "", 0, url
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with guarded_async_client(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(url, headers=_HEADERS)
             html, status = resp.text, resp.status_code
             # Short links (amzn.in/d/…) expand via redirect even when the destination
             # serves a bot-block page — the canonical URL is gold for the search tier.
             final_url = str(resp.url)
     except httpx.HTTPError as e:
-        print(f"[product] fetch error for {url}: {e}")
+        log.warning("direct fetch error: %s", e, extra={"url": url})
 
     blocked = not html or _looks_blocked(status, html)
 

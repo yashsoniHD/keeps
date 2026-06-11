@@ -10,6 +10,7 @@ from models.note import IngestRequest, JobStatus
 from services.auth_dep import require_user
 from services.cloud_tasks import enqueue_process_job
 from services.firebase import get_db
+from services.net_guard import BlockedURLError, assert_public_url_async
 
 router = APIRouter(tags=["ingest"])
 
@@ -71,6 +72,12 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
     body = await _parse_ingest_request(request)
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL")
+    # SSRF gate at the boundary: instant 400 instead of a doomed job (the worker
+    # re-checks before fetching, so this is feedback, not the security boundary).
+    try:
+        await assert_public_url_async(body.url)
+    except BlockedURLError:
+        raise HTTPException(status_code=400, detail="This URL points at a private address and can't be saved.")
 
     db = get_db()
     await _enforce_cost_caps(db, user_id)

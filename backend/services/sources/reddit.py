@@ -16,6 +16,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from models.note import ContentBundle
+from services.net_guard import guarded_async_client
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -115,7 +116,7 @@ async def acquire(url: str) -> ContentBundle:
         try:
             # RSS first: .json 403s on many networks AND a failed .json request trips
             # Reddit's bot detection for the request that follows it (measured).
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
+            async with guarded_async_client(timeout=15.0, follow_redirects=True, headers=headers) as client:
                 bundle = await _try_rss(client, url)
                 if bundle is None:
                     bundle = await _try_json(client, url)
