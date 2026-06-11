@@ -1,7 +1,8 @@
+import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud import firestore as fs
 
 from config import settings
@@ -44,8 +45,30 @@ async def _enforce_cost_caps(db, user_id: str) -> None:
     await _bump(transaction)
 
 
+async def _parse_ingest_request(request: Request) -> IngestRequest:
+    """Accepts the URL however the client can deliver it. The web app sends JSON;
+    the iOS Shortcut sends headers — JSON dictionary values get silently stripped when
+    a signed .shortcut file is imported, while header dictionaries survive intact
+    (verified on-device, iOS 18). A bare-text body is the last-ditch fallback."""
+    url = request.headers.get("x-clipnote-url", "")
+    source = request.headers.get("x-clipnote-source", "web")
+    content = None
+    raw = await request.body()
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                url = data.get("url") or url
+                content = data.get("content")
+                source = data.get("source") or source
+        except json.JSONDecodeError:
+            url = url or raw.decode("utf-8", errors="ignore")
+    return IngestRequest(url=url, content=content, source=source)  # validator sanitizes url
+
+
 @router.post("/ingest", response_model=JobStatus)
-async def ingest(body: IngestRequest, user_id: str = Depends(require_user)):
+async def ingest(request: Request, user_id: str = Depends(require_user)):
+    body = await _parse_ingest_request(request)
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL")
 

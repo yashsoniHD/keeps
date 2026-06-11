@@ -1,11 +1,25 @@
 from typing import Any, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class IngestRequest(BaseModel):
     url: str
     content: str | None = None   # pre-extracted text (paywall/auth bypass via PWA/shortcut)
     source: str = "web"          # "web" | "shortcut" | "pwa"
+
+    @field_validator("url")
+    @classmethod
+    def _clean_url(cls, v: str) -> str:
+        # Shared URLs (iOS shortcut / share sheet / paste) arrive messy: trailing newlines,
+        # or the same link repeated on multiple lines (the Shortcut's "Get URLs" action
+        # stringifies multi-matches with \n). httpx rejects any non-printable char in a URL,
+        # so sanitize at the boundary — take the first http(s) token.
+        v = (v or "").strip()
+        if any(c.isspace() for c in v):
+            for tok in v.split():
+                if tok.startswith(("http://", "https://")):
+                    return tok
+        return v
 
 
 class ContentBundle(BaseModel):
