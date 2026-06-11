@@ -4,6 +4,7 @@ import type { Note } from "@/lib/types";
 import { formatDate } from "@/lib/note-meta";
 import { TypeBadge } from "./TypeBadge";
 import { SourcePill } from "./SourcePill";
+import { ShareButton } from "./ShareButton";
 import { DeleteButton } from "@/components/NoteCard";
 
 export function NoteHeader({ note, onDelete }: { note: Note; onDelete?: () => void }) {
@@ -17,7 +18,10 @@ export function NoteHeader({ note, onDelete }: { note: Note; onDelete?: () => vo
           <ArrowLeft className="h-4 w-4" />
           Notes
         </Link>
-        {onDelete && <DeleteButton onDelete={onDelete} />}
+        <div className="flex items-center gap-2">
+          <ShareButton note={note} />
+          {onDelete && <DeleteButton onDelete={onDelete} />}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

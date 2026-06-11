@@ -25,4 +25,5 @@ export interface Job {
   error: string | null;
   attempt_count: number;
   created_at: Timestamp;
+  updated_at?: Timestamp;
 }

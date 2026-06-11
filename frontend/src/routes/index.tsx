@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { watchNotes, watchPendingJobs, getUserCategories } from "@/lib/firestore";
 import { ingest } from "@/lib/api";
 import { noteLabel, sourceLabel } from "@/lib/note-meta";
-import { NoteCard, NoteRowList, ProcessingCard } from "@/components/NoteCard";
+import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
 import { AppShell } from "@/components/AppShell";
 import type { Note, Job } from "@/lib/types";
 
@@ -28,6 +28,13 @@ function Feed() {
     () => (localStorage.getItem("clipnote.layout") as Layout) || "standard",
   );
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("clipnote.dismissedJobs") || "[]");
+    } catch {
+      return [];
+    }
+  });
   const [optimistic, setOptimistic] = useState<{ id: string; url: string }[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [pendingUrl, setPendingUrl] = useState("");
@@ -131,13 +138,34 @@ function Feed() {
   // placeholders, drop any whose note already landed (the brief completion overlap).
   const pendingJobs = useMemo<Job[]>(() => {
     if (active !== "all" || source !== "all" || query.trim()) return [];
+    const inflight = jobs.filter((j) => j.status === "pending" || j.status === "processing");
     const noteUrls = new Set(notes.map((n) => n.source_url));
     const jobUrls = new Set(jobs.map((j) => j.url));
     const placeholders = optimistic
       .filter((o) => !jobUrls.has(o.url) && !noteUrls.has(o.url))
       .map((o) => ({ id: o.id, url: o.url, status: "pending" }) as Job);
-    return [...placeholders, ...jobs.filter((j) => !noteUrls.has(j.url))];
+    return [...placeholders, ...inflight.filter((j) => !noteUrls.has(j.url))];
   }, [jobs, optimistic, notes, active, source, query]);
+
+  // Failed captures stay visible (with the error) until dismissed or retried — a card
+  // that silently disappears reads as data loss.
+  const failedJobs = useMemo<Job[]>(() => {
+    if (active !== "all" || source !== "all" || query.trim()) return [];
+    return jobs.filter((j) => j.status === "failed" && !dismissedJobs.includes(j.id));
+  }, [jobs, dismissedJobs, active, source, query]);
+
+  const dismissJob = (jobId: string) => {
+    setDismissedJobs((prev) => {
+      const next = [...prev.filter((id) => id !== jobId), jobId].slice(-100);
+      localStorage.setItem("clipnote.dismissedJobs", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const retryJob = (job: Job) => {
+    dismissJob(job.id);
+    handleCapture(job.url);
+  };
 
   if (loading || !user) {
     return (
@@ -263,12 +291,21 @@ function Feed() {
               <div key={i} className="h-48 animate-pulse rounded-2xl border border-border bg-card" />
             ))}
           </section>
-        ) : filtered.length === 0 && pendingJobs.length === 0 ? (
+        ) : filtered.length === 0 && pendingJobs.length === 0 && failedJobs.length === 0 ? (
           <EmptyState hasNotes={notes.length > 0 || active !== "all" || source !== "all" || !!query.trim()} />
         ) : layout === "condensed" ? (
-          <NoteRowList notes={filtered} jobs={pendingJobs} />
+          <NoteRowList
+            notes={filtered}
+            jobs={pendingJobs}
+            failedJobs={failedJobs}
+            onRetry={retryJob}
+            onDismiss={dismissJob}
+          />
         ) : (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {failedJobs.map((j) => (
+              <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
+            ))}
             {pendingJobs.map((j) => (
               <ProcessingCard key={j.id} job={j} />
             ))}

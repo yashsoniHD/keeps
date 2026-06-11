@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Trash2, Loader2 } from "lucide-react";
+import { Trash2, Loader2, AlertCircle, RotateCcw, X } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import { formatDate, formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 
@@ -128,10 +128,25 @@ export function NoteRow({ note }: { note: Note }) {
 
 // The condensed view's container: constrained width (never stretches on wide screens),
 // rows divided by hairlines instead of per-row borders. Processing rows (if any) sit on top.
-export function NoteRowList({ notes, jobs = [] }: { notes: Note[]; jobs?: Job[] }) {
+export function NoteRowList({
+  notes,
+  jobs = [],
+  failedJobs = [],
+  onRetry,
+  onDismiss,
+}: {
+  notes: Note[];
+  jobs?: Job[];
+  failedJobs?: Job[];
+  onRetry?: (job: Job) => void;
+  onDismiss?: (jobId: string) => void;
+}) {
   return (
     <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card">
       <div className="divide-y divide-border/70">
+        {failedJobs.map((j) => (
+          <FailedRow key={j.id} job={j} onRetry={onRetry ?? (() => {})} onDismiss={onDismiss ?? (() => {})} />
+        ))}
         {jobs.map((j) => (
           <ProcessingRow key={j.id} job={j} />
         ))}
@@ -188,6 +203,100 @@ export function ProcessingCard({ job }: { job: Job }) {
         />
         <span className="truncate">{sourceLabel(domain)}</span>
       </div>
+    </div>
+  );
+}
+
+// A capture that failed must say so — a vanishing processing card reads as data loss.
+export function FailedCard({
+  job,
+  onRetry,
+  onDismiss,
+}: {
+  job: Job;
+  onRetry: (job: Job) => void;
+  onDismiss: (jobId: string) => void;
+}) {
+  const domain = jobDomain(job.url);
+  return (
+    <div
+      className="relative flex min-w-0 flex-col rounded-2xl border border-destructive/30 bg-destructive/5 p-4"
+      aria-label="Capture failed"
+    >
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
+          <AlertCircle className="h-3 w-3" />
+          Couldn't save
+        </span>
+        <button
+          type="button"
+          onClick={() => onDismiss(job.id)}
+          aria-label="Dismiss"
+          className="text-ink-soft transition-colors hover:text-ink"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <p className="mt-3 break-all text-sm font-medium text-ink line-clamp-2">{job.url}</p>
+      <p className="mt-1.5 text-xs text-ink-soft line-clamp-2">
+        {job.error || "Something went wrong while processing this link."}
+      </p>
+
+      <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+        <span className="truncate text-[11px] text-ink-soft">{sourceLabel(domain)}</span>
+        <button
+          type="button"
+          onClick={() => onRetry(job)}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent"
+        >
+          <RotateCcw className="h-3 w-3" />
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function FailedRow({
+  job,
+  onRetry,
+  onDismiss,
+}: {
+  job: Job;
+  onRetry: (job: Job) => void;
+  onDismiss: (jobId: string) => void;
+}) {
+  const domain = jobDomain(job.url);
+  return (
+    <div className="flex w-full min-w-0 items-center gap-3.5 px-4 py-3" aria-label="Capture failed">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-destructive/10 text-destructive">
+        <AlertCircle className="h-5 w-5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="break-all text-sm font-medium text-ink line-clamp-1">{job.url}</p>
+        <div className="mt-1 flex items-center gap-1.5 text-xs text-ink-soft">
+          <span className="font-medium text-destructive">Couldn't save</span>
+          <span>·</span>
+          <span className="truncate">{sourceLabel(domain)}</span>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => onRetry(job)}
+        aria-label="Try again"
+        className="shrink-0 rounded-full border border-border bg-card p-2 text-ink-soft transition-colors hover:text-ink"
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onDismiss(job.id)}
+        aria-label="Dismiss"
+        className="shrink-0 text-ink-soft transition-colors hover:text-ink"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
 }

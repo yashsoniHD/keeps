@@ -56,11 +56,14 @@ export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): 
   });
 }
 
-// In-flight captures: drives the optimistic "processing" cards in the feed. Reuses the
-// existing (user_id, created_at) jobs index — a freshly created job always has the newest
-// created_at, so the most-recent slice is guaranteed to include any pending one — and
-// filters to in-flight statuses client-side. Completed/failed jobs never render here, so
-// stale cards can't pile up across reloads.
+// How long a failed job stays visible in the feed (it can also be dismissed).
+const FAILED_JOB_TTL_MS = 6 * 60 * 60 * 1000;
+
+// In-flight + recently-failed captures: drives the "processing" and "failed" cards in
+// the feed. Reuses the existing (user_id, created_at) jobs index — a freshly created job
+// always has the newest created_at, so the most-recent slice is guaranteed to include any
+// pending one. Completed jobs never render (the note card replaces them); failed jobs
+// surface for a few hours so a capture never just vanishes without an explanation.
 export function watchPendingJobs(
   userId: string,
   callback: (jobs: Job[]) => void,
@@ -73,9 +76,15 @@ export function watchPendingJobs(
     limit(max),
   );
   return onSnapshot(q, (snap) => {
+    const cutoff = Date.now() - FAILED_JOB_TTL_MS;
     const jobs = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }) as Job)
-      .filter((j) => j.status === "pending" || j.status === "processing");
+      .filter(
+        (j) =>
+          j.status === "pending" ||
+          j.status === "processing" ||
+          (j.status === "failed" && ((j.updated_at ?? j.created_at)?.toMillis() ?? 0) > cutoff),
+      );
     callback(jobs);
   });
 }
