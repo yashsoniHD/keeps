@@ -105,8 +105,17 @@ def _og_meta(soup: BeautifulSoup) -> dict:
 def _looks_blocked(status: int, html: str) -> bool:
     if status in (403, 503, 429):
         return True
-    low = html[:4000].lower()
-    return "captcha" in low or "robot check" in low or "automated access" in low
+    low = html[:6000].lower()
+    # Amazon's datacenter-IP interstitial is an HTTP 200 with a near-empty body whose only
+    # CTA is "Continue shopping" (sometimes a validateCaptcha form) — not the product page.
+    return any(
+        marker in low
+        for marker in (
+            "captcha", "robot check", "automated access",
+            "validatecaptcha", "continue shopping",
+            "type the characters you see",
+        )
+    )
 
 
 def _strip_nav_markdown(md: str) -> str:
@@ -137,6 +146,9 @@ async def _jina_reader(url: str) -> str | None:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(f"https://r.jina.ai/{url}", headers=headers)
         if resp.status_code == 200 and len(resp.text) > 500:
+            # Jina forwards CAPTCHA interstitials as "successful" markdown — reject them.
+            if "captcha" in resp.text[:1500].lower():
+                return None
             return _strip_nav_markdown(resp.text)
     except httpx.HTTPError as e:
         print(f"[product] jina reader failed: {e}")
@@ -159,11 +171,14 @@ async def _firecrawl(url: str) -> str | None:
 
 
 async def acquire(url: str) -> ContentBundle:
-    html, status = "", 0
+    html, status, final_url = "", 0, url
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(url, headers=_HEADERS)
             html, status = resp.text, resp.status_code
+            # Short links (amzn.in/d/…) expand via redirect even when the destination
+            # serves a bot-block page — the canonical URL is gold for the search tier.
+            final_url = str(resp.url)
     except httpx.HTTPError as e:
         print(f"[product] fetch error for {url}: {e}")
 
@@ -200,7 +215,7 @@ async def acquire(url: str) -> ContentBundle:
     # shell with og:title but no price/specs/body — looks "ok" but extracts nothing).
     thin = not json_ld and not site_fields.get("price") and len(body_text) < 800
     if blocked or thin:
-        md = (await _jina_reader(url)) or (await _firecrawl(url))
+        md = (await _jina_reader(final_url)) or (await _firecrawl(final_url))
         if md:
             return ContentBundle(
                 kind="text", text=md[:28000],
@@ -208,6 +223,20 @@ async def acquire(url: str) -> ContentBundle:
                 metadata={"title": title if title != "Untitled product" else md.splitlines()[0][:120],
                           "platform": "product", "tier": "reader"},
                 strategy="product_reader",
+            )
+        # Tier 2b: Amazon blocks every direct fetcher (datacenter IPs, Jina, Gemini's
+        # url_context) — but its listings are fully indexed, so recover the facts via
+        # Google Search grounding on the expanded canonical URL.
+        from services.gemini import gemini_service
+        hint = title if title != "Untitled product" else ""
+        grounded = await gemini_service.search_grounded_page(final_url, hint)
+        if grounded:
+            return ContentBundle(
+                kind="text", text=grounded[:28000],
+                images=images,
+                metadata={"title": title, "platform": "product", "tier": "search_grounded",
+                          "canonical_url": final_url},
+                strategy="product_search_grounded",
             )
 
     if not json_ld and not site_fields and not body_text:

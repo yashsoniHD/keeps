@@ -53,8 +53,11 @@ Rules, in priority order:
    essays, news articles, opinion pieces, talks. NEVER use "summary" for anything
    with steps, items, specs, exercises, or places.
 4. NEVER return "general", "misc", "other", or "video" — invent a specific new slug instead
-   (e.g. "book-recommendations", "home-decor-ideas", "career-advice").
-5. Discussion threads, Q&A, comment collections, and anecdote threads are NOT plans.
+   (e.g. "books", "home-decor", "career").
+5. Slugs are SHORT: one word, two only when needed ("home-decor", not
+   "home-decor-ideas"). Never append filler like -recommendations, -guide, -ideas,
+   -advice, -list, -tips.
+6. Discussion threads, Q&A, comment collections, and anecdote threads are NOT plans.
    A forum thread about workouts is "fitness-discussion", not "workout". Only classify as
    recipe/workout/itinerary when the source actually CONTAINS that artifact."""
 
@@ -283,6 +286,43 @@ class GeminiService:
 
     async def extract_async(self, url: str, bundle: ContentBundle, content_type: str) -> NoteExtraction:
         return await asyncio.to_thread(self.extract, url, bundle, content_type)
+
+    # ---------- Search-grounded page lookup (for bot-blocked pages) ----------
+
+    def _search_grounded_page(self, url: str, hint: str = "") -> str | None:
+        """Recover page facts via Google Search grounding when the page itself is
+        unreachable from datacenter IPs (Amazon blocks direct fetch, Jina, and even
+        Gemini's url_context — but its listings are fully indexed by Google Search).
+        Returns grounded prose for the normal extraction pipeline, or None."""
+        prompt = (
+            f"Use Google Search to find this exact page: {url}\n"
+            + (f"Known hint about it: {hint}\n" if hint else "")
+            + "Report ONLY facts you find about this exact page/product/item: full title, "
+            "brand/author, current price, rating and review count, key features or specs, "
+            "and a short factual description. Do not include facts about similar items. "
+            "If you cannot find this exact page, reply with just: NOT_FOUND"
+        )
+        for attempt in (1, 2):  # transient 5xx happen on the global endpoint
+            try:
+                resp = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                        temperature=0.1,
+                    ),
+                )
+                text = (resp.text or "").strip()
+                if not text or "NOT_FOUND" in text[:300]:
+                    return None
+                return text
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[gemini] search-grounded lookup failed for {url}: {e}")
+        return None
+
+    async def search_grounded_page(self, url: str, hint: str = "") -> str | None:
+        return await asyncio.to_thread(self._search_grounded_page, url, hint)
 
 
 gemini_service = GeminiService()
