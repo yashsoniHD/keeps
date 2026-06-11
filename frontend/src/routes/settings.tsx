@@ -1,18 +1,28 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, LogOut, Trash2, Smartphone, Copy, Check, X } from "lucide-react";
+import { ArrowLeft, LogOut, Trash2, Smartphone, Copy, Check, X, Download } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import {
   deleteAllNotes,
   createToken,
   listTokens,
   revokeToken,
-  API_BASE,
   type ShortcutToken,
 } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
+
+// One-time setup: import frontend/public/clipnote.shortcut into the Shortcuts app (Mac),
+// Share → "Copy iCloud Link", paste it here. iOS only allows true one-tap installs from
+// icloud.com/shortcuts links — the shortcuts:// URL scheme rejects self-hosted files
+// ("invalid URL"), and file downloads need manual taps through Safari's download list.
+const SHORTCUT_ICLOUD_LINK = "";
+
+// Installed-PWA context has no Safari download UI; we steer users to Safari for the file.
+const isStandalone = () =>
+  window.matchMedia("(display-mode: standalone)").matches ||
+  ("standalone" in navigator && (navigator as { standalone?: boolean }).standalone === true);
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
@@ -135,6 +145,14 @@ function ConnectPhone() {
     try {
       const { token } = await createToken("iPhone");
       setNewToken(token);
+      // Copy immediately so it's ready to paste into the Shortcut's install prompt.
+      try {
+        await navigator.clipboard.writeText(token);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        /* clipboard may be blocked until a user gesture — the Copy button is the fallback */
+      }
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't create token.");
@@ -163,8 +181,9 @@ function ConnectPhone() {
           browser menu ("Add to Home screen") — it then appears in your share sheet.
         </p>
         <p>
-          <strong className="text-ink">iPhone:</strong> create a token below, then build a
-          one-time Shortcut that shares links straight to Clipnote.
+          <strong className="text-ink">iPhone:</strong> create a token, download the ready-made
+          Shortcut, and paste the token once when prompted. Links then share straight to Clipnote
+          from any app.
         </p>
       </div>
 
@@ -186,20 +205,45 @@ function ConnectPhone() {
               {copied ? <Check className="h-4 w-4 text-itinerary" /> : <Copy className="h-4 w-4" />}
             </button>
           </div>
-          <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
-            <li>Open the <strong className="text-ink">Shortcuts</strong> app → + → name it "Save to Clipnote".</li>
-            <li>Tap the ⓘ info panel → enable <strong className="text-ink">Show in Share Sheet</strong>.</li>
-            <li>Add action <strong className="text-ink">"Get URLs from Input"</strong> (input: Shortcut Input).</li>
-            <li>
-              Add action <strong className="text-ink">"Get Contents of URL"</strong>:
-              <ul className="mt-1 list-disc space-y-1 pl-4">
-                <li>URL: <code className="rounded bg-muted px-1 text-xs">{API_BASE}/api/ingest</code></li>
-                <li>Method: POST · Headers: <code className="rounded bg-muted px-1 text-xs">Authorization: Bearer &lt;your token&gt;</code></li>
-                <li>Request body (JSON): <code className="rounded bg-muted px-1 text-xs">url</code> = URLs from step 3, <code className="rounded bg-muted px-1 text-xs">source</code> = shortcut</li>
-              </ul>
-            </li>
-            <li>Add action <strong className="text-ink">"Show Notification"</strong> ("Saved to Clipnote ✓").</li>
-          </ol>
+          <p className="mt-2 text-xs text-ink-soft">
+            {copied ? "Copied to your clipboard ✓ — keep it handy for step 2." : "Tap copy, then keep it handy for step 2."}
+          </p>
+
+          <a
+            href={SHORTCUT_ICLOUD_LINK || "/clipnote.shortcut"}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+          >
+            <Download className="h-4 w-4" />
+            {SHORTCUT_ICLOUD_LINK ? "Add the Shortcut" : "Download the Shortcut"}
+          </a>
+
+          {SHORTCUT_ICLOUD_LINK ? (
+            <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
+              <li>Tap <strong className="text-ink">Add the Shortcut</strong> — it opens the Shortcuts app.</li>
+              <li>Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when asked <em>"Paste your Clipnote token"</em>.</li>
+              <li>
+                Done. In any app: <strong className="text-ink">Share</strong> →{" "}
+                <strong className="text-ink">Save to Clipnote</strong>.
+              </li>
+            </ol>
+          ) : (
+            <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
+              <li>Tap <strong className="text-ink">Download the Shortcut</strong> in Safari on your iPhone.</li>
+              <li>Tap the <strong className="text-ink">downloads (↓) icon</strong> in Safari's address bar, then tap <strong className="text-ink">Save to Clipnote.shortcut</strong> — the Shortcuts app opens.</li>
+              <li>Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when asked <em>"Paste your Clipnote token"</em>.</li>
+              <li>
+                Done. In any app: <strong className="text-ink">Share</strong> →{" "}
+                <strong className="text-ink">Save to Clipnote</strong>.
+              </li>
+            </ol>
+          )}
+          {isStandalone() && !SHORTCUT_ICLOUD_LINK && (
+            <p className="mt-3 text-xs text-ink-soft">
+              You're in the installed app, where iPhone can't show downloads — open{" "}
+              <strong className="text-ink">{window.location.host}/settings</strong> in Safari for
+              this step.
+            </p>
+          )}
           <button
             type="button"
             onClick={() => setNewToken(null)}

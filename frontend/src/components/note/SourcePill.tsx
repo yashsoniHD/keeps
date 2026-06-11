@@ -1,4 +1,5 @@
 import { ExternalLink } from "lucide-react";
+import { sourceLabel } from "@/lib/note-meta";
 
 export function SourcePill({ domain, url }: { domain: string; url: string }) {
   return (
@@ -13,7 +14,7 @@ export function SourcePill({ domain, url }: { domain: string; url: string }) {
         alt=""
         className="h-3.5 w-3.5 rounded-sm"
       />
-      <span>{domain}</span>
+      <span>{sourceLabel(domain)}</span>
       <ExternalLink className="h-3 w-3 opacity-60" />
     </a>
   );

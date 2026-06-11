@@ -4,8 +4,9 @@ import type { Note } from "@/lib/types";
 import { formatDate } from "@/lib/note-meta";
 import { TypeBadge } from "./TypeBadge";
 import { SourcePill } from "./SourcePill";
+import { DeleteButton } from "@/components/NoteCard";
 
-export function NoteHeader({ note }: { note: Note }) {
+export function NoteHeader({ note, onDelete }: { note: Note; onDelete?: () => void }) {
   return (
     <header className="mb-8 flex flex-col gap-5">
       <div className="flex items-center justify-between">
@@ -16,6 +17,7 @@ export function NoteHeader({ note }: { note: Note }) {
           <ArrowLeft className="h-4 w-4" />
           Notes
         </Link>
+        {onDelete && <DeleteButton onDelete={onDelete} />}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

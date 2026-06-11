@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
-import { getNote } from "@/lib/firestore";
+import { getNote, deleteNote } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
@@ -46,7 +46,13 @@ function NoteDetail() {
 
   return (
     <AppShell>
-      <NoteContent note={note} />
+      <NoteContent
+        note={note}
+        onDelete={async () => {
+          await deleteNote(note.id);
+          navigate({ to: "/" });
+        }}
+      />
     </AppShell>
   );
 }

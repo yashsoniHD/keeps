@@ -25,12 +25,12 @@ function NoteBody({ note }: { note: Note }) {
   }
 }
 
-export function NoteContent({ note }: { note: Note }) {
+export function NoteContent({ note, onDelete }: { note: Note; onDelete?: () => void }) {
   // ProductNote lays out its own image beside the buy panel.
   const showCover = note.cover_image_url && note.content_type !== "product";
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
-      <NoteHeader note={note} />
+      <NoteHeader note={note} onDelete={onDelete} />
       {showCover && (
         <div className="mb-8 overflow-hidden rounded-3xl border border-border">
           <img

@@ -48,6 +48,30 @@ export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): 
   });
 }
 
+// In-flight captures: drives the optimistic "processing" cards in the feed. Reuses the
+// existing (user_id, created_at) jobs index — a freshly created job always has the newest
+// created_at, so the most-recent slice is guaranteed to include any pending one — and
+// filters to in-flight statuses client-side. Completed/failed jobs never render here, so
+// stale cards can't pile up across reloads.
+export function watchPendingJobs(
+  userId: string,
+  callback: (jobs: Job[]) => void,
+  max = 15,
+): Unsubscribe {
+  const q = query(
+    collection(db, "jobs"),
+    where("user_id", "==", userId),
+    orderBy("created_at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(q, (snap) => {
+    const jobs = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as Job)
+      .filter((j) => j.status === "pending" || j.status === "processing");
+    callback(jobs);
+  });
+}
+
 // One doc read against users/{uid}.categories — never scan the notes collection.
 export async function getUserCategories(userId: string): Promise<string[]> {
   const snap = await getDoc(doc(db, "users", userId));

@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { CaptureModal } from "@/components/CaptureModal";
+import { ingest } from "@/lib/api";
 
 // PWA share-sheet target (manifest.json share_target). Platforms are inconsistent about
 // which field carries the link: Android often puts it in `text`, iOS in `url`.
@@ -34,26 +34,27 @@ function SharePage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const [sharedUrl] = useState(() => extractUrl(search));
+  const fired = useRef(false);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
 
+  // Kick off the capture, then drop the user into the feed where the processing card
+  // (driven by the new job doc) provides the feedback — no separate blocking screen.
   useEffect(() => {
-    if (!sharedUrl && user) navigate({ to: "/" });
-  }, [sharedUrl, user, navigate]);
-
-  if (loading || !user || !sharedUrl) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
-      </div>
-    );
-  }
+    if (!user || fired.current) return;
+    if (!sharedUrl) {
+      navigate({ to: "/" });
+      return;
+    }
+    fired.current = true;
+    ingest(sharedUrl).finally(() => navigate({ to: "/" }));
+  }, [user, sharedUrl, navigate]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <CaptureModal url={sharedUrl} onClose={() => navigate({ to: "/" })} />
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
     </div>
   );
 }

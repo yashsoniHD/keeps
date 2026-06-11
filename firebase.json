@@ -4,8 +4,18 @@
     "indexes": "infra/firestore.indexes.json"
   },
   "hosting": {
+    "site": "clipnote",
     "public": "frontend/dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "**/*.shortcut",
+        "headers": [
+          { "key": "Content-Type", "value": "application/octet-stream" },
+          { "key": "Content-Disposition", "value": "attachment; filename=\"Save to Clipnote.shortcut\"" }
+        ]
+      }
+    ],
     "rewrites": [{ "source": "**", "destination": "/index.html" }]
   }
 }

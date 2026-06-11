@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Search, Sparkles, Plus, LayoutGrid, List, Globe, ChevronDown, Settings } from "lucide-react";
+import { Search, Sparkles, Plus, LayoutGrid, List, Globe, ChevronDown, Settings, AlertCircle, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { watchNotes, deleteNote } from "@/lib/firestore";
-import { noteLabel } from "@/lib/note-meta";
-import { NoteCard, NoteRow } from "@/components/NoteCard";
-import { CaptureModal } from "@/components/CaptureModal";
+import { watchNotes, watchPendingJobs } from "@/lib/firestore";
+import { ingest } from "@/lib/api";
+import { noteLabel, sourceLabel } from "@/lib/note-meta";
+import { NoteCard, NoteRowList, ProcessingCard } from "@/components/NoteCard";
 import { AppShell } from "@/components/AppShell";
-import type { Note } from "@/lib/types";
+import type { Note, Job } from "@/lib/types";
 
 export const Route = createFileRoute("/")({ component: Feed });
 
@@ -23,9 +23,11 @@ function Feed() {
   const [layout, setLayout] = useState<Layout>(
     () => (localStorage.getItem("clipnote.layout") as Layout) || "standard",
   );
-  const [captureUrl, setCaptureUrl] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [optimistic, setOptimistic] = useState<{ id: string; url: string }[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [pendingUrl, setPendingUrl] = useState("");
+  const [ingestError, setIngestError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
@@ -36,6 +38,41 @@ function Feed() {
     if (!user) return;
     return watchNotes(user.uid, setNotes);
   }, [user]);
+
+  // In-flight captures → optimistic "processing" cards (works for every capture path).
+  useEffect(() => {
+    if (!user) return;
+    return watchPendingJobs(user.uid, setJobs);
+  }, [user]);
+
+  // Retire each local placeholder once its real job (same url) or finished note arrives,
+  // so the optimistic card hands off seamlessly to the server-backed one.
+  useEffect(() => {
+    if (!optimistic.length) return;
+    const realUrls = new Set(jobs.map((j) => j.url));
+    const noteUrls = new Set(notes.map((n) => n.source_url));
+    setOptimistic((prev) => prev.filter((o) => !realUrls.has(o.url) && !noteUrls.has(o.url)));
+  }, [jobs, notes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire-and-forget capture: the job doc (and thus the processing card) appears within a
+  // few hundred ms; the local placeholder covers that gap so feedback is instant.
+  const handleCapture = async (raw: string) => {
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    setShowAdd(false);
+    setPendingUrl("");
+    setIngestError(null);
+    const tempId = `opt-${url}-${notes.length}`;
+    setOptimistic((prev) => [{ id: tempId, url }, ...prev]);
+    // Safety net: drop the placeholder if the listener never replaces it (e.g. the
+    // backend rewrote the URL so it can't be matched). Longer than any real job.
+    setTimeout(() => setOptimistic((prev) => prev.filter((o) => o.id !== tempId)), 120_000);
+    try {
+      await ingest(url);
+    } catch (e) {
+      setOptimistic((prev) => prev.filter((o) => o.id !== tempId));
+      setIngestError(e instanceof Error ? e.message : "Couldn't start the capture. Please try again.");
+    }
+  };
 
   const toggleLayout = () => {
     const next: Layout = layout === "standard" ? "condensed" : "standard";
@@ -64,6 +101,19 @@ function Feed() {
       return true;
     });
   }, [notes, active, source, query]);
+
+  // Processing cards show only on the default view — an in-flight job has no type/title
+  // yet to match a filter or search. Merge server jobs with not-yet-acknowledged local
+  // placeholders, drop any whose note already landed (the brief completion overlap).
+  const pendingJobs = useMemo<Job[]>(() => {
+    if (active !== "all" || source !== "all" || query.trim()) return [];
+    const noteUrls = new Set(notes.map((n) => n.source_url));
+    const jobUrls = new Set(jobs.map((j) => j.url));
+    const placeholders = optimistic
+      .filter((o) => !jobUrls.has(o.url) && !noteUrls.has(o.url))
+      .map((o) => ({ id: o.id, url: o.url, status: "pending" }) as Job);
+    return [...placeholders, ...jobs.filter((j) => !noteUrls.has(j.url))];
+  }, [jobs, optimistic, notes, active, source, query]);
 
   if (loading || !user) {
     return (
@@ -98,7 +148,7 @@ function Feed() {
                 to="/settings"
                 aria-label="Settings"
                 title="Settings"
-                className="hidden h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink md:inline-flex"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
               >
                 <Settings className="h-4 w-4" />
               </Link>
@@ -128,7 +178,7 @@ function Feed() {
                   <option value="all">All sources</option>
                   {sources.map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {sourceLabel(s)}
                     </option>
                   ))}
                 </select>
@@ -161,18 +211,32 @@ function Feed() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8">
-        {filtered.length === 0 ? (
+        {ingestError && (
+          <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="flex-1">{ingestError}</span>
+            <button
+              type="button"
+              onClick={() => setIngestError(null)}
+              aria-label="Dismiss"
+              className="shrink-0 text-destructive/70 hover:text-destructive"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {filtered.length === 0 && pendingJobs.length === 0 ? (
           <EmptyState hasNotes={notes.length > 0} />
         ) : layout === "condensed" ? (
-          <section className="grid gap-2 lg:grid-cols-2">
-            {filtered.map((n) => (
-              <NoteRow key={n.id} note={n} onDelete={() => deleteNote(n.id)} />
-            ))}
-          </section>
+          <NoteRowList notes={filtered} jobs={pendingJobs} />
         ) : (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {pendingJobs.map((j) => (
+              <ProcessingCard key={j.id} job={j} />
+            ))}
             {filtered.map((n) => (
-              <NoteCard key={n.id} note={n} onDelete={() => deleteNote(n.id)} />
+              <NoteCard key={n.id} note={n} />
             ))}
           </section>
         )}
@@ -185,23 +249,19 @@ function Feed() {
           setShowAdd(true);
         }}
         aria-label="Add note"
-        className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 md:bottom-8"
+        className="fixed bottom-8 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95"
       >
         <Plus className="h-6 w-6" />
       </button>
 
-      {showAdd && !captureUrl && (
+      {showAdd && (
         <AddSheet
           url={pendingUrl}
           setUrl={setPendingUrl}
           onCancel={() => setShowAdd(false)}
-          onSubmit={(u) => {
-            setCaptureUrl(u);
-            setShowAdd(false);
-          }}
+          onSubmit={handleCapture}
         />
       )}
-      {captureUrl && <CaptureModal url={captureUrl} onClose={() => setCaptureUrl(null)} />}
     </AppShell>
   );
 }

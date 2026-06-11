@@ -1,16 +1,11 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Trash2 } from "lucide-react";
-import type { Note } from "@/lib/types";
-import { formatDate, noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
+import { Trash2, Loader2 } from "lucide-react";
+import type { Note, Job } from "@/lib/types";
+import { formatDate, formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 
-function DeleteButton({
-  onDelete,
-  className = "",
-}: {
-  onDelete: () => void;
-  className?: string;
-}) {
+// Two-tap delete; used inside the note view (NoteHeader), not on feed cards.
+export function DeleteButton({ onDelete }: { onDelete: () => void }) {
   const [confirm, setConfirm] = useState(false);
   return (
     <button
@@ -26,19 +21,22 @@ function DeleteButton({
         }
         onDelete();
       }}
-      className={`inline-flex h-8 items-center justify-center gap-1 rounded-full text-xs shadow-sm backdrop-blur transition-colors ${
+      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border text-sm transition-colors ${
         confirm
-          ? "w-auto bg-destructive px-2.5 text-white"
-          : "w-8 bg-card/90 text-ink-soft hover:text-destructive"
-      } ${className}`}
+          ? "border-destructive bg-destructive px-3 text-white"
+          : "w-9 border-border bg-card text-ink-soft hover:text-destructive"
+      }`}
     >
-      <Trash2 className="h-3.5 w-3.5" />
+      <Trash2 className="h-4 w-4" />
       {confirm && "Sure?"}
     </button>
   );
 }
 
-export function NoteCard({ note, onDelete }: { note: Note; onDelete?: () => void }) {
+// Uniform card: no cover preview — every note gets the same anatomy (chip + date,
+// title, summary, source footer). min-heights on title/summary reserve their full
+// line-clamp space so cards stay equal-sized even when text runs short.
+export function NoteCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
   const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
@@ -47,72 +45,41 @@ export function NoteCard({ note, onDelete }: { note: Note; onDelete?: () => void
     <Link
       to="/notes/$noteId"
       params={{ noteId: note.id }}
-      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${accent.ring}`}
+      className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${accent.ring}`}
     >
-      {onDelete && (
-        <div className="absolute right-3 top-3 z-10 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
-          <DeleteButton onDelete={onDelete} />
-        </div>
-      )}
+      <div className="flex items-center justify-between">
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${accent.chip}`}
+        >
+          <Icon className="h-3 w-3" />
+          {noteLabel(note.content_type)}
+        </span>
+        <span className="text-[11px] text-ink-soft">{formatDate(note.created_at)}</span>
+      </div>
 
-      {note.cover_image_url ? (
-        <div className="relative h-40 overflow-hidden">
-          <img
-            src={note.cover_image_url}
-            alt=""
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-            onError={(e) => {
-              (e.currentTarget.parentElement as HTMLElement).style.display = "none";
-            }}
-          />
-          {price && (
-            <span className="absolute left-3 top-3 rounded-full bg-card px-2.5 py-0.5 font-serif text-sm text-ink shadow-sm">
-              {price}
-            </span>
-          )}
-        </div>
-      ) : (
-        <div className={`paper-grain p-4 ${accent.soft}`}>
-          <div className={`flex items-center gap-1.5 text-xs uppercase tracking-wider ${accent.text}`}>
-            <Icon className="h-3 w-3" />
-            {noteLabel(note.content_type)}
-          </div>
-          <p className="mt-2 font-serif text-base leading-snug text-ink line-clamp-3">
-            {note.ai_summary}
-          </p>
-        </div>
-      )}
+      <h3 className="mt-3 min-h-[2.5em] font-serif text-xl leading-tight text-ink line-clamp-2">
+        {note.title}
+      </h3>
+      <p className="mt-2 min-h-[4.3em] text-sm text-ink-soft line-clamp-3">{note.ai_summary}</p>
 
-      <div className="flex flex-1 flex-col gap-3 p-4">
-        <div className="flex items-center justify-between">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${accent.chip}`}
-          >
-            <Icon className="h-3 w-3" />
-            {noteLabel(note.content_type)}
-          </span>
-          <span className="text-[11px] text-ink-soft">{formatDate(note.created_at)}</span>
-        </div>
-
-        <h3 className="font-serif text-xl leading-tight text-ink line-clamp-2">{note.title}</h3>
-        <p className="text-sm text-ink-soft line-clamp-3">{note.ai_summary}</p>
-
-        <div className="mt-auto flex items-center gap-2 pt-1 text-[11px] text-ink-soft">
-          <img
-            src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
-            alt=""
-            className="h-3.5 w-3.5 rounded-sm"
-          />
-          <span>{note.source_domain}</span>
-        </div>
+      <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+          alt=""
+          className="h-3.5 w-3.5 rounded-sm"
+        />
+        <span className="truncate">{sourceLabel(note.source_domain)}</span>
+        {price && <span className="ml-auto font-serif text-sm text-ink">{price}</span>}
       </div>
     </Link>
   );
 }
 
-// Condensed layout: one slim row per note — scan many notes at once.
-export function NoteRow({ note, onDelete }: { note: Note; onDelete?: () => void }) {
+// Condensed layout: a contained "ledger" — one bordered card holding hairline-divided
+// rows (see NoteRowList). Serif titles keep it in the app's editorial voice; min-w-0 +
+// truncate are load-bearing: flex children default to min-width:auto, which lets long
+// titles stretch rows past the viewport on phones.
+export function NoteRow({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
 
@@ -120,41 +87,127 @@ export function NoteRow({ note, onDelete }: { note: Note; onDelete?: () => void 
     <Link
       to="/notes/$noteId"
       params={{ noteId: note.id }}
-      className="group flex items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2.5 transition-colors hover:bg-accent"
+      className="group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent"
     >
       {note.cover_image_url ? (
         <img
           src={note.cover_image_url}
           alt=""
           loading="lazy"
-          className="h-10 w-10 shrink-0 rounded-lg object-cover"
+          className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60 object-cover"
           onError={(e) => {
-            e.currentTarget.style.display = "none";
+            // Swap the broken image for the type chip so the row stays aligned.
+            const img = e.currentTarget;
+            img.style.display = "none";
+            (img.nextElementSibling as HTMLElement | null)?.classList.remove("hidden");
           }}
         />
-      ) : (
-        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${accent.chip}`}>
-          <Icon className="h-4 w-4" />
-        </span>
-      )}
+      ) : null}
+      <span
+        className={`${note.cover_image_url ? "hidden" : ""} flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg ${accent.chip}`}
+      >
+        <Icon className="h-5 w-5" />
+      </span>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-ink">{note.title}</div>
-        <div className="flex items-center gap-2 text-[11px] text-ink-soft">
-          <span className={`${accent.text}`}>{noteLabel(note.content_type)}</span>
-          <span>·</span>
-          <span className="truncate">{note.source_domain}</span>
+        <h3 className="font-serif text-base leading-snug text-ink line-clamp-2">{note.title}</h3>
+        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
+          <span className={`shrink-0 font-medium ${accent.text}`}>
+            {noteLabel(note.content_type)}
+          </span>
+          <span className="shrink-0">·</span>
+          <span className="truncate">{sourceLabel(note.source_domain)}</span>
+          <span className="shrink-0">·</span>
+          <span className="shrink-0">{formatDateShort(note.created_at)}</span>
         </div>
       </div>
-
-      <span className="hidden shrink-0 text-[11px] text-ink-soft sm:block">
-        {formatDate(note.created_at)}
-      </span>
-      {onDelete && (
-        <div className="shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100">
-          <DeleteButton onDelete={onDelete} />
-        </div>
-      )}
     </Link>
+  );
+}
+
+// The condensed view's container: constrained width (never stretches on wide screens),
+// rows divided by hairlines instead of per-row borders. Processing rows (if any) sit on top.
+export function NoteRowList({ notes, jobs = [] }: { notes: Note[]; jobs?: Job[] }) {
+  return (
+    <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card">
+      <div className="divide-y divide-border/70">
+        {jobs.map((j) => (
+          <ProcessingRow key={j.id} job={j} />
+        ))}
+        {notes.map((n) => (
+          <NoteRow key={n.id} note={n} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// --- Optimistic "processing" placeholders, driven by the jobs collection ---
+// A freshly-ingested URL has a jobs/{id} doc within ~50ms but no note for 12–70s. These
+// stand in for that gap so the capture reads as "received & working", not "did nothing".
+
+function jobDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "link";
+  }
+}
+
+export function ProcessingCard({ job }: { job: Job }) {
+  const domain = jobDomain(job.url);
+  return (
+    <div
+      className="relative flex min-w-0 animate-pulse flex-col rounded-2xl border border-dashed border-border bg-card p-4"
+      aria-label="Note processing"
+    >
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-ink-soft">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Processing
+        </span>
+        <span className="text-[11px] text-ink-soft">just now</span>
+      </div>
+
+      <div className="mt-3 min-h-[2.5em] space-y-2">
+        <div className="h-4 w-3/4 rounded bg-muted" />
+        <div className="h-4 w-1/2 rounded bg-muted" />
+      </div>
+      <div className="mt-2 min-h-[4.3em] space-y-2">
+        <div className="h-3 w-full rounded bg-muted" />
+        <div className="h-3 w-5/6 rounded bg-muted" />
+      </div>
+
+      <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+          alt=""
+          className="h-3.5 w-3.5 rounded-sm"
+        />
+        <span className="truncate">{sourceLabel(domain)}</span>
+      </div>
+    </div>
+  );
+}
+
+export function ProcessingRow({ job }: { job: Job }) {
+  const domain = jobDomain(job.url);
+  return (
+    <div
+      className="flex w-full min-w-0 animate-pulse items-center gap-3.5 px-4 py-3"
+      aria-label="Note processing"
+    >
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-muted text-ink-soft">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="h-4 w-2/3 rounded bg-muted" />
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-soft">
+          <span className="font-medium">Processing</span>
+          <span>·</span>
+          <span className="truncate">{sourceLabel(domain)}</span>
+        </div>
+      </div>
+    </div>
   );
 }
