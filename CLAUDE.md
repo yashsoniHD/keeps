@@ -143,6 +143,18 @@ passed the gate.
       shortcut PATs (`cn_<id>.<secret>`, bcrypt; `require_user` accepts Firebase JWT or PAT;
       Settings → "Capture from your phone"). Feed UX: delete, source filter, layout toggle,
       responsive 1–4 col grid.
+- [x] Production hardening (2026-06-11, plan: `2026-06-11-production-readiness.md`):
+      SSRF guard on every outbound fetch (`backend/services/net_guard.py` — validates each
+      redirect hop; BlockedURLError is permanent, no fallback note); PAT lockout (10 failed
+      attempts) + 5-token cap; structured JSON logging (`services/logging_setup.py` —
+      job_id/user_id/url are queryable Cloud Logging fields); `/api/client-errors` browser
+      error sink; Gemini extract retry-once; Firestore PITR + daily backups (30d retention);
+      Cloud Tasks max-backoff 600s; Cloud Run max-instances 10; uptime check on /health +
+      email alerts (ERROR logs, queue depth >100) → yash@goheydigital.com; storage IAM
+      narrowed objectAdmin→objectUser; hosting security headers (**CSP is report-only —
+      flip to enforcing after checking violation reports**); frontend: 401 retry w/ token
+      refresh, deep-link/share survive login redirect, feed pagination + server-side type
+      filter, client error reporting; `backend/tests/` (30 tests) + GitHub Actions CI.
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
