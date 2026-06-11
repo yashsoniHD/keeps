@@ -27,7 +27,43 @@ The frontend design already exists (Lovable-built TanStack Start app at `/Users/
 - Lite: `gemini-2.5-flash-lite` — category assignment only (~50 tokens per call)
 - Imagen 3 (`imagen-3.0-generate-002`): only when no cover found **and** the content type is visual (~₹1.60/image)
 
-> **iOS Shortcut is deferred to Post-MVP** (see the Post-MVP section). The MVP capture path is the web "+ capture" flow only.
+---
+
+## Build Order & Phasing (binding)
+
+The work is sequenced so the **core bet, monetization, retention, and growth each get de-risked in
+turn** rather than everything being built and then launched at once. Tasks 1–14 below are the
+Phase 1 build; the phase table tells you what wraps around them.
+
+| Phase | What | Gate |
+|-------|------|------|
+| 0 | Validate AI output on 20–30 real URLs | Blocks everything |
+| 1 | Core backend + frontend (Tasks 1–14, with the fixes folded in) | Working capture-to-note |
+| 2 | PWA share target + iOS shortcut/PAT | Capture is a reflex |
+| 3 | Paywall + weekly digest email | Before public launch |
+| 4 | Typesense search + public notes | First month of usage |
+| 5 | Expo native share extension | After web validation |
+
+**Hard rules:** don't skip Phase 0; don't launch publicly before Phase 3 is done.
+
+Phases 2–5 are specified after Task 14 (each is its own task block). Phase 0 is below — it runs before
+any building.
+
+---
+
+## Phase 0: Validation gate (blocking, ~1 day)
+
+**Goal:** prove the core bet — that an AI-restructured note is genuinely more useful than its source —
+before writing production code.
+
+- [ ] **Step 0.1: Run the Step 2 extraction prompt against 20–30 real URLs** spanning the real mix:
+  recipes, products, articles, at least one paywalled article, and a captioned video.
+- [ ] **Step 0.2: Read each output note next to its source.** If recipes/products/articles are clearly
+  better than the source, proceed to Phase 1. If output is mediocre, **fix the prompt here** (iterate
+  on `EXTRACTION_SYSTEM` / the per-type prompts) before building anything else.
+
+> This is a gate, not a formality. A weak Phase 0 means the whole product premise is weak — surface
+> that now, cheaply, rather than after the full stack is built.
 
 ---
 
@@ -284,6 +320,10 @@ class Settings:
     # Content types that warrant an Imagen-generated cover when none is found.
     VISUAL_CONTENT_TYPES: set[str] = {"recipe", "product", "itinerary", "travel", "place", "fashion"}
 
+    # Imagen-generated covers are DEFERRED for MVP — og:image fallback + gradient
+    # placeholder is enough. Flip ENABLE_IMAGEN=true only after validating users care about covers.
+    ENABLE_IMAGEN: bool = os.getenv("ENABLE_IMAGEN", "false").lower() == "true"
+
 settings = Settings()
 ```
 
@@ -299,6 +339,7 @@ CLOUD_TASKS_WORKER_URL=https://clip-note-api-xxx.run.app
 CLOUD_TASKS_SA_EMAIL=clip-note-sa@your-project.iam.gserviceaccount.com
 CLOUD_STORAGE_BUCKET=clip-note-media-your-project
 TEMP_DOWNLOAD_DIR=/tmp/clip_note_downloads
+ENABLE_IMAGEN=false
 ```
 
 - [ ] **Step 1.9: Commit**
@@ -371,6 +412,8 @@ from pydantic import BaseModel
 
 class IngestRequest(BaseModel):
     url: str
+    content: str | None = None   # pre-extracted text (paywall/auth bypass via PWA/shortcut)
+    source: str = "web"          # "web" | "shortcut" | "pwa"
 
 class NoteExtraction(BaseModel):
     content_type: str
@@ -398,6 +441,13 @@ git commit -m "feat: Firebase admin service, Firestore helpers, note models"
 
 **Files:**
 - Create: `backend/services/gemini.py`
+
+> **Phase 1 refinement — type-specific extraction prompts.** The `EXTRACTION_SYSTEM` below carries
+> every type's schema in one mega-prompt. Once Step 1 has assigned the category, load a *focused*
+> prompt for just that type (a `TYPE_PROMPTS: dict[str, str]` keyed by slug, falling back to the
+> generic-building-blocks instructions for AI-invented types) and pass only that schema to
+> `analyze_text`/`analyze_media`. This produces better-targeted output and spends fewer input tokens
+> per note. Keep the generic-blocks instructions as the default branch for unknown slugs.
 
 - [ ] **Step 3.1: Write backend/services/gemini.py**
 ```python
@@ -562,6 +612,12 @@ git commit -m "feat: Gemini two-step pipeline (category + extraction with HTML)"
 - Create: `backend/services/downloader.py`
 
 - [ ] **Step 4.1: Write backend/services/imagen.py**
+> **Confirm the import path before relying on this.** `vertexai.preview.vision_models` is a
+> *preview* namespace and may move. Verify against the installed `google-cloud-aiplatform` version
+> whether the stable path (`vertexai.vision_models import ImageGenerationModel`) is available and
+> prefer it. A wrong/relocated import fails at first call. Imagen is also gated off by default for
+> MVP (`ENABLE_IMAGEN=false`), so this is only exercised once covers are turned on.
+
 ```python
 import uuid
 from google.cloud import storage
@@ -917,6 +973,8 @@ async def ingest(
     await db.collection("jobs").document(job_id).set({
         "user_id": user_id,
         "url": body.url,
+        "content": body.content,   # pre-extracted text from PWA/shortcut, if any
+        "source": body.source,     # "web" | "shortcut" | "pwa"
         "status": "pending",
         "note_id": None,
         "error": None,
@@ -925,6 +983,7 @@ async def ingest(
         "updated_at": now,
     })
 
+    # content/source are read back off the job doc by the worker — no need to inflate the task payload.
     enqueue_process_job(job_id, user_id, body.url)
 
     return JobStatus(job_id=job_id, status="pending")
@@ -996,6 +1055,8 @@ async def process_job(job_id: str, request: Request):
 
     user_id: str = job["user_id"]
     url: str = job["url"]
+    content: str | None = job.get("content")   # device-extracted text (PWA/shortcut), if any
+    source: str = job.get("source", "web")
     now = datetime.now(timezone.utc)
     await job_ref.update({"status": "processing", "attempt_count": fs.Increment(1), "updated_at": now})
 
@@ -1006,7 +1067,12 @@ async def process_job(job_id: str, request: Request):
         text_content = ""        # always defined → no NameError if a video branch fails
         use_media = False
 
-        if is_video_url(url):
+        if content:
+            # Device-side extraction (PWA "Get Text" / shortcut) already stripped HTML and
+            # bypassed any paywall/auth wall — skip the scraper entirely.
+            text_content = content[:30000]
+            content_preview = text_content[:300]
+        elif is_video_url(url):
             info = await asyncio.to_thread(probe_video, url)
             cover_image_url = info["thumbnail_url"]
             content_preview = f"{info['title']} by {info['author'] or 'unknown'}"
@@ -1044,8 +1110,14 @@ async def process_job(job_id: str, request: Request):
                 gemini_service.analyze_text, text_content, url, content_type
             )
 
-        # Imagen fallback only for visual content types with no found cover.
-        if (not cover_image_url and extracted.cover_image_prompt
+        # Output validation: refuse to persist an empty/too-thin extraction — mark the job failed
+        # with a clear error instead of saving a broken note (the except below records it).
+        if not extracted.data or len(str(extracted.data)) < 40:
+            raise ValueError("Extraction produced empty or suspiciously short data")
+
+        # Imagen fallback only for visual content types with no found cover — and only when covers
+        # are enabled (deferred for MVP; ENABLE_IMAGEN=false). og:image/gradient placeholder otherwise.
+        if (settings.ENABLE_IMAGEN and not cover_image_url and extracted.cover_image_prompt
                 and content_type in settings.VISUAL_CONTENT_TYPES):
             cover_image_url = await asyncio.to_thread(generate_cover_image, extracted.cover_image_prompt)
 
@@ -1059,6 +1131,7 @@ async def process_job(job_id: str, request: Request):
             "ai_summary": extracted.ai_summary,
             "source_url": url,
             "source_domain": source_domain,
+            "source": source,              # "web" | "shortcut" | "pwa"
             "cover_image_url": cover_image_url,
             "data": extracted.data,        # structured only — no rendered_html
             "created_at": now,
@@ -1095,8 +1168,8 @@ git commit -m "feat: process router — full async pipeline with category assign
 - Create: `backend/main.py`
 - Create: `backend/Dockerfile`
 
-> The iOS Shortcut router (`routers/shortcut.py`) is **deferred to Post-MVP** — see the Post-MVP
-> section at the end of this plan.
+> The iOS Shortcut + Personal Access Token routes are built in **Phase 2** (Track B), not here —
+> see the Phase 2 task block after Task 14. Phase 1 ships the web "+ capture" flow only.
 
 - [ ] **Step 7.0: Write backend/services/auth_dep.py** (one shared dependency — no per-router `_auth` copies)
 ```python
@@ -1156,11 +1229,10 @@ async def delete_all_notes(user_id: str = Depends(require_user)):
     async for doc in db.collection("notes").where("user_id", "==", user_id).stream():
         batch.delete(doc.reference)
         count += 1
-        if count % 500 == 0:
+        if count % 499 == 0:
             await batch.commit()
             batch = db.batch()
-    if count % 500 != 0:
-        await batch.commit()
+    await batch.commit()  # always commit the final batch (committing an empty batch is a no-op)
     return {"deleted": count}
 ```
 
@@ -1190,7 +1262,7 @@ async def get_job(job_id: str, user_id: str = Depends(require_user)):
     return {"id": doc.id, **doc.to_dict()}
 ```
 
-- [ ] **Step 7.3: (deferred) iOS Shortcut router** — moved to the Post-MVP section. Skip for MVP.
+- [ ] **Step 7.3: (Phase 2) iOS Shortcut + PAT router** — built in the Phase 2 task block (Track B), not in Phase 1. Skip here.
 
 - [ ] **Step 7.4: Write backend/main.py**
 ```python
@@ -1487,7 +1559,8 @@ function LoginPage() {
         </div>
         <h1 className="font-serif text-4xl text-ink">Clipnote</h1>
         <p className="mt-2 text-sm text-ink-soft">
-          Paste any link. Get a note worth keeping.
+          Your saved recipes, products, and articles — structured and searchable,
+          not buried in a bookmark graveyard.
         </p>
         <button
           onClick={signInWithGoogle}
@@ -1644,14 +1717,9 @@ export function watchJob(
 }
 
 export async function getUserCategories(userId: string): Promise<string[]> {
-  const q = query(collection(db, 'notes'), where('user_id', '==', userId))
-  const snap = await getDocs(q)
-  const types = new Set<string>()
-  snap.docs.forEach(d => {
-    const ct = d.data().content_type
-    if (ct) types.add(ct)
-  })
-  return Array.from(types).sort()
+  // One doc read against users/{uid}.categories — never scan the whole notes collection.
+  const snap = await getDoc(doc(db, 'users', userId))
+  return snap.exists() ? ((snap.data().categories ?? []) as string[]).sort() : []
 }
 ```
 
@@ -2162,7 +2230,7 @@ function Settings() {
           </div>
         </section>
 
-        {/* iOS Shortcut — deferred to Post-MVP (see plan). Intentionally omitted from the MVP. */}
+        {/* "Connect iPhone" (PAT generation + connected-devices list) is added in Phase 2, Track B. */}
 
         {/* Sign out */}
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
@@ -2319,6 +2387,127 @@ git commit -m "feat: deployment configuration complete"
 
 ---
 
+## Phase 2: Capture — make clipping a reflex (MVP, two tracks)
+
+The web "+ capture" flow ships in Phase 1. Phase 2 makes capture frictionless from the share sheet.
+Two independent tracks; ship Track A first (broadest reach), then Track B for iOS power users.
+
+### Track A — PWA Web Share Target (Android + iOS Safari, ~2–3 days)
+
+- [ ] **Step 2A.1: Add a `share_target` to `frontend/public/manifest.json`**
+```json
+"share_target": {
+  "action": "/share",
+  "method": "GET",
+  "params": { "url": "url", "text": "text", "title": "title" }
+}
+```
+- [ ] **Step 2A.2: Add a `/share` route** (`frontend/src/routes/share.tsx`) that reads `?url=` (falling
+  back to `?text=` when a platform puts the link there), then opens the capture flow pre-filled with
+  that URL — same `CaptureModal` path as the manual "+ capture". Redirect to `/` afterward.
+- [ ] **Step 2A.3:** Confirm the app is installable (valid manifest + service worker) so the OS share
+  sheet lists Clip Note. Verify share from Android Chrome opens the pre-filled capture modal.
+
+### Track B — iOS Shortcut + Personal Access Token system (~2 days)
+
+**Backend:**
+
+- [ ] **Step 2B.1: New collection `shortcut_tokens/{token_id}`** — `{user_id, token_hash (bcrypt),
+  label, created_at, last_used_at}`. **Store bcrypt hashes, never raw tokens.** Add `bcrypt` to
+  `requirements.txt`. Lock the collection in `firestore.rules` to backend-only (`allow read, write: if false`).
+- [ ] **Step 2B.2: Token routes** (`routers/tokens.py`, `Depends(require_user)`):
+  - `POST /api/tokens` → generates a `cn_`-prefixed random token, stores its bcrypt hash + label,
+    returns the **raw token exactly once**.
+  - `GET /api/tokens` → returns labels + `last_used_at` only (never the token or hash).
+  - `DELETE /api/tokens/{id}` → revokes.
+- [ ] **Step 2B.3: Make `require_user` accept both token types** (`services/auth_dep.py`):
+```python
+if authorization.startswith("Bearer ey"):      # Firebase JWT
+    return await verify_firebase_token(...)
+elif authorization.startswith("Bearer cn_"):    # Personal Access Token
+    return await verify_pat(...)                 # bcrypt-check against shortcut_tokens; bump last_used_at
+```
+  `verify_pat` looks up the token's hash, checks bcrypt, updates `last_used_at`, returns `user_id`.
+- [ ] **Step 2B.4: `GET /api/shortcut/version`** → `{current, min_supported}` so the shortcut can prompt
+  for updates without a manual reinstall.
+- [ ] **Step 2B.5: Separate, stricter rate-limit bucket for PAT requests** (distinct from the
+  Firebase-user daily ingest cap) in `/api/ingest`.
+
+**Shortcut (configuration, not code):**
+
+1. Receive share input → "Get Contents of Web Page" → "Get Text" (strips HTML, bypasses paywalls
+   **on-device** — this is why the shortcut sends `content`, not just `url`).
+2. "Get Contents of URL" → POST `/api/ingest` with the PAT in `Authorization` and the extracted
+   `content` in the body (`source: "shortcut"`). Runs silently — **never** "Open URL".
+3. Native notification on success; native alert on 429/error.
+
+**Frontend setup flow:**
+
+- [ ] **Step 2B.6: Settings "Connect iPhone"** generates a token server-side, then deep-links to
+  `shortcuts://run-shortcut?name=Clip%20Note%20Setup&input=TOKEN`. The setup shortcut stores the token
+  in the iOS **Keychain** (16.4+) or a Shortcuts global variable. **Avoid Data Jar** (paid third-party
+  dependency).
+- [ ] **Step 2B.7: Connected-devices list in Settings** — show each token's label, created, and last-used,
+  with one-tap revoke (calls `DELETE /api/tokens/{id}`).
+
+- [ ] **Step 2B.8: Commit** Phase 2 backend + frontend.
+
+---
+
+## Phase 3: Monetization + retention (before public launch)
+
+> Hard rule: do not launch publicly until this phase is done.
+
+### Paywall
+
+- [ ] **Step 3.1: Add `plan: "free" | "pro"` to `users/{uid}`** (default `"free"` on first write).
+- [ ] **Step 3.2: Enforce note limits in `/api/ingest`** — free = 20 notes/month, pro = unlimited.
+  On cap hit, return a **structured HTTP 402** (e.g. `{"detail": "...", "code": "plan_limit"}`) the
+  frontend catches and turns into an upgrade prompt (distinct from the 429 cost-cap path).
+- [ ] **Step 3.3: Stripe Checkout (~1 day)** — checkout session + one webhook that flips
+  `users/{uid}.plan = "pro"` on successful payment. Store `stripe_customer_id` on the user doc.
+- [ ] **Step 3.4: Frontend upgrade prompt** — catch the 402 in `lib/api.ts`, surface an upgrade
+  modal that links to Checkout.
+
+### Retention
+
+- [ ] **Step 3.5: Weekly digest email** — Cloud Scheduler → a Cloud Run endpoint that, per user, sends
+  "Here's what you saved this week" (last 5 notes) via SendGrid free tier. No personalization needed.
+
+**Pricing rationale:** per note ≈ $0.05–0.15; 100 notes ≈ $5–15 of AI cost → **pro ≈ $7–9/month**.
+The existing per-user caps, global kill switch, and billing alert stay in place as backstops even with
+the paywall.
+
+- [ ] **Step 3.6: Commit** paywall + digest.
+
+---
+
+## Phase 4: Search + growth (first month of usage)
+
+- [ ] **Step 4.1: Full-text search via Typesense Cloud (free tier).** On note creation, index
+  `{id, title, ai_summary, content_type, source_domain}`. Add `POST /api/search`. This **replaces the
+  client-side substring match**, which breaks past ~50 notes. Point the feed search box at `/api/search`.
+- [ ] **Step 4.2: Public shareable notes.** Add `is_public: false` to the note schema; a "Share" button
+  flips it. `/p/{note_id}` renders read-only **without auth**, with an og:image. Firestore rule:
+```
+allow read: if resource.data.is_public == true
+            || (request.auth != null && request.auth.uid == resource.data.user_id);
+```
+  The og:image preview requires **SSR** — move the note-detail render to Cloud Run (or use a prerender
+  service as a stopgap), since the Phase 1 frontend is a static SPA.
+- [ ] **Step 4.3: Commit** search + public notes.
+
+---
+
+## Phase 5: Native app (after web validation)
+
+- [ ] **Step 5.1:** Wrap the web app in **Expo** + `expo-share-extension` to ship a native iOS Share
+  Extension. It appears in the share row by default and removes the Shortcuts install friction.
+  **Don't start until web users are actively saving via the Phase 2 shortcut** — this is gated on real
+  usage, not a checklist item to rush.
+
+---
+
 ## Verification Checklist
 
 - [ ] 1. App loads at Firebase Hosting URL, Google Sign-In works, profile photo shows in Settings
@@ -2334,19 +2523,24 @@ git commit -m "feat: deployment configuration complete"
 - [ ] 11. **Security:** `POST /api/process/{job_id}` without a valid OIDC token returns 403; a Cloud-Tasks-signed call succeeds
 - [ ] 12. **Idempotency:** re-POSTing `/api/process` for an already-completed job is a no-op (no second note, no extra AI spend)
 - [ ] 13. **Long video:** a 20-min+ video produces a transcript-based note (no inline-bytes failure, no media download)
+- [ ] 14. **Phase 0 gate:** AI output quality on the 20–30 sample URLs judged acceptable before any build
+- [ ] 15. **PWA share (Track A):** sharing from Android Chrome opens the capture modal pre-filled
+- [ ] 16. **iOS shortcut (Track B):** running it on a paywalled article sends device-extracted `content` and produces a complete note
+- [ ] 17. **PAT auth:** a valid PAT ingests successfully; a revoked PAT returns 401
+- [ ] 18. **Paywall:** a free user at 20 notes gets a structured 402 + upgrade prompt; a pro user is uncapped
+- [ ] 19. **Digest:** the weekly digest email fires and links back into the app
+- [ ] 20. **Search:** returns a note by a word in its body/summary, not just its title
+- [ ] 21. **Public note:** `/p/{id}` renders without auth and shows a correct og:image preview when shared
 
 ---
 
 ## Post-MVP backlog
 
-Deferred from MVP, in rough priority order:
+Most of what was here is now scheduled into the phase plan above (iOS shortcut → Phase 2; public
+share pages → Phase 4; search → Phase 4; native apps → Phase 5). What remains genuinely deferred:
 
-- **iOS Share-Sheet shortcut.** The original `routers/shortcut.py` (hand-built binary `.shortcut`
-  plist + per-user `shortcut_tokens` + Settings install UI with QR) was cut: brittle across iOS
-  versions and signed-shortcut friction make it high-effort/low-confidence. Revisit with a prebuilt
-  iCloud-hosted shortcut that takes the user's token via a deep link, rather than synthesizing the
-  plist server-side.
-- **Public share pages.** Server-rendered, no-auth note pages (SEO + a viral loop). Requires moving
-  the note-detail render path to SSR (Cloud Run) instead of the static SPA.
-- **Retention mechanics.** Resurfacing/reminders, user-owned collections, better full-text search.
-- **Native apps.** iOS + Android once the web wedge is validated.
+- **Resurfacing / reminders.** Surface old notes back to the user on a schedule.
+- **User-owned collections.** Manual grouping on top of the AI-assigned `content_type`.
+- **Android native app.** After the iOS native app (Phase 5) is validated.
+- **Imagen-generated covers at scale.** Gated off for MVP (`ENABLE_IMAGEN=false`); enable only once
+  there's evidence users value generated covers.
