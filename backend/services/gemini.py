@@ -14,13 +14,17 @@ JSON mode (response_mime_type) and validate with Pydantic afterwards instead of 
 """
 import asyncio
 import json
+import logging
 import re
+import time
 
 from google import genai
 from google.genai import types
 
 from config import settings
 from models.note import ContentBundle, NoteExtraction
+
+log = logging.getLogger("clipnote.gemini")
 
 
 def normalize_slug(raw: str) -> str:
@@ -275,14 +279,26 @@ class GeminiService:
                 config.media_resolution = types.MediaResolution.MEDIA_RESOLUTION_LOW
             except AttributeError:
                 pass  # older SDK without media_resolution — default is fine
-        response = self.client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=self._build_contents(url, bundle, content_type),
-            config=config,
-        )
-        parsed = NoteExtraction.model_validate_json(_strip_code_fences(response.text))
-        parsed.content_type = content_type  # enforce Step 1's decision
-        return parsed
+        # One retry: the global endpoint throws transient 5xx, and a flaky generation can
+        # return unparseable JSON — both deserve a second attempt before failing the job.
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                response = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=self._build_contents(url, bundle, content_type),
+                    config=config,
+                )
+                parsed = NoteExtraction.model_validate_json(_strip_code_fences(response.text))
+                parsed.content_type = content_type  # enforce Step 1's decision
+                return parsed
+            except Exception as e:
+                last_exc = e
+                if attempt == 1:
+                    log.warning("extract attempt 1 failed, retrying: %s: %s",
+                                type(e).__name__, e, extra={"url": url})
+                    time.sleep(2)
+        raise last_exc
 
     async def extract_async(self, url: str, bundle: ContentBundle, content_type: str) -> NoteExtraction:
         return await asyncio.to_thread(self.extract, url, bundle, content_type)
@@ -318,7 +334,7 @@ class GeminiService:
                 return text
             except Exception as e:
                 if attempt == 2:
-                    print(f"[gemini] search-grounded lookup failed for {url}: {e}")
+                    log.warning("search-grounded lookup failed: %s", e, extra={"url": url})
         return None
 
     async def search_grounded_page(self, url: str, hint: str = "") -> str | None:

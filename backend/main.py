@@ -1,11 +1,15 @@
+import logging
 import os
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
+from services.logging_setup import setup_logging
+
+setup_logging()
+log = logging.getLogger("clipnote.app")
 
 os.makedirs(settings.TEMP_DOWNLOAD_DIR, exist_ok=True)
 
@@ -31,13 +35,26 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    print(traceback.format_exc())
+    log.error("unhandled exception on %s %s", request.method, request.url.path, exc_info=exc)
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": settings.VERSION}
+
+
+_client_log = logging.getLogger("clipnote.client")
+
+
+@app.post("/api/client-errors")
+async def client_errors(request: Request):
+    """Frontend error sink: window.onerror/unhandledrejection report here so browser
+    failures show up in Cloud Logging instead of dying in users' consoles.
+    Unauthenticated by design (errors often happen before sign-in); body is capped."""
+    body = (await request.body())[:2048].decode("utf-8", errors="ignore")
+    _client_log.error("client error: %s", body, extra={"source": "frontend"})
+    return {"status": "logged"}
 
 
 from routers.ingest import router as ingest_router      # noqa: E402

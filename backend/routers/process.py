@@ -4,6 +4,7 @@ Auth: Cloud Tasks OIDC token (signature + audience + SA email) — no shared sec
 Idempotent: a retry of a completed job is a no-op (no double AI spend).
 Permanent failures return 200 with status=failed so Cloud Tasks does not retry them.
 """
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ from services.firebase import add_user_category, get_db, get_user_categories
 from services.gemini import gemini_service
 
 router = APIRouter(tags=["process"])
+log = logging.getLogger("clipnote.process")
 
 
 def _verify_oidc(request: Request) -> None:
@@ -100,11 +102,14 @@ async def process_job(job_id: str, request: Request):
         await add_user_category(user_id, extracted.content_type)
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "updated_at": datetime.now(timezone.utc)})
+        log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
+                 extra={"job_id": job_id, "user_id": user_id, "url": url, "strategy": bundle.strategy})
         return {"status": "completed", "note_id": note_id}
 
     except Exception as e:
         # Mark failed and return 200: retrying would just re-spend on the same failing input.
-        print(f"Process job {job_id} failed: {type(e).__name__}: {e}")
+        log.error("process job failed: %s: %s", type(e).__name__, e,
+                  extra={"job_id": job_id, "user_id": user_id, "url": url}, exc_info=True)
         await job_ref.update({"status": "failed", "error": f"{type(e).__name__}: {e}"[:500],
                               "updated_at": datetime.now(timezone.utc)})
         return {"status": "failed", "error": str(e)[:200]}
