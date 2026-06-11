@@ -7,6 +7,11 @@ from fastapi import Header, HTTPException
 from services.firebase import get_db, verify_firebase_token
 
 
+# A locked token must be revoked + recreated from the web app. The lock check runs
+# BEFORE the bcrypt compare so brute-force attempts on a locked token cost no CPU.
+MAX_FAILED_PAT_ATTEMPTS = 10
+
+
 async def _verify_pat(token: str) -> str:
     """Validates a cn_<id>.<secret> Personal Access Token; returns the owner's uid
     and bumps last_used_at. bcrypt check runs off the event loop."""
@@ -19,12 +24,19 @@ async def _verify_pat(token: str) -> str:
     if not snap.exists:
         raise HTTPException(401, "Invalid token")
     data = snap.to_dict()
+    failed = data.get("failed_attempts", 0)
+    if failed >= MAX_FAILED_PAT_ATTEMPTS:
+        raise HTTPException(401, "Token locked after repeated failures — create a new one in Settings")
     ok = await asyncio.to_thread(
         bcrypt.checkpw, secret.encode(), data.get("token_hash", "").encode()
     )
     if not ok:
+        await snap.reference.update({"failed_attempts": failed + 1})
         raise HTTPException(401, "Invalid token")
-    await snap.reference.update({"last_used_at": datetime.now(timezone.utc)})
+    update = {"last_used_at": datetime.now(timezone.utc)}
+    if failed:
+        update["failed_attempts"] = 0
+    await snap.reference.update(update)
     return data["user_id"]
 
 

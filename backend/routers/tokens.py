@@ -23,9 +23,15 @@ class TokenCreateRequest(BaseModel):
     label: str = "iPhone"
 
 
+MAX_TOKENS_PER_USER = 5
+
+
 @router.post("/tokens")
 async def create_token(body: TokenCreateRequest, user_id: str = Depends(require_firebase_user)):
     db = get_db()
+    existing = await db.collection("shortcut_tokens").where("user_id", "==", user_id).count().get()
+    if existing[0][0].value >= MAX_TOKENS_PER_USER:
+        raise HTTPException(400, f"Token limit reached ({MAX_TOKENS_PER_USER}). Revoke an unused token first.")
     token_id = uuid.uuid4().hex[:12]
     secret = secrets.token_urlsafe(24)
     token_hash = bcrypt.hashpw(secret.encode(), bcrypt.gensalt()).decode()
@@ -36,6 +42,7 @@ async def create_token(body: TokenCreateRequest, user_id: str = Depends(require_
         "label": body.label[:40] or "iPhone",
         "created_at": now,
         "last_used_at": None,
+        "failed_attempts": 0,
     })
     return {"token": f"cn_{token_id}.{secret}", "id": token_id, "label": body.label[:40]}
 
