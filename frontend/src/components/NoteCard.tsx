@@ -65,6 +65,7 @@ export function NoteCard({ note }: { note: Note }) {
       <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
           src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+          onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
           alt=""
           className="h-3.5 w-3.5 rounded-sm"
         />
@@ -181,6 +182,7 @@ export function ProcessingCard({ job }: { job: Job }) {
       <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
           src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+          onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
           alt=""
           className="h-3.5 w-3.5 rounded-sm"
         />

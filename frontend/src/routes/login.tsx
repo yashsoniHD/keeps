@@ -1,20 +1,32 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+  }),
 });
 
 function LoginPage() {
   const { user, loading, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const router = useRouter();
+  const { redirect } = Route.useSearch();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && user) navigate({ to: "/" });
-  }, [user, loading, navigate]);
+    if (!loading && user) {
+      // Same-origin paths only — never replay an absolute URL (open-redirect guard).
+      if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+        router.history.replace(redirect);
+      } else {
+        navigate({ to: "/" });
+      }
+    }
+  }, [user, loading, navigate, router, redirect]);
 
   const handleSignIn = async () => {
     setError(null);

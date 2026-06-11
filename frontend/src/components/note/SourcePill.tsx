@@ -11,6 +11,7 @@ export function SourcePill({ domain, url }: { domain: string; url: string }) {
     >
       <img
         src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+        onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
         alt=""
         className="h-3.5 w-3.5 rounded-sm"
       />

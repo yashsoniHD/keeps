@@ -14,20 +14,28 @@ import { db } from "@/integrations/firebase/client";
 import type { Note, Job } from "@/lib/types";
 
 // Real-time feed: notes appear/update without a manual refetch. Returns an unsubscribe fn.
+// contentType filters server-side via the (user_id, content_type, created_at) composite
+// index, so a filtered view reaches past the feed window instead of slicing loaded docs.
 export function watchNotes(
   userId: string,
   callback: (notes: Note[]) => void,
-  max = 50,
+  opts: { max?: number; contentType?: string; onError?: (e: Error) => void } = {},
 ): Unsubscribe {
-  const q = query(
-    collection(db, "notes"),
+  const { max = 50, contentType, onError } = opts;
+  const clauses = [
     where("user_id", "==", userId),
+    ...(contentType ? [where("content_type", "==", contentType)] : []),
     orderBy("created_at", "desc"),
     limit(max),
+  ];
+  const q = query(collection(db, "notes"), ...clauses);
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note));
+    },
+    (err) => onError?.(err),
   );
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note));
-  });
 }
 
 export async function getNote(noteId: string): Promise<Note | null> {

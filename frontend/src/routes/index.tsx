@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Search, Sparkles, Plus, LayoutGrid, List, Globe, ChevronDown, Settings, AlertCircle, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { watchNotes, watchPendingJobs } from "@/lib/firestore";
+import { watchNotes, watchPendingJobs, getUserCategories } from "@/lib/firestore";
 import { ingest } from "@/lib/api";
 import { noteLabel, sourceLabel } from "@/lib/note-meta";
 import { NoteCard, NoteRowList, ProcessingCard } from "@/components/NoteCard";
@@ -17,6 +17,10 @@ function Feed() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [notes, setNotes] = useState<Note[]>([]);
+  const [notesReady, setNotesReady] = useState(false);
+  const [feedError, setFeedError] = useState(false);
+  const [max, setMax] = useState(50);
+  const [userCategories, setUserCategories] = useState<string[]>([]);
   const [active, setActive] = useState<string>("all");
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
@@ -33,10 +37,30 @@ function Feed() {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
 
-  // Real-time feed: new/updated notes stream in without a refetch.
+  // Real-time feed: new/updated notes stream in without a refetch. The active type
+  // filter runs server-side (composite index), so it sees past the feed window.
   useEffect(() => {
     if (!user) return;
-    return watchNotes(user.uid, setNotes);
+    return watchNotes(
+      user.uid,
+      (n) => {
+        setNotes(n);
+        setNotesReady(true);
+        setFeedError(false);
+      },
+      {
+        max,
+        contentType: active === "all" ? undefined : active,
+        onError: () => setFeedError(true),
+      },
+    );
+  }, [user, max, active]);
+
+  // Chip list comes from users/{uid}.categories (source of truth), so chips don't
+  // vanish when a server-side filter narrows the loaded notes to one type.
+  useEffect(() => {
+    if (!user) return;
+    getUserCategories(user.uid).then(setUserCategories).catch(() => {});
   }, [user]);
 
   // In-flight captures → optimistic "processing" cards (works for every capture path).
@@ -80,10 +104,10 @@ function Feed() {
     localStorage.setItem("clipnote.layout", next);
   };
 
-  // Filter chips emerge from the notes themselves — the user's personal taxonomy.
+  // Filter chips emerge from the user's own taxonomy (user doc + loaded notes).
   const categories = useMemo(
-    () => Array.from(new Set(notes.map((n) => n.content_type))).sort(),
-    [notes],
+    () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
+    [notes, userCategories],
   );
   const sources = useMemo(
     () => Array.from(new Set(notes.map((n) => n.source_domain))).sort(),
@@ -226,8 +250,21 @@ function Feed() {
           </div>
         )}
 
-        {filtered.length === 0 && pendingJobs.length === 0 ? (
-          <EmptyState hasNotes={notes.length > 0} />
+        {feedError && (
+          <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="flex-1">Couldn't load your notes. Check your connection and refresh.</span>
+          </div>
+        )}
+
+        {!notesReady && !feedError ? (
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="h-48 animate-pulse rounded-2xl border border-border bg-card" />
+            ))}
+          </section>
+        ) : filtered.length === 0 && pendingJobs.length === 0 ? (
+          <EmptyState hasNotes={notes.length > 0 || active !== "all" || source !== "all" || !!query.trim()} />
         ) : layout === "condensed" ? (
           <NoteRowList notes={filtered} jobs={pendingJobs} />
         ) : (
@@ -239,6 +276,18 @@ function Feed() {
               <NoteCard key={n.id} note={n} />
             ))}
           </section>
+        )}
+
+        {notesReady && notes.length >= max && (
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setMax((m) => m + 50)}
+              className="rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-accent"
+            >
+              Load older notes
+            </button>
+          </div>
         )}
       </main>
 

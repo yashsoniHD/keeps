@@ -37,7 +37,13 @@ function SharePage() {
   const fired = useRef(false);
 
   useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
+    // Carry the share payload through login so the capture still fires after sign-in.
+    if (!loading && !user) {
+      navigate({
+        to: "/login",
+        search: { redirect: `${window.location.pathname}${window.location.search}` },
+      });
+    }
   }, [user, loading, navigate]);
 
   // Kick off the capture, then drop the user into the feed where the processing card

@@ -135,7 +135,9 @@ function ConnectPhone() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    listTokens().then(setTokens).catch(() => {});
+    listTokens()
+      .then(setTokens)
+      .catch(() => setError("Couldn't load your connected devices. Refresh to retry."));
   }, []);
   useEffect(refresh, [refresh]);
 

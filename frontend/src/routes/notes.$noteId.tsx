@@ -15,20 +15,42 @@ function NoteDetail() {
   const navigate = useNavigate();
   const [note, setNote] = useState<Note | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
-  }, [user, loading, navigate]);
+    // Preserve the destination: after sign-in the login page replays this path,
+    // so a shared /notes/… link doesn't dump a signed-out user on the feed.
+    if (!loading && !user) {
+      navigate({ to: "/login", search: { redirect: `/notes/${noteId}` } });
+    }
+  }, [user, loading, navigate, noteId]);
 
   useEffect(() => {
     if (user && noteId) {
-      getNote(noteId).then((n) => {
-        if (!n || n.user_id !== user.uid) setNotFound(true);
-        else setNote(n);
-      });
+      setLoadError(false);
+      getNote(noteId)
+        .then((n) => {
+          if (!n || n.user_id !== user.uid) setNotFound(true);
+          else setNote(n);
+        })
+        .catch(() => setLoadError(true));
     }
   }, [user, noteId]);
 
+  if (loadError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-ink-soft">
+        <span>Couldn't load this note. Check your connection.</span>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (loading || (!note && !notFound)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
