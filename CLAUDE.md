@@ -164,8 +164,10 @@ passed the gate.
       Firebase Auth identity + Firestore note counts + token counters; cost derived at
       read-time from `GEMINI_PRICE_*` config (raw tokens stored, never $; rates confirmed
       vs live pricing — 3.5-flash $1.50/$9.00, 3.1-flash-lite $0.25/$1.50 per 1M in/out).
-      Hidden `/admin` route + Settings link (admin-only). **Deploy TODO:** grant the runtime
-      SA `roles/firebaseauth.viewer` so `auth.list_users()` works (else stats 500s).
+      Hidden `/admin` route + Settings link (admin-only). Deployed 2026-06-12 (Cloud Run
+      rev 00014-z6n + clipnote.web.app). No IAM grant needed: the runtime SA already has
+      `firebaseauth.users.get` via `roles/firebase.sdkAdminServiceAgent`, which is what
+      `auth.list_users()` requires.
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
