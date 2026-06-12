@@ -1,4 +1,5 @@
 import {
+  Bookmark,
   ChefHat,
   MapPin,
   ShoppingBag,
@@ -40,6 +41,7 @@ const PALETTES: NoteAccent[] = [
 // Known categories: a fixed icon + palette, and optionally a short display label
 // (slugs like "entertainment-recommendations" render as "Entertainment").
 const KNOWN: Record<string, { icon: LucideIcon; palette: number; label?: string }> = {
+  bookmark: { icon: Bookmark, palette: 3 }, // salvage notes from the backend
   recipe: { icon: ChefHat, palette: 0 },
   itinerary: { icon: MapPin, palette: 1 },
   product: { icon: ShoppingBag, palette: 2 },

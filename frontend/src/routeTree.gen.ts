@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AskRouteImport } from './routes/ask'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
 
@@ -30,6 +32,16 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AskRoute = AskRouteImport.update({
+  id: '/ask',
+  path: '/ask',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,6 +55,8 @@ const NotesNoteIdRoute = NotesNoteIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/ask': typeof AskRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
@@ -50,6 +64,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/ask': typeof AskRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
@@ -58,6 +74,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/ask': typeof AskRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
@@ -65,14 +83,38 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/settings' | '/share' | '/notes/$noteId'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/ask'
+    | '/login'
+    | '/settings'
+    | '/share'
+    | '/notes/$noteId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/settings' | '/share' | '/notes/$noteId'
-  id: '__root__' | '/' | '/login' | '/settings' | '/share' | '/notes/$noteId'
+  to:
+    | '/'
+    | '/admin'
+    | '/ask'
+    | '/login'
+    | '/settings'
+    | '/share'
+    | '/notes/$noteId'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/ask'
+    | '/login'
+    | '/settings'
+    | '/share'
+    | '/notes/$noteId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  AskRoute: typeof AskRoute
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   ShareRoute: typeof ShareRoute
@@ -102,6 +144,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ask': {
+      id: '/ask'
+      path: '/ask'
+      fullPath: '/ask'
+      preLoaderRoute: typeof AskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -121,6 +177,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  AskRoute: AskRoute,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   ShareRoute: ShareRoute,

@@ -155,6 +155,17 @@ passed the gate.
       flip to enforcing after checking violation reports**); frontend: 401 retry w/ token
       refresh, deep-link/share survive login redirect, feed pagination + server-side type
       filter, client error reporting; `backend/tests/` (30 tests) + GitHub Actions CI.
+- [x] Admin dashboard (2026-06-12): per-user usage + cost. Gemini token spend metered
+      via a request-scoped contextvar meter (`services/usage_meter.py`) — `gemini.py` calls
+      `record_usage` after every `generate_content` (output = candidates **+ thoughts**, since
+      3.x bills thinking tokens); `flush_usage` writes per-tier lifetime counters to
+      `users/{uid}` + global daily to `system/usage-{date}`. `GET /api/admin/stats`
+      (`routers/admin.py`, gated to `ADMIN_EMAILS` by **verified Firebase email**) joins
+      Firebase Auth identity + Firestore note counts + token counters; cost derived at
+      read-time from `GEMINI_PRICE_*` config (raw tokens stored, never $; rates confirmed
+      vs live pricing — 3.5-flash $1.50/$9.00, 3.1-flash-lite $0.25/$1.50 per 1M in/out).
+      Hidden `/admin` route + Settings link (admin-only). **Deploy TODO:** grant the runtime
+      SA `roles/firebaseauth.viewer` so `auth.list_users()` works (else stats 500s).
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
@@ -217,14 +228,16 @@ clip-note/
 ```
 users/{uid}           display_name, email, photo_url, categories[], created_at
                       plan ("free"|"pro"), stripe_customer_id     # added in Phase 3
+                      lifetime_tokens_{in,out}_{main,lite}, lifetime_ai_calls  # admin dashboard
 notes/{note_id}       user_id, content_type, title, ai_summary,
                       source_url, source_domain, source ("web"|"shortcut"|"pwa"),
                       cover_image_url, data (flexible map), created_at, updated_at
                       is_public (default false)                   # added in Phase 4
 jobs/{job_id}         user_id, url, content, source, status, note_id, error,
                       attempt_count, created_at, updated_at
-usage/{uid}-{date}    user_id, date, ingest_count        # per-user daily rate limit
-system/usage-{date}   date, note_count                   # global daily kill-switch
+usage/{uid}-{date}    user_id, date, ingest_count, ask_count   # per-user daily rate limit
+system/usage-{date}   date, note_count, ask_count,             # global daily kill-switch
+                      tok_tokens_{in,out}_{main,lite}, tok_ai_calls  # global daily token spend
 shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used_at  # Phase 2 (PAT)
 ```
 

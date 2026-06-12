@@ -1,11 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Search, Sparkles, Plus, LayoutGrid, List, Globe, ChevronDown, Settings, AlertCircle, X } from "lucide-react";
+import {
+  Search,
+  Sparkles,
+  Plus,
+  LayoutGrid,
+  List,
+  Filter,
+  WandSparkles,
+  Settings,
+  AlertCircle,
+  X,
+} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { watchNotes, watchPendingJobs, getUserCategories } from "@/lib/firestore";
+import {
+  watchNotes,
+  watchPendingJobs,
+  getUserCategories,
+  getOnboardingDone,
+  setOnboardingDone,
+} from "@/lib/firestore";
 import { ingest } from "@/lib/api";
+import {
+  enqueueCapture,
+  isQueueableError,
+  loadQueue,
+  replayQueue,
+  type QueuedCapture,
+} from "@/lib/capture-queue";
 import { noteLabel, sourceLabel } from "@/lib/note-meta";
 import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { GettingStarted } from "@/components/GettingStarted";
 import { AppShell } from "@/components/AppShell";
 import type { Note, Job } from "@/lib/types";
 
@@ -36,6 +62,8 @@ function Feed() {
     }
   });
   const [optimistic, setOptimistic] = useState<{ id: string; url: string }[]>([]);
+  const [queued, setQueued] = useState<QueuedCapture[]>(loadQueue);
+  const [showGuide, setShowGuide] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [pendingUrl, setPendingUrl] = useState("");
   const [ingestError, setIngestError] = useState<string | null>(null);
@@ -67,7 +95,9 @@ function Feed() {
   // vanish when a server-side filter narrows the loaded notes to one type.
   useEffect(() => {
     if (!user) return;
-    getUserCategories(user.uid).then(setUserCategories).catch(() => {});
+    getUserCategories(user.uid)
+      .then(setUserCategories)
+      .catch(() => {});
   }, [user]);
 
   // In-flight captures → optimistic "processing" cards (works for every capture path).
@@ -75,6 +105,42 @@ function Feed() {
     if (!user) return;
     return watchPendingJobs(user.uid, setJobs);
   }, [user]);
+
+  // Offline-queued captures replay on mount and whenever the connection returns.
+  // Server-rejected entries (4xx) are dropped with their error surfaced — they'd
+  // fail identically forever; network failures keep the rest of the queue intact.
+  useEffect(() => {
+    if (!user) return;
+    const replay = () => {
+      if (loadQueue().length === 0) return;
+      replayQueue((_url, message) => setIngestError(message)).then(setQueued);
+    };
+    replay();
+    window.addEventListener("online", replay);
+    return () => window.removeEventListener("online", replay);
+  }, [user]);
+
+  // Getting-started guide: shown until users/{uid}.onboarding_done (cross-device);
+  // the localStorage mirror prevents a flash of the guide on every load after dismissal.
+  useEffect(() => {
+    if (!user || localStorage.getItem("clipnote.onboardingDone") === "1") return;
+    getOnboardingDone(user.uid)
+      .then((done) => {
+        if (done) localStorage.setItem("clipnote.onboardingDone", "1");
+        else setShowGuide(true);
+      })
+      .catch(() => {});
+  }, [user]);
+
+  const dismissGuide = () => {
+    setShowGuide(false);
+    try {
+      localStorage.setItem("clipnote.onboardingDone", "1");
+    } catch {
+      /* mirror only — the Firestore flag below is the durable copy */
+    }
+    if (user) setOnboardingDone(user.uid).catch(() => {});
+  };
 
   // Retire each local placeholder once its real job (same url) or finished note arrives,
   // so the optimistic card hands off seamlessly to the server-backed one.
@@ -101,7 +167,15 @@ function Feed() {
       await ingest(url);
     } catch (e) {
       setOptimistic((prev) => prev.filter((o) => o.id !== tempId));
-      setIngestError(e instanceof Error ? e.message : "Couldn't start the capture. Please try again.");
+      if (isQueueableError(e)) {
+        // Offline / server down: hold the URL locally and show a "waiting" card —
+        // the capture is parked, not lost. Replayed by the effect above.
+        setQueued(enqueueCapture(url));
+      } else {
+        setIngestError(
+          e instanceof Error ? e.message : "Couldn't start the capture. Please try again.",
+        );
+      }
     }
   };
 
@@ -147,6 +221,17 @@ function Feed() {
     return [...placeholders, ...inflight.filter((j) => !noteUrls.has(j.url))];
   }, [jobs, optimistic, notes, active, source, query]);
 
+  // Offline-held captures render as "waiting" cards so they're visibly parked. Hidden
+  // once a real job/note for the same URL exists (replay succeeded elsewhere).
+  const queuedJobs = useMemo<Job[]>(() => {
+    if (active !== "all" || source !== "all" || query.trim()) return [];
+    const jobUrls = new Set(jobs.map((j) => j.url));
+    const noteUrls = new Set(notes.map((n) => n.source_url));
+    return queued
+      .filter((q) => !jobUrls.has(q.url) && !noteUrls.has(q.url))
+      .map((q) => ({ id: `queued-${q.url}`, url: q.url, status: "pending" }) as Job);
+  }, [queued, jobs, notes, active, source, query]);
+
   // Failed captures stay visible (with the error) until dismissed or retried — a card
   // that silently disappears reads as data loss.
   const failedJobs = useMemo<Job[]>(() => {
@@ -190,11 +275,17 @@ function Feed() {
               <button
                 type="button"
                 onClick={toggleLayout}
-                aria-label={layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"}
+                aria-label={
+                  layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"
+                }
                 title={layout === "standard" ? "Condensed view" : "Card view"}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
               >
-                {layout === "standard" ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+                {layout === "standard" ? (
+                  <List className="h-4 w-4" />
+                ) : (
+                  <LayoutGrid className="h-4 w-4" />
+                )}
               </button>
               <Link
                 to="/settings"
@@ -208,24 +299,44 @@ function Feed() {
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card px-4 py-2.5">
-              <Search className="h-4 w-4 text-ink-soft" />
+            <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card py-2.5 pl-4 pr-1.5">
+              <Search className="h-4 w-4 shrink-0 text-ink-soft" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search your notes"
                 className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
               />
-            </label>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate({
+                    to: "/ask",
+                    search: query.trim() ? { q: query.trim(), send: true } : {},
+                  })
+                }
+                aria-label="AI search"
+                title="AI search"
+                className="-my-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform active:scale-95"
+              >
+                <WandSparkles className="h-4 w-4" />
+              </button>
+            </div>
 
             {sources.length > 1 && (
-              <label className="relative inline-flex shrink-0 items-center">
-                <Globe className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-ink-soft" />
+              <div
+                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                  source !== "all"
+                    ? "border-ink bg-ink text-paper"
+                    : "border-border bg-card text-ink-soft hover:text-ink"
+                }`}
+              >
+                <Filter className="h-4 w-4" />
                 <select
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                   aria-label="Filter by source"
-                  className="appearance-none rounded-full border border-border bg-card py-2.5 pl-9 pr-8 text-sm text-ink outline-none transition-colors hover:bg-accent"
+                  className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
                 >
                   <option value="all">All sources</option>
                   {sources.map((s) => (
@@ -234,29 +345,29 @@ function Feed() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-ink-soft" />
-              </label>
+              </div>
             )}
           </div>
 
           {categories.length > 0 && (
             <div className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
-              {[{ id: "all", label: "All" }, ...categories.map((c) => ({ id: c, label: noteLabel(c) }))].map(
-                (f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setActive(f.id)}
-                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                      active === f.id
-                        ? "bg-ink text-paper"
-                        : "border border-border bg-card text-ink-soft hover:text-ink"
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ),
-              )}
+              {[
+                { id: "all", label: "All" },
+                ...categories.map((c) => ({ id: c, label: noteLabel(c) })),
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setActive(f.id)}
+                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                    active === f.id
+                      ? "bg-ink text-paper"
+                      : "border border-border bg-card text-ink-soft hover:text-ink"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -281,22 +392,46 @@ function Feed() {
         {feedError && (
           <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="flex-1">Couldn't load your notes. Check your connection and refresh.</span>
+            <span className="flex-1">
+              Couldn't load your notes. Check your connection and refresh.
+            </span>
           </div>
+        )}
+
+        {notesReady && showGuide && (
+          <GettingStarted
+            notesCount={notes.length}
+            onAddLink={() => {
+              setPendingUrl("");
+              setShowAdd(true);
+            }}
+            onDismiss={dismissGuide}
+          />
         )}
 
         {!notesReady && !feedError ? (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 8 }, (_, i) => (
-              <div key={i} className="h-48 animate-pulse rounded-2xl border border-border bg-card" />
+              <div
+                key={i}
+                className="h-48 animate-pulse rounded-2xl border border-border bg-card"
+              />
             ))}
           </section>
-        ) : filtered.length === 0 && pendingJobs.length === 0 && failedJobs.length === 0 ? (
-          <EmptyState hasNotes={notes.length > 0 || active !== "all" || source !== "all" || !!query.trim()} />
+        ) : filtered.length === 0 &&
+          pendingJobs.length === 0 &&
+          failedJobs.length === 0 &&
+          queuedJobs.length === 0 ? (
+          showGuide ? null : (
+            <EmptyState
+              hasNotes={notes.length > 0 || active !== "all" || source !== "all" || !!query.trim()}
+            />
+          )
         ) : layout === "condensed" ? (
           <NoteRowList
             notes={filtered}
             jobs={pendingJobs}
+            queuedJobs={queuedJobs}
             failedJobs={failedJobs}
             onRetry={retryJob}
             onDismiss={dismissJob}
@@ -306,11 +441,16 @@ function Feed() {
             {failedJobs.map((j) => (
               <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
             ))}
+            {queuedJobs.map((j) => (
+              <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
+            ))}
             {pendingJobs.map((j) => (
               <ProcessingCard key={j.id} job={j} />
             ))}
             {filtered.map((n) => (
-              <NoteCard key={n.id} note={n} />
+              <ErrorBoundary key={n.id} label="feed-card" fallback={<FallbackNoteCard note={n} />}>
+                <NoteCard note={n} />
+              </ErrorBoundary>
             ))}
           </section>
         )}
@@ -364,7 +504,10 @@ function AddSheet({
   onSubmit: (u: string) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-sm md:items-center md:p-4">
+    <div
+      data-no-refresh
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-sm md:items-center md:p-4"
+    >
       <div className="w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-2xl md:rounded-3xl">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border md:hidden" />
         <h2 className="font-serif text-2xl text-ink">New note</h2>
@@ -407,6 +550,21 @@ function AddSheet({
         </form>
       </div>
     </div>
+  );
+}
+
+// Boundary fallback for a feed card whose data breaks NoteCard's render: title-only,
+// still clickable (the detail route has its own deeper fallback ladder).
+function FallbackNoteCard({ note }: { note: Note }) {
+  return (
+    <Link
+      to="/notes/$noteId"
+      params={{ noteId: note.id }}
+      className="flex min-w-0 flex-col justify-center rounded-2xl border border-border bg-card p-4"
+    >
+      <h3 className="font-serif text-xl leading-tight text-ink line-clamp-2">{note.title}</h3>
+      <p className="mt-2 text-sm text-ink-soft">Preview unavailable — tap to open.</p>
+    </Link>
   );
 }
 

@@ -22,7 +22,9 @@ from google import genai
 from google.genai import types
 
 from config import settings
+from models.ask import GroundedAnswer, NoteSelection
 from models.note import ContentBundle, NoteExtraction
+from services.usage_meter import record_usage
 
 log = logging.getLogger("clipnote.gemini")
 
@@ -193,6 +195,41 @@ steps or day sections; a list of recommendations becomes sections with one headi
 Do NOT flatten everything into one bullet list — that is a failure."""
 
 
+ASK_SELECT_SYSTEM = """You select which of a user's saved notes could help answer their question.
+You receive a JSON index of notes (id, type, title, summary), the question,
+and recent conversation turns.
+Return ONLY valid JSON: {"note_ids": ["id", ...]}
+
+Rules:
+- Include every note that could plausibly contribute; most relevant first; max 12.
+- Use ONLY ids that appear in the index — never invent ids.
+- Resolve follow-ups from the conversation ("which of those is cheapest" refers
+  to the notes discussed in the previous turns).
+- If nothing is relevant, return {"note_ids": []}."""
+
+
+ASK_ANSWER_SYSTEM = """You are Clipnote's assistant. The user saves links as structured notes; answer
+their question using ONLY the saved notes provided.
+Return ONLY valid JSON: {"answer_markdown": str, "cited_note_ids": [str]}
+
+Rules:
+- Ground every claim in the notes. NEVER FABRICATE: if the notes don't contain
+  enough to answer, say so plainly and suggest what they could save — do not
+  fill gaps from general knowledge or the wider internet.
+- Be direct, conversational, and specific: use the real names, prices, timings,
+  and quantities from the notes.
+- Mention note titles naturally when recommending or comparing, so the user
+  knows where each item came from.
+- cited_note_ids: only notes you actually used, most relevant first.
+- Markdown subset only: short paragraphs, "- " bullets, numbered lists, **bold**,
+  ### headings. No tables, images, links, or HTML.
+- Use the conversation history to resolve follow-ups; answer the latest question."""
+
+
+def _history_lines(history: list[dict]) -> str:
+    return "\n".join(f"{t['role']}: {t['text']}" for t in history)
+
+
 def _strip_code_fences(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
@@ -232,6 +269,7 @@ class GeminiService:
                 system_instruction=CATEGORY_SYSTEM,
             ),
         )
+        record_usage(settings.GEMINI_LITE_MODEL, response)
         try:
             slug = json.loads(_strip_code_fences(response.text)).get("content_type", "summary")
         except (json.JSONDecodeError, AttributeError):
@@ -289,6 +327,7 @@ class GeminiService:
                     contents=self._build_contents(url, bundle, content_type),
                     config=config,
                 )
+                record_usage(settings.GEMINI_MODEL, response)
                 parsed = NoteExtraction.model_validate_json(_strip_code_fences(response.text))
                 parsed.content_type = content_type  # enforce Step 1's decision
                 return parsed
@@ -302,6 +341,74 @@ class GeminiService:
 
     async def extract_async(self, url: str, bundle: ContentBundle, content_type: str) -> NoteExtraction:
         return await asyncio.to_thread(self.extract, url, bundle, content_type)
+
+    # ---------- Ask AI: chat grounded in the user's saved notes ----------
+
+    def _select_notes(self, question: str, history: list[dict], index: list[dict]) -> list[str]:
+        prompt_parts = [f"Question: {question}"]
+        if history:
+            prompt_parts.append("Recent conversation:\n" + _history_lines(history))
+        prompt_parts.append("Note index (JSON):\n" + json.dumps(index, ensure_ascii=False))
+        for attempt in (1, 2):
+            try:
+                response = self.client.models.generate_content(
+                    model=settings.GEMINI_LITE_MODEL,
+                    contents=["\n\n".join(prompt_parts)],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        system_instruction=ASK_SELECT_SYSTEM,
+                    ),
+                )
+                record_usage(settings.GEMINI_LITE_MODEL, response)
+                return NoteSelection.model_validate_json(_strip_code_fences(response.text)).note_ids
+            except Exception as e:
+                if attempt == 1:
+                    log.warning("select_notes attempt 1 failed, retrying: %s: %s",
+                                type(e).__name__, e)
+                    time.sleep(2)
+        # Selection is best-effort: an empty list degrades to "nothing found",
+        # which beats failing the whole ask.
+        return []
+
+    async def select_notes(self, question: str, history: list[dict], index: list[dict]) -> list[str]:
+        return await asyncio.to_thread(self._select_notes, question, history, index)
+
+    def _answer_from_notes(self, question: str, history: list[dict], notes: list[dict]) -> GroundedAnswer:
+        prompt_parts = []
+        if history:
+            prompt_parts.append("Conversation so far:\n" + _history_lines(history))
+        for n in notes:
+            prompt_parts.append(
+                f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
+                f" | {n.get('source_domain', '')}\n"
+                f"summary: {n.get('ai_summary', '')}\n"
+                f"data: {json.dumps(n.get('data', {}), ensure_ascii=False, default=str)[:6000]}"
+            )
+        prompt_parts.append(f"Question: {question}")
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                response = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=["\n\n".join(prompt_parts)],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        system_instruction=ASK_ANSWER_SYSTEM,
+                        temperature=0.3,
+                    ),
+                )
+                record_usage(settings.GEMINI_MODEL, response)
+                return GroundedAnswer.model_validate_json(_strip_code_fences(response.text))
+            except Exception as e:
+                last_exc = e
+                if attempt == 1:
+                    log.warning("answer_from_notes attempt 1 failed, retrying: %s: %s",
+                                type(e).__name__, e)
+                    time.sleep(2)
+        raise last_exc
+
+    async def answer_from_notes(self, question: str, history: list[dict], notes: list[dict]) -> GroundedAnswer:
+        return await asyncio.to_thread(self._answer_from_notes, question, history, notes)
 
     # ---------- Search-grounded page lookup (for bot-blocked pages) ----------
 
@@ -328,6 +435,7 @@ class GeminiService:
                         temperature=0.1,
                     ),
                 )
+                record_usage(settings.GEMINI_MODEL, resp)
                 text = (resp.text or "").strip()
                 if not text or "NOT_FOUND" in text[:300]:
                     return None

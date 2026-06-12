@@ -1,10 +1,15 @@
 import asyncio
+import logging
+from datetime import datetime, timezone
 
 import firebase_admin
 from firebase_admin import auth
-from google.cloud.firestore_v1 import AsyncClient, ArrayUnion
+from google.cloud.firestore_v1 import AsyncClient, ArrayUnion, Increment
 
 from config import settings
+from services.usage_meter import UsageMeter
+
+log = logging.getLogger("clipnote.firebase")
 
 _app = None
 _db: AsyncClient | None = None
@@ -33,6 +38,13 @@ async def verify_firebase_token(token: str) -> str:
     get_firebase_app()
     decoded = await asyncio.to_thread(auth.verify_id_token, token)
     return decoded["uid"]
+
+
+async def verify_firebase_token_claims(token: str) -> dict:
+    """Like verify_firebase_token but returns the full decoded claims (uid, email,
+    email_verified, name, …) — used by admin gating, which checks the email."""
+    get_firebase_app()
+    return await asyncio.to_thread(auth.verify_id_token, token)
 
 
 async def get_user_categories(uid: str) -> list[str]:
@@ -79,3 +91,74 @@ async def ensure_user_doc(uid: str, *, display_name: str | None = None,
     }.items() if v is not None}
     if doc:
         await get_db().collection("users").document(uid).set(doc, merge=True)
+
+
+def _split_by_tier(meter: UsageMeter) -> tuple[int, int, int, int]:
+    """Collapse per-model token totals into (main_in, main_out, lite_in, lite_out).
+    Anything that isn't the lite model is billed at main rates (the main model also
+    serves the search-grounded salvage path)."""
+    main_in = main_out = lite_in = lite_out = 0
+    for model, (tin, tout) in meter.by_model.items():
+        if model == settings.GEMINI_LITE_MODEL:
+            lite_in += tin
+            lite_out += tout
+        else:
+            main_in += tin
+            main_out += tout
+    return main_in, main_out, lite_in, lite_out
+
+
+async def flush_usage(user_id: str, meter: UsageMeter) -> None:
+    """Persist a request's Gemini token usage. Two writes:
+      - users/{uid}: lifetime counters (cheap single-doc read powers the dashboard)
+      - system/usage-{date}: global daily token totals (powers 'cost today')
+    Per-tier so cost can be computed from the two models' different prices. Best-effort:
+    a flush failure must never fail the underlying capture/ask."""
+    if meter is None or meter.calls == 0:
+        return
+    main_in, main_out, lite_in, lite_out = _split_by_tier(meter)
+    fields = {
+        "tokens_in_main": Increment(main_in),
+        "tokens_out_main": Increment(main_out),
+        "tokens_in_lite": Increment(lite_in),
+        "tokens_out_lite": Increment(lite_out),
+        "ai_calls": Increment(meter.calls),
+    }
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    db = get_db()
+    try:
+        await db.collection("users").document(user_id).set(
+            {f"lifetime_{k}": v for k, v in fields.items()}, merge=True
+        )
+        await db.collection("system").document(f"usage-{today}").set(
+            {"date": today, **{f"tok_{k}": v for k, v in fields.items()}}, merge=True
+        )
+    except Exception as e:
+        log.warning("usage flush failed for %s: %s: %s", user_id, type(e).__name__, e)
+
+
+async def list_auth_users() -> list[dict]:
+    """Enumerate all Firebase Auth users — the source of truth for identity (email,
+    name, signup time, last sign-in), which the users/{uid} Firestore docs don't carry.
+    Paginates 1000/page; blocking SDK so it runs off the event loop. Timestamps are
+    epoch-millis ints (JSON-safe; the frontend formats them)."""
+    get_firebase_app()
+
+    def _list() -> list[dict]:
+        out: list[dict] = []
+        page = auth.list_users()
+        while page:
+            for u in page.users:
+                meta = u.user_metadata
+                out.append({
+                    "uid": u.uid,
+                    "email": u.email,
+                    "display_name": u.display_name,
+                    "photo_url": u.photo_url,
+                    "created_at": getattr(meta, "creation_timestamp", None),
+                    "last_sign_in": getattr(meta, "last_sign_in_timestamp", None),
+                })
+            page = page.get_next_page()
+        return out
+
+    return await asyncio.to_thread(_list)

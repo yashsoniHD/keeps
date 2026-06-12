@@ -12,6 +12,8 @@ export interface Note {
   cover_image_url: string | null;
   data: Record<string, unknown>;
   acquisition?: string;
+  is_fallback?: boolean; // salvage "bookmark" note — content couldn't be processed
+
   created_at: Timestamp;
   updated_at: Timestamp;
 }

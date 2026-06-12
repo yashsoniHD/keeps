@@ -2,24 +2,128 @@
 
 Auth: Cloud Tasks OIDC token (signature + audience + SA email) — no shared secret.
 Idempotent: a retry of a completed job is a no-op (no double AI spend).
-Permanent failures return 200 with status=failed so Cloud Tasks does not retry them.
+
+Failure ladder (a capture must always produce a note):
+  - BlockedURLError (SSRF guard) → failed, no note, no retry. Permanent by design.
+  - Transient (Gemini 5xx/429, network timeouts) below MAX_TRANSIENT_ATTEMPTS →
+    re-raise as 500 so Cloud Tasks retries with its configured backoff.
+  - Everything else (and transient at the attempt cap) → salvage: a minimal
+    "bookmark" note from whatever metadata is reachable. Only if even the
+    salvage Firestore write fails does the job end up failed.
 """
 import logging
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+import httpx
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
 from google.auth.transport import requests as google_requests
 from google.cloud import firestore as fs
+from google.genai import errors as genai_errors
 from google.oauth2 import id_token
 
 from config import settings
+from models.note import ContentBundle
 from services import sources
-from services.firebase import add_user_category, firestore_safe, get_db, get_user_categories
+from services.firebase import (
+    add_user_category,
+    firestore_safe,
+    flush_usage,
+    get_db,
+    get_user_categories,
+)
 from services.gemini import gemini_service
+from services.net_guard import BlockedURLError, guarded_async_client
+from services.usage_meter import start_metering
 
 router = APIRouter(tags=["process"])
 log = logging.getLogger("clipnote.process")
+
+# A transient failure below this many attempts re-raises as 500 (Cloud Tasks retries,
+# max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
+MAX_TRANSIENT_ATTEMPTS = 3
+
+
+def _is_transient(e: Exception) -> bool:
+    """Failures with a real chance of succeeding on a Cloud Tasks retry."""
+    if isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(e, genai_errors.APIError):
+        return e.code == 429 or e.code >= 500
+    return False
+
+
+def _domain_of(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or url).replace("www.", "")
+    except ValueError:
+        return url
+
+
+async def _link_preview(url: str) -> dict:
+    """Best-effort og:title/og:image fetch for salvage notes. Net-guarded like every
+    other outbound fetch; callers treat any failure as 'no preview'."""
+    headers = {"User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+                              "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 "
+                              "Mobile/15E148 Safari/604.1")}
+    async with guarded_async_client(timeout=8.0, follow_redirects=True) as client:
+        resp = await client.get(url, headers=headers)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text[:300_000], "html.parser")
+    preview: dict = {}
+    if tag := soup.find("meta", property="og:title"):
+        preview["title"] = tag.get("content")
+    elif soup.title and soup.title.string:
+        preview["title"] = soup.title.string.strip()
+    if tag := soup.find("meta", property="og:image"):
+        preview["image"] = tag.get("content")
+    return preview
+
+
+async def _salvage_note(db, *, user_id: str, url: str, source: str,
+                        bundle: ContentBundle | None, now: datetime) -> str:
+    """Writes a minimal bookmark note so the capture is never lost.
+
+    Title/cover tiers: acquired bundle metadata → lightweight og: fetch → bare domain.
+    Enrichment is best-effort; only the Firestore write may fail upward.
+    """
+    domain = _domain_of(url)
+    title: str | None = None
+    cover: str | None = None
+    try:
+        if bundle is not None:
+            meta_title = (bundle.metadata or {}).get("title")
+            if meta_title and str(meta_title) not in (domain, url, "Untitled"):
+                title = str(meta_title)
+            cover = bundle.images[0] if bundle.images else None
+        if not title:
+            preview = await _link_preview(url)
+            title = preview.get("title") or None
+            cover = cover or preview.get("image")
+    except Exception as e:
+        log.warning("salvage enrichment failed, writing URL-only note: %s: %s",
+                    type(e).__name__, e, extra={"url": url, "user_id": user_id})
+
+    note_id = str(uuid.uuid4())
+    await db.collection("notes").document(note_id).set({
+        "user_id": user_id,
+        "content_type": "bookmark",
+        "title": title or domain,
+        "ai_summary": "Saved as a bookmark — this link couldn't be fully processed. "
+                      "Open the source to read it, or retry from the note.",
+        "source_url": url,
+        "source_domain": domain,
+        "source": source,
+        "cover_image_url": cover,
+        "data": {"facts": [{"label": "Source", "value": domain}], "sections": []},
+        "acquisition": "salvage",
+        "is_fallback": True,
+        "created_at": now,
+        "updated_at": now,
+    })
+    return note_id
 
 
 def _verify_oidc(request: Request) -> None:
@@ -58,13 +162,19 @@ async def process_job(job_id: str, request: Request):
     device_content: str | None = job.get("content")
     source: str = job.get("source", "web")
     now = datetime.now(timezone.utc)
+    # This run's attempt number — read before the Increment so the ladder below can
+    # compare against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
+    attempt = (job.get("attempt_count") or 0) + 1
     await job_ref.update({"status": "processing", "attempt_count": fs.Increment(1), "updated_at": now})
 
+    # Meter Gemini token spend for this job; flushed once below regardless of outcome
+    # (a failed/salvaged job still incurred AI cost that must be attributed).
+    meter = start_metering()
+    bundle: ContentBundle | None = None
     try:
         # 1. Acquire content via the source-aware resolver (or trust device-extracted text,
         #    which already bypassed any paywall/login on the user's phone).
         if device_content:
-            from models.note import ContentBundle
             bundle = ContentBundle(kind="text", text=device_content[:30000],
                                    metadata={"title": url, "platform": source},
                                    strategy="device_content")
@@ -106,10 +216,49 @@ async def process_job(job_id: str, request: Request):
                  extra={"job_id": job_id, "user_id": user_id, "url": url, "strategy": bundle.strategy})
         return {"status": "completed", "note_id": note_id}
 
-    except Exception as e:
-        # Mark failed and return 200: retrying would just re-spend on the same failing input.
-        log.error("process job failed: %s: %s", type(e).__name__, e,
-                  extra={"job_id": job_id, "user_id": user_id, "url": url}, exc_info=True)
-        await job_ref.update({"status": "failed", "error": f"{type(e).__name__}: {e}"[:500],
+    except BlockedURLError as e:
+        # SSRF guard or unsupported scheme — permanent and deliberate: no note, no retry.
+        log.warning("blocked URL, failing without a note: %s", e,
+                    extra={"job_id": job_id, "user_id": user_id, "url": url})
+        await job_ref.update({"status": "failed", "error": f"BlockedURL: {e}"[:500],
                               "updated_at": datetime.now(timezone.utc)})
         return {"status": "failed", "error": str(e)[:200]}
+
+    except Exception as e:
+        if _is_transient(e) and attempt < MAX_TRANSIENT_ATTEMPTS:
+            # Let Cloud Tasks retry with its configured backoff. Status returns to
+            # "pending" so the feed keeps showing the in-flight card, not a failure.
+            log.warning("transient failure (attempt %d/%d), re-raising for retry: %s: %s",
+                        attempt, MAX_TRANSIENT_ATTEMPTS, type(e).__name__, e,
+                        extra={"job_id": job_id, "user_id": user_id, "url": url})
+            await job_ref.update({"status": "pending",
+                                  "error": f"transient: {type(e).__name__}: {e}"[:500],
+                                  "updated_at": datetime.now(timezone.utc)})
+            raise HTTPException(500, "Transient failure — Cloud Tasks will retry")
+
+        # Permanent extraction failure (or transient at the cap) → salvage a bookmark
+        # note. The capture is preserved even when the AI pipeline can't deliver.
+        log.error("process job failed, salvaging bookmark note: %s: %s", type(e).__name__, e,
+                  extra={"job_id": job_id, "user_id": user_id, "url": url}, exc_info=True)
+        try:
+            note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
+                                          bundle=bundle, now=datetime.now(timezone.utc))
+            try:
+                await add_user_category(user_id, "bookmark")
+            except Exception:
+                pass  # category chip is cosmetic — never fail the salvage over it
+            await job_ref.update({"status": "completed", "note_id": note_id,
+                                  "error": f"salvaged: {type(e).__name__}: {e}"[:500],
+                                  "updated_at": datetime.now(timezone.utc)})
+            return {"status": "completed", "note_id": note_id, "salvaged": True}
+        except Exception as salvage_exc:
+            # Even the URL-only Firestore write failed — the one path left is "failed".
+            log.error("salvage write failed: %s: %s", type(salvage_exc).__name__, salvage_exc,
+                      extra={"job_id": job_id, "user_id": user_id, "url": url}, exc_info=True)
+            await job_ref.update({"status": "failed", "error": f"{type(e).__name__}: {e}"[:500],
+                                  "updated_at": datetime.now(timezone.utc)})
+            return {"status": "failed", "error": str(e)[:200]}
+
+    finally:
+        # Attribute token spend even when the job re-raised for a Cloud Tasks retry.
+        await flush_usage(user_id, meter)

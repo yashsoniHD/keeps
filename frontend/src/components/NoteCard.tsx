@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Trash2, Loader2, AlertCircle, RotateCcw, X } from "lucide-react";
+import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, X } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
-import { formatDate, formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
+import {
+  formatDate,
+  formatDateShort,
+  noteAccent,
+  noteIcon,
+  noteLabel,
+  sourceLabel,
+} from "@/lib/note-meta";
 
 // Two-tap delete; used inside the note view (NoteHeader), not on feed cards.
 export function DeleteButton({ onDelete }: { onDelete: () => void }) {
@@ -65,7 +72,9 @@ export function NoteCard({ note }: { note: Note }) {
       <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
           src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
-          onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
+          onError={(e) => {
+            e.currentTarget.style.visibility = "hidden";
+          }}
           alt=""
           className="h-3.5 w-3.5 rounded-sm"
         />
@@ -131,21 +140,34 @@ export function NoteRow({ note }: { note: Note }) {
 export function NoteRowList({
   notes,
   jobs = [],
+  queuedJobs = [],
   failedJobs = [],
   onRetry,
   onDismiss,
 }: {
   notes: Note[];
   jobs?: Job[];
+  queuedJobs?: Job[];
   failedJobs?: Job[];
   onRetry?: (job: Job) => void;
   onDismiss?: (jobId: string) => void;
 }) {
+  // Desktop (lg+) packs rows into 2 columns. `divide-y` can't draw the dividers there
+  // (it's a sibling selector, blind to grid geometry), so each child gets its own
+  // border-b instead — minus the bottom row, which would double the container border.
   return (
-    <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card">
-      <div className="divide-y divide-border/70">
+    <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card lg:max-w-6xl">
+      <div className="divide-y divide-border/70 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-border/70 lg:[&>*:nth-last-child(-n+2)]:border-b-0">
         {failedJobs.map((j) => (
-          <FailedRow key={j.id} job={j} onRetry={onRetry ?? (() => {})} onDismiss={onDismiss ?? (() => {})} />
+          <FailedRow
+            key={j.id}
+            job={j}
+            onRetry={onRetry ?? (() => {})}
+            onDismiss={onDismiss ?? (() => {})}
+          />
+        ))}
+        {queuedJobs.map((j) => (
+          <ProcessingRow key={j.id} job={j} label="Waiting for connection" />
         ))}
         {jobs.map((j) => (
           <ProcessingRow key={j.id} job={j} />
@@ -170,17 +192,18 @@ function jobDomain(url: string): string {
   }
 }
 
-export function ProcessingCard({ job }: { job: Job }) {
+export function ProcessingCard({ job, label = "Processing" }: { job: Job; label?: string }) {
   const domain = jobDomain(job.url);
+  const waiting = label !== "Processing"; // offline-queued: held locally, not spinning
   return (
     <div
       className="relative flex min-w-0 animate-pulse flex-col rounded-2xl border border-dashed border-border bg-card p-4"
-      aria-label="Note processing"
+      aria-label={waiting ? "Capture waiting for connection" : "Note processing"}
     >
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-ink-soft">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Processing
+          {waiting ? <WifiOff className="h-3 w-3" /> : <Loader2 className="h-3 w-3 animate-spin" />}
+          {label}
         </span>
         <span className="text-[11px] text-ink-soft">just now</span>
       </div>
@@ -197,7 +220,9 @@ export function ProcessingCard({ job }: { job: Job }) {
       <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
           src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-          onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
+          onError={(e) => {
+            e.currentTarget.style.visibility = "hidden";
+          }}
           alt=""
           className="h-3.5 w-3.5 rounded-sm"
         />
@@ -301,20 +326,21 @@ export function FailedRow({
   );
 }
 
-export function ProcessingRow({ job }: { job: Job }) {
+export function ProcessingRow({ job, label = "Processing" }: { job: Job; label?: string }) {
   const domain = jobDomain(job.url);
+  const waiting = label !== "Processing";
   return (
     <div
       className="flex w-full min-w-0 animate-pulse items-center gap-3.5 px-4 py-3"
-      aria-label="Note processing"
+      aria-label={waiting ? "Capture waiting for connection" : "Note processing"}
     >
       <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-muted text-ink-soft">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        {waiting ? <WifiOff className="h-5 w-5" /> : <Loader2 className="h-5 w-5 animate-spin" />}
       </span>
       <div className="min-w-0 flex-1">
         <div className="h-4 w-2/3 rounded bg-muted" />
         <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-soft">
-          <span className="font-medium">Processing</span>
+          <span className="font-medium">{label}</span>
           <span>·</span>
           <span className="truncate">{sourceLabel(domain)}</span>
         </div>

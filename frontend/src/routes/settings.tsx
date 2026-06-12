@@ -1,7 +1,18 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, LogOut, Trash2, Smartphone, Copy, Check, X, Download } from "lucide-react";
+import {
+  ArrowLeft,
+  LogOut,
+  Trash2,
+  Smartphone,
+  Copy,
+  Check,
+  X,
+  Download,
+  BarChart3,
+} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { ADMIN_EMAILS } from "@/routes/admin";
 import {
   deleteAllNotes,
   createToken,
@@ -10,19 +21,18 @@ import {
   type ShortcutToken,
 } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
+import { isStandalone } from "@/lib/platform";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
-// One-time setup: import frontend/public/clipnote.shortcut into the Shortcuts app (Mac),
-// Share → "Copy iCloud Link", paste it here. iOS only allows true one-tap installs from
+// Published from frontend/public/clipnote.shortcut (import into Shortcuts on the Mac →
+// Share → "Copy iCloud Link"). iOS only allows true one-tap installs from
 // icloud.com/shortcuts links — the shortcuts:// URL scheme rejects self-hosted files
 // ("invalid URL"), and file downloads need manual taps through Safari's download list.
-const SHORTCUT_ICLOUD_LINK = "";
-
-// Installed-PWA context has no Safari download UI; we steer users to Safari for the file.
-const isStandalone = () =>
-  window.matchMedia("(display-mode: standalone)").matches ||
-  ("standalone" in navigator && (navigator as { standalone?: boolean }).standalone === true);
+// The published copy carries the "Paste your Clipnote token" import question (verified
+// via the icloud.com/shortcuts/api/records/<id> payload) — no token is baked in.
+// Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
+const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/a3ff9cb521f54dfcb8d82a5773050848";
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
@@ -94,6 +104,15 @@ function Settings() {
 
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
+          {!!user.email && ADMIN_EMAILS.has(user.email.toLowerCase()) && (
+            <Link
+              to="/admin"
+              className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Admin dashboard
+            </Link>
+          )}
           <button
             onClick={handleSignOut}
             className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
@@ -141,21 +160,45 @@ function ConnectPhone() {
   }, []);
   useEffect(refresh, [refresh]);
 
-  const handleCreate = async () => {
+  // Tap 1: create the token and auto-copy it. The shortcut link is then a real anchor
+  // ("Add the Shortcut") — JS-triggered window.open after an await is outside the user
+  // gesture and iOS blocks it, so opening Shortcuts gets its own explicit tap instead.
+  // Safari clipboard gotcha: writeText after an await is equally outside the gesture —
+  // but ClipboardItem accepts a *promise* for its payload, letting the write start
+  // synchronously inside the gesture while the token is still being minted.
+  const handleAdd = async () => {
     setCreating(true);
     setError(null);
+    setCopied(false);
+    const tokenPromise = createToken("iPhone").then(({ token }) => token);
+    tokenPromise.then(() => refresh()).catch(() => {});
+
+    let clipboardOk = false;
     try {
-      const { token } = await createToken("iPhone");
-      setNewToken(token);
-      // Copy immediately so it's ready to paste into the Shortcut's install prompt.
-      try {
-        await navigator.clipboard.writeText(token);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch {
-        /* clipboard may be blocked until a user gesture — the Copy button is the fallback */
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/plain": tokenPromise.then((t) => new Blob([t], { type: "text/plain" })),
+          }),
+        ]);
+        clipboardOk = true;
       }
-      refresh();
+    } catch {
+      /* clipboard refused — the visible token + Copy button below is the fallback */
+    }
+
+    try {
+      const token = await tokenPromise;
+      setNewToken(token); // stays on screen as the fallback if the paste was missed
+      if (!clipboardOk) {
+        try {
+          await navigator.clipboard.writeText(token);
+          clipboardOk = true;
+        } catch {
+          /* same fallback */
+        }
+      }
+      setCopied(clipboardOk);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't create token.");
     } finally {
@@ -179,73 +222,122 @@ function ConnectPhone() {
 
       <div className="mt-4 space-y-2 text-sm text-ink-soft">
         <p>
-          <strong className="text-ink">Android / desktop:</strong> install Clipnote from the
-          browser menu ("Add to Home screen") — it then appears in your share sheet.
+          <strong className="text-ink">Android / desktop:</strong> install Clipnote from the browser
+          menu ("Add to Home screen") — it then appears in your share sheet.
         </p>
         <p>
-          <strong className="text-ink">iPhone:</strong> create a token, download the ready-made
-          Shortcut, and paste the token once when prompted. Links then share straight to Clipnote
-          from any app.
+          <strong className="text-ink">iPhone:</strong> one tap sets up a Shortcut so any app's
+          share sheet can save straight to Clipnote.
         </p>
       </div>
 
-      {newToken ? (
+      {!newToken && (
+        <button
+          type="button"
+          onClick={handleAdd}
+          disabled={creating}
+          className="mt-4 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {creating ? "Setting up…" : "Add iPhone shortcut"}
+        </button>
+      )}
+
+      {newToken && (
         <div className="mt-4 rounded-2xl border border-border bg-paper p-4">
-          <div className="text-xs uppercase tracking-wider text-ink-soft">
-            Your token — shown only once
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs text-ink">
-              {newToken}
-            </code>
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-ink-soft hover:text-ink"
-              aria-label="Copy token"
-            >
-              {copied ? <Check className="h-4 w-4 text-itinerary" /> : <Copy className="h-4 w-4" />}
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-ink-soft">
-            {copied ? "Copied to your clipboard ✓ — keep it handy for step 2." : "Tap copy, then keep it handy for step 2."}
-          </p>
-
-          <a
-            href={SHORTCUT_ICLOUD_LINK || "/clipnote.shortcut"}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper transition-opacity hover:opacity-90"
-          >
-            <Download className="h-4 w-4" />
-            {SHORTCUT_ICLOUD_LINK ? "Add the Shortcut" : "Download the Shortcut"}
-          </a>
-
           {SHORTCUT_ICLOUD_LINK ? (
-            <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
-              <li>Tap <strong className="text-ink">Add the Shortcut</strong> — it opens the Shortcuts app.</li>
-              <li>Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when asked <em>"Paste your Clipnote token"</em>.</li>
-              <li>
-                Done. In any app: <strong className="text-ink">Share</strong> →{" "}
-                <strong className="text-ink">Save to Clipnote</strong>.
-              </li>
-            </ol>
+            <>
+              <a
+                href={SHORTCUT_ICLOUD_LINK}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+              >
+                <Download className="h-4 w-4" />
+                Add the Shortcut
+              </a>
+              <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
+                <li>
+                  Tap <strong className="text-ink">Add the Shortcut</strong> — the Shortcuts app
+                  opens.
+                </li>
+                <li>
+                  Tap <strong className="text-ink">Add Shortcut</strong>, then{" "}
+                  <strong className="text-ink">paste when asked</strong> — your token is already
+                  copied.
+                </li>
+                <li>
+                  Done. In any app: <strong className="text-ink">Share</strong> →{" "}
+                  <strong className="text-ink">Save to Clipnote</strong>.
+                </li>
+              </ol>
+            </>
           ) : (
-            <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
-              <li>Tap <strong className="text-ink">Download the Shortcut</strong> in Safari on your iPhone.</li>
-              <li>Tap the <strong className="text-ink">downloads (↓) icon</strong> in Safari's address bar, then tap <strong className="text-ink">Save to Clipnote.shortcut</strong> — the Shortcuts app opens.</li>
-              <li>Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when asked <em>"Paste your Clipnote token"</em>.</li>
-              <li>
-                Done. In any app: <strong className="text-ink">Share</strong> →{" "}
-                <strong className="text-ink">Save to Clipnote</strong>.
-              </li>
-            </ol>
+            <>
+              <a
+                href="/clipnote.shortcut"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+              >
+                <Download className="h-4 w-4" />
+                Download the Shortcut
+              </a>
+              <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
+                <li>
+                  Tap <strong className="text-ink">Download the Shortcut</strong> in Safari on your
+                  iPhone.
+                </li>
+                <li>
+                  Tap the <strong className="text-ink">downloads (↓) icon</strong> in Safari's
+                  address bar, then tap{" "}
+                  <strong className="text-ink">Save to Clipnote.shortcut</strong> — the Shortcuts
+                  app opens.
+                </li>
+                <li>
+                  Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when
+                  asked <em>"Paste your Clipnote token"</em>.
+                </li>
+                <li>
+                  Done. In any app: <strong className="text-ink">Share</strong> →{" "}
+                  <strong className="text-ink">Save to Clipnote</strong>.
+                </li>
+              </ol>
+              {isStandalone() && (
+                <p className="mt-3 text-xs text-ink-soft">
+                  You're in the installed app, where iPhone can't show downloads — open{" "}
+                  <strong className="text-ink">{window.location.host}/settings</strong> in Safari
+                  for this step.
+                </p>
+              )}
+            </>
           )}
-          {isStandalone() && !SHORTCUT_ICLOUD_LINK && (
-            <p className="mt-3 text-xs text-ink-soft">
-              You're in the installed app, where iPhone can't show downloads — open{" "}
-              <strong className="text-ink">{window.location.host}/settings</strong> in Safari for
-              this step.
+
+          <div className="mt-4 border-t border-border pt-3">
+            <div className="text-xs uppercase tracking-wider text-ink-soft">
+              Your token — shown only once
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs text-ink">
+                {newToken}
+              </code>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-ink-soft hover:text-ink"
+                aria-label="Copy token"
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 text-itinerary" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-ink-soft">
+              {copied
+                ? "Copied to your clipboard ✓ — just paste when the Shortcut asks."
+                : "Tap copy, then paste when the Shortcut asks."}
             </p>
-          )}
+          </div>
+
           <button
             type="button"
             onClick={() => setNewToken(null)}
@@ -254,15 +346,6 @@ function ConnectPhone() {
             Done — hide token
           </button>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={creating}
-          className="mt-4 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {creating ? "Creating…" : "Create iPhone token"}
-        </button>
       )}
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 

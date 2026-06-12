@@ -33,6 +33,10 @@ class Settings:
     MAX_NOTES_PER_USER: int = int(os.getenv("MAX_NOTES_PER_USER", "500"))
     MAX_INGESTS_PER_USER_PER_DAY: int = int(os.getenv("MAX_INGESTS_PER_USER_PER_DAY", "50"))
     DAILY_GLOBAL_NOTE_CAP: int = int(os.getenv("DAILY_GLOBAL_NOTE_CAP", "1000"))
+    MAX_ASKS_PER_USER_PER_DAY: int = int(os.getenv("MAX_ASKS_PER_USER_PER_DAY", "30"))
+    DAILY_GLOBAL_ASK_CAP: int = int(os.getenv("DAILY_GLOBAL_ASK_CAP", "300"))
+    # How many full notes get sent to the answering model per ask.
+    ASK_MAX_GROUNDED_NOTES: int = int(os.getenv("ASK_MAX_GROUNDED_NOTES", "12"))
 
     # Direct-URI video analysis cap. YouTube videos longer than this fall back to the
     # transcript path instead of being sent to Gemini whole.
@@ -55,6 +59,26 @@ class Settings:
     # Imagen covers DEFERRED for MVP. Covers come from og:image → thumbnail → gradient.
     ENABLE_IMAGEN: bool = os.getenv("ENABLE_IMAGEN", "false").lower() == "true"
     VISUAL_CONTENT_TYPES: set[str] = {"recipe", "product", "itinerary", "travel", "place", "fashion", "workout"}
+
+    # --- Admin dashboard ---
+    # Emails allowed to read /api/admin/stats (comma-separated). Gating is by verified
+    # Firebase email, not uid, so it's set-and-forget across re-signups.
+    ADMIN_EMAILS: set[str] = {
+        e.strip().lower()
+        for e in os.getenv("ADMIN_EMAILS", "yashsoni102@gmail.com").split(",")
+        if e.strip()
+    }
+
+    # Vertex AI Gemini token pricing, USD per 1,000,000 tokens. We store raw token
+    # counts (immutable facts) and derive cost at read-time from these, so a price
+    # change re-prices history correctly. Paid-tier Standard rates (confirmed against
+    # the live pricing page, 2026-06-12); output includes thinking tokens. Lite input
+    # uses the text/image/video rate ($0.25; audio would be $0.50 — we send no audio).
+    GEMINI_PRICE_IN: float = float(os.getenv("GEMINI_PRICE_IN", "1.50"))
+    GEMINI_PRICE_OUT: float = float(os.getenv("GEMINI_PRICE_OUT", "9.00"))
+    GEMINI_LITE_PRICE_IN: float = float(os.getenv("GEMINI_LITE_PRICE_IN", "0.25"))
+    GEMINI_LITE_PRICE_OUT: float = float(os.getenv("GEMINI_LITE_PRICE_OUT", "1.50"))
+    USD_TO_INR: float = float(os.getenv("USD_TO_INR", "84.0"))
 
 
 settings = Settings()

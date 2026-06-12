@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ingest } from "@/lib/api";
+import { enqueueCapture, isQueueableError } from "@/lib/capture-queue";
 
 // PWA share-sheet target (manifest.json share_target). Platforms are inconsistent about
 // which field carries the link: Android often puts it in `text`, iOS in `url`.
@@ -48,6 +49,8 @@ function SharePage() {
 
   // Kick off the capture, then drop the user into the feed where the processing card
   // (driven by the new job doc) provides the feedback — no separate blocking screen.
+  // A share that can't reach the backend (offline, 5xx) is parked in the capture queue
+  // instead of vanishing; the feed shows it as "waiting" and replays it when online.
   useEffect(() => {
     if (!user || fired.current) return;
     if (!sharedUrl) {
@@ -55,7 +58,11 @@ function SharePage() {
       return;
     }
     fired.current = true;
-    ingest(sharedUrl).finally(() => navigate({ to: "/" }));
+    ingest(sharedUrl)
+      .catch((e) => {
+        if (isQueueableError(e)) enqueueCapture(sharedUrl);
+      })
+      .finally(() => navigate({ to: "/" }));
   }, [user, sharedUrl, navigate]);
 
   return (

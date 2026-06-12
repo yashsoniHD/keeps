@@ -5,6 +5,7 @@ import {
   orderBy,
   limit,
   getDoc,
+  setDoc,
   deleteDoc,
   doc,
   onSnapshot,
@@ -93,4 +94,15 @@ export function watchPendingJobs(
 export async function getUserCategories(userId: string): Promise<string[]> {
   const snap = await getDoc(doc(db, "users", userId));
   return snap.exists() ? ((snap.data().categories ?? []) as string[]).sort() : [];
+}
+
+// Getting-started guide flag lives on the user doc (not localStorage) so dismissing
+// it once sticks across devices and reinstalls.
+export async function getOnboardingDone(userId: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, "users", userId));
+  return snap.exists() && snap.data().onboarding_done === true;
+}
+
+export async function setOnboardingDone(userId: string): Promise<void> {
+  await setDoc(doc(db, "users", userId), { onboarding_done: true }, { merge: true });
 }
