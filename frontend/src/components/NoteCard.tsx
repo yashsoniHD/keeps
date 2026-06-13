@@ -43,7 +43,15 @@ export function DeleteButton({ onDelete }: { onDelete: () => void }) {
 // Cover image with a built-in fallback: the type-accented icon placeholder sits behind
 // the image, so a missing OR broken cover reveals an intentional visual rather than a
 // blank box. Every card gets *something* — a feed of dead tiles invites no return.
-export function CoverThumb({ note, className = "" }: { note: Note; className?: string }) {
+export function CoverThumb({
+  note,
+  className = "",
+  onImageError,
+}: {
+  note: Note;
+  className?: string;
+  onImageError?: () => void;
+}) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
   return (
@@ -59,11 +67,22 @@ export function CoverThumb({ note, className = "" }: { note: Note; className?: s
           className="absolute inset-0 h-full w-full object-cover"
           onError={(e) => {
             e.currentTarget.style.display = "none"; // reveal the placeholder behind it
+            onImageError?.(); // let the card drop the now-redundant label icon
           }}
         />
       )}
     </div>
   );
+}
+
+// A note "has a cover" only if a URL exists AND it actually loaded — a broken image
+// reveals CoverThumb's placeholder icon, so the label must not repeat it.
+function useCoverPresent(note: Note) {
+  const [broken, setBroken] = useState(false);
+  return {
+    hasCover: Boolean(note.cover_image_url) && !broken,
+    onImageError: () => setBroken(true),
+  };
 }
 
 // Uniform card: no cover preview — every note gets the same anatomy (icon chip + date,
@@ -72,6 +91,7 @@ export function CoverThumb({ note, className = "" }: { note: Note; className?: s
 export function NoteCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
+  const { hasCover, onImageError } = useCoverPresent(note);
   const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
 
   return (
@@ -82,11 +102,15 @@ export function NoteCard({ note }: { note: Note }) {
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <CoverThumb note={note} className="h-9 w-9 shrink-0 rounded-lg" />
+          <CoverThumb
+            note={note}
+            className="h-9 w-9 shrink-0 rounded-lg"
+            onImageError={onImageError}
+          />
           <span className={`inline-flex min-w-0 items-center gap-1 text-xs font-medium ${accent.text}`}>
             {/* The thumb already shows the icon when there's no cover — only repeat it
-                next to the label when a cover image takes the thumb's place. */}
-            {note.cover_image_url && <Icon className="h-3.5 w-3.5 shrink-0" />}
+                next to the label when a cover image actually takes the thumb's place. */}
+            {hasCover && <Icon className="h-3.5 w-3.5 shrink-0" />}
             <span className="truncate">{noteLabel(note.content_type)}</span>
           </span>
         </div>
@@ -121,6 +145,7 @@ export function NoteCard({ note }: { note: Note }) {
 export function NoteRow({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
+  const { hasCover, onImageError } = useCoverPresent(note);
 
   return (
     <Link
@@ -131,13 +156,14 @@ export function NoteRow({ note }: { note: Note }) {
       <CoverThumb
         note={note}
         className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60"
+        onImageError={onImageError}
       />
 
       <div className="min-w-0 flex-1">
         <h3 className="text-base font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
           <span className={`inline-flex shrink-0 items-center gap-1 font-medium ${accent.text}`}>
-            {note.cover_image_url && <Icon className="h-3.5 w-3.5 shrink-0" />}
+            {hasCover && <Icon className="h-3.5 w-3.5 shrink-0" />}
             {noteLabel(note.content_type)}
           </span>
           <span className="shrink-0">·</span>
