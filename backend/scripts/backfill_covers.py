@@ -1,24 +1,28 @@
-"""One-off backfill: generate an AI cover for existing notes that have no cover image.
+"""One-off backfill to fix note covers, mirroring the worker's own chain. Two tiers:
 
-New captures generate covers in the worker (process.py); this catches notes saved
-before that, or whose source yielded no image. Idempotent — only touches notes still
-missing `cover_image_url`.
+  1. RE-HOST (free): a note whose cover points at an external URL (e.g. an Instagram
+     CDN thumbnail) gets the real image copied into our durable covers bucket via
+     persist_cover — preserving the actual cover before the hot-linked, time-signed URL
+     expires and the note goes blank. New captures already do this; old ones predate it.
 
-PAID OPERATION. Each note is one Imagen image (~$IMAGEN_PRICE_PER_IMAGE). Unlike the
-sibling backfill_embeddings (≈free), this defaults to a DRY RUN and prints a cost
-estimate; you must pass --apply to actually generate. It bypasses the per-user/global
-daily caps (those rate-limit live ingest) — control spend with --limit / --user instead.
-It also force-enables generation in-process, so it works even while the live service
-keeps ENABLE_IMAGEN=false.
+  2. GENERATE (paid): a note with no cover at all, or whose external cover is already
+     dead/unfetchable, gets an Imagen cover (the frontend gradient hero is the fallback
+     if generation is off/fails).
 
-Prereqs (same as enabling Imagen): IMAGEN_MODEL + region verified against the live Vertex
-catalog, an Imagen quota increase, and COVERS_BUCKET set. Run from backend/ with ADC
-pointing at the project.
+Idempotent: notes already on a durable covers-bucket URL are skipped. Re-hosting is free
+and on by default; Imagen is paid, so it only runs with --apply, can be turned off with
+--no-imagen, and is bounded by --limit. Bypasses the live per-user/global daily caps
+(those rate-limit ingest). Force-enables generation in-process, so it works even while
+the live service keeps ENABLE_IMAGEN=false.
+
+Imagen prereqs: IMAGEN_MODEL + region verified against the live Vertex catalog, a quota
+increase, and COVERS_BUCKET set. Run from backend/ with ADC pointing at the project.
 
 Usage:
-    python -m scripts.backfill_covers                  # dry run: count + cost estimate
-    python -m scripts.backfill_covers --apply          # generate for ALL coverless notes
-    python -m scripts.backfill_covers --apply --limit 20
+    python -m scripts.backfill_covers                       # dry run: plan + cost estimate
+    python -m scripts.backfill_covers --apply               # re-host + generate
+    python -m scripts.backfill_covers --apply --no-imagen   # only re-host (free, no spend)
+    python -m scripts.backfill_covers --apply --limit 20    # cap Imagen generations
     python -m scripts.backfill_covers --apply --user <uid>
 """
 import argparse
@@ -29,6 +33,7 @@ from datetime import datetime, timezone
 from google.cloud.firestore_v1 import Increment
 
 from config import settings
+from services.covers import persist_cover
 from services.firebase import get_db, record_image_generated
 from services.imagen import generate_cover
 
@@ -62,66 +67,98 @@ async def _bump_daily(db, n: int) -> None:
         log.warning("daily image meter bump failed: %s: %s", type(e).__name__, e)
 
 
-async def run(apply: bool, limit: int, user: str | None) -> None:
+def _is_durable(url: str | None) -> bool:
+    return bool(url) and settings.COVERS_BUCKET and settings.COVERS_BUCKET in url
+
+
+async def run(apply: bool, limit: int, user: str | None, do_imagen: bool) -> None:
     if apply:
         # Operator deliberately ran a backfill — generate regardless of the live flag.
-        settings.ENABLE_IMAGEN = True
+        settings.ENABLE_IMAGEN = do_imagen
         if not settings.COVERS_BUCKET:
-            log.error("COVERS_BUCKET is not set — cannot upload generated covers. Aborting.")
+            log.error("COVERS_BUCKET is not set — cannot store covers. Aborting.")
             return
 
     db = get_db()
     col = db.collection("notes")
     query = col.where("user_id", "==", user) if user else col
 
-    scanned = eligible = generated = failed = 0
+    scanned = durable = rehost_n = rehost_done = imagen_n = imagen_done = failed = 0
     async for doc in query.stream():
         scanned += 1
         d = doc.to_dict() or {}
-        if d.get("cover_image_url"):
+        url = d.get("cover_image_url")
+
+        if _is_durable(url):
+            durable += 1
             continue
-        eligible += 1
-        if limit and generated >= limit:
+
+        # Tier 1 — external cover still present: try to re-host it durably (free).
+        if url:
+            rehost_n += 1
+            if apply:
+                try:
+                    new = await persist_cover(url)
+                    if new:
+                        await doc.reference.update(
+                            {"cover_image_url": new, "updated_at": datetime.now(timezone.utc)}
+                        )
+                        rehost_done += 1
+                        log.info("re-hosted %s → %s", doc.id, new)
+                        continue
+                    # persist_cover returned None → source is dead/unfetchable; fall to Imagen.
+                    log.info("re-host failed for %s (dead source) → generating", doc.id)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("re-host error %s: %s: %s", doc.id, type(e).__name__, e)
+            else:
+                continue  # dry run: counted as a re-host candidate
+
+        # Tier 2 — no cover (or re-host just failed): generate one with Imagen (paid).
+        imagen_n += 1
+        if not (apply and do_imagen):
             continue
-        if not apply:
+        if limit and imagen_done >= limit:
             continue
         try:
-            url = await generate_cover(_cover_prompt(d), d.get("content_type", ""))
-            if not url:
+            gen = await generate_cover(_cover_prompt(d), d.get("content_type", ""))
+            if not gen:
                 failed += 1
-                log.warning("no cover generated for note %s (filtered/empty)", doc.id)
+                log.warning("no cover generated for %s (filtered/empty)", doc.id)
                 continue
             await doc.reference.update(
-                {"cover_image_url": url, "updated_at": datetime.now(timezone.utc)}
+                {"cover_image_url": gen, "updated_at": datetime.now(timezone.utc)}
             )
             await record_image_generated(d.get("user_id", ""))
-            generated += 1
-            log.info("note %s → %s", doc.id, url)
+            imagen_done += 1
+            log.info("generated %s → %s", doc.id, gen)
         except Exception as e:  # noqa: BLE001
             failed += 1
-            log.warning("failed to backfill note %s: %s: %s", doc.id, type(e).__name__, e)
+            log.warning("generate error %s: %s: %s", doc.id, type(e).__name__, e)
 
-    if apply and generated:
-        await _bump_daily(db, generated)
+    if apply and imagen_done:
+        await _bump_daily(db, imagen_done)
 
     if not apply:
-        count = min(limit, eligible) if limit else eligible
-        est = count * settings.IMAGEN_PRICE_PER_IMAGE
+        gen_count = min(limit, imagen_n) if limit else imagen_n
+        est = (gen_count if do_imagen else 0) * settings.IMAGEN_PRICE_PER_IMAGE
         log.info(
-            "DRY RUN: scanned=%d coverless=%d — would generate %d, est. cost ≈ $%.2f. "
-            "Re-run with --apply to generate.", scanned, eligible, count, est,
+            "DRY RUN: scanned=%d  already-durable=%d  to re-host (free)=%d  "
+            "to generate%s=%d  → est. cost ≈ $%.2f. Re-run with --apply.",
+            scanned, durable, rehost_n, "" if do_imagen else " (disabled)", gen_count, est,
         )
     else:
-        log.info("done: scanned=%d coverless=%d generated=%d failed=%d",
-                 scanned, eligible, generated, failed)
+        log.info("done: scanned=%d durable=%d re-hosted=%d generated=%d failed=%d",
+                 scanned, durable, rehost_done, imagen_done, failed)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true",
-                        help="actually generate (default is a dry-run cost estimate)")
+                        help="actually write (default is a dry-run plan + cost estimate)")
+    parser.add_argument("--no-imagen", action="store_true",
+                        help="only re-host external covers durably; skip paid Imagen generation")
     parser.add_argument("--limit", type=int, default=0,
-                        help="max covers to generate this run (0 = no limit)")
+                        help="max Imagen covers to generate this run (0 = no limit)")
     parser.add_argument("--user", default=None, help="restrict to one user uid")
     args = parser.parse_args()
-    asyncio.run(run(args.apply, args.limit, args.user))
+    asyncio.run(run(args.apply, args.limit, args.user, do_imagen=not args.no_imagen))
