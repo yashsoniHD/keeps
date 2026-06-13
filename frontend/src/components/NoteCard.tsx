@@ -88,7 +88,7 @@ export function NoteCard({ note }: { note: Note }) {
         <span className="shrink-0 text-[11px] text-ink-soft">{formatDateShort(note.created_at)}</span>
       </div>
 
-      <h3 className="mt-3 min-h-[2.5em] font-serif text-xl font-semibold leading-tight text-ink line-clamp-2">
+      <h3 className="mt-3 min-h-[2.5em] font-serif text-2xl leading-[1.15] text-ink line-clamp-2">
         {note.title}
       </h3>
       <p className="mt-2 min-h-[4.3em] text-sm text-ink-soft line-clamp-3">{note.ai_summary}</p>
