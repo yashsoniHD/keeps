@@ -105,7 +105,7 @@ function PublicNoteHeader({ note }: { note: Note }) {
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
           <Sparkles className="h-3.5 w-3.5" />
         </span>
-        Clip Note
+        Clipnote
       </Link>
       <div className="flex flex-wrap items-center gap-2">
         <TypeBadge type={note.content_type} size="md" />
@@ -122,7 +122,7 @@ function PublicSignupCTA() {
   return (
     <div className="mt-12 flex flex-col items-start gap-3 rounded-3xl border border-border bg-card p-6 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p className="font-serif text-xl text-ink">Saved with Clip Note</p>
+        <p className="font-serif text-xl text-ink">Saved with Clipnote</p>
         <p className="mt-1 text-sm text-ink-soft">
           Turn any link (recipe, video, product, article) into a structured note you'll
           actually re-read.

@@ -65,32 +65,44 @@ export async function updateNote(
 
 // The taxonomy joined with per-type note counts. Rename/delete re-tag the affected
 // notes server-side (Firestore forbids client writes to notes/), so they live here.
-export async function listCategories(): Promise<{ slug: string; count: number }[]> {
+export interface CategoryInfo {
+  slug: string;
+  count: number;
+  icon?: string; // pinned icon name (see note-meta CATEGORY_ICONS); absent = auto-derived
+  palette?: number; // pinned palette index; absent = auto-derived
+}
+
+export async function listCategories(): Promise<CategoryInfo[]> {
   const res = await apiFetch("/api/categories");
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't load your categories."), res.status);
   return res.json();
 }
 
-export async function createCategory(name: string): Promise<{ slug: string; count: number }> {
+export async function createCategory(
+  name: string,
+  meta?: { icon?: string; palette?: number },
+): Promise<CategoryInfo> {
   const res = await apiFetch("/api/categories", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, ...meta }),
   });
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't create the category."), res.status);
   return res.json();
 }
 
-export async function renameCategory(
+// Rename and/or re-skin a category. Any subset of {new_name, icon, palette} may be sent;
+// renaming re-tags the affected notes server-side and moves the icon/colour to the new slug.
+export async function updateCategory(
   slug: string,
-  newName: string,
-): Promise<{ slug: string; count: number }> {
+  patch: { new_name?: string; icon?: string; palette?: number },
+): Promise<CategoryInfo> {
   const res = await apiFetch(`/api/categories/${encodeURIComponent(slug)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ new_name: newName }),
+    body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't rename the category."), res.status);
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the category."), res.status);
   return res.json();
 }
 

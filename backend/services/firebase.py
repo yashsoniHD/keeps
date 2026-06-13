@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import firebase_admin
 from firebase_admin import auth
 from google.cloud.firestore_v1 import AsyncClient, ArrayRemove, ArrayUnion, Increment
+from google.cloud.firestore_v1.transforms import DELETE_FIELD
 
 from config import settings
 from services.usage_meter import UsageMeter
@@ -98,6 +99,59 @@ async def remove_user_category(uid: str, slug: str) -> None:
     await get_db().collection("users").document(uid).set(
         {"categories": ArrayRemove([slug])}, merge=True
     )
+
+
+async def get_category_meta(uid: str) -> dict[str, dict]:
+    """The user's per-category icon/colour overrides from users/{uid}.category_meta —
+    a map of slug -> {icon?, palette?}. One doc read."""
+    snap = await get_db().collection("users").document(uid).get()
+    if not snap.exists:
+        return {}
+    return snap.to_dict().get("category_meta", {}) or {}
+
+
+async def set_category_meta(
+    uid: str, slug: str, icon: str | None = None, palette: int | None = None
+) -> None:
+    """Pin an icon and/or palette for a category. Only the provided fields are written
+    (deep-merge), so other categories' overrides — and the slug's other field — are left
+    intact. Whichever of icon/palette is None is simply not touched."""
+    entry: dict = {}
+    if icon is not None:
+        entry["icon"] = icon
+    if palette is not None:
+        entry["palette"] = palette
+    if not entry:
+        return
+    await get_db().collection("users").document(uid).set(
+        {"category_meta": {slug: entry}}, merge=True
+    )
+
+
+async def move_category_meta(uid: str, old_slug: str, new_slug: str) -> None:
+    """Carry a category's icon/colour override from one slug to another on rename, then
+    drop the old entry. No-op when the slug is unchanged."""
+    if old_slug == new_slug:
+        return
+    meta = await get_category_meta(uid)
+    entry = meta.get(old_slug)
+    updates: dict = {f"category_meta.{old_slug}": DELETE_FIELD}
+    if entry:
+        updates[f"category_meta.{new_slug}"] = entry
+    try:
+        await get_db().collection("users").document(uid).update(updates)
+    except Exception:
+        pass  # user doc/field may not exist yet — nothing to migrate
+
+
+async def remove_category_meta(uid: str, slug: str) -> None:
+    """Drop a category's icon/colour override (on delete)."""
+    try:
+        await get_db().collection("users").document(uid).update(
+            {f"category_meta.{slug}": DELETE_FIELD}
+        )
+    except Exception:
+        pass  # field may not exist; nothing to clean up
 
 
 async def count_notes_by_type(uid: str) -> dict[str, int]:

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, X } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
@@ -87,13 +87,33 @@ function useCoverPresent(note: Note) {
 }
 
 // Uniform card: no cover preview — every note gets the same anatomy (icon chip + date,
-// title, summary, source footer). min-heights on title/summary reserve their full
-// line-clamp space so cards stay equal-sized even when text runs short.
+// title, summary, source footer). The card hugs its content (no min-heights), so a short
+// title doesn't bake in dead space; the summary clamp adapts to the title's line count to
+// keep total height balanced — a 2-line title gets a 2-line preview, a 1-line title gets 3.
 export function NoteCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
   const { hasCover, onImageError } = useCoverPresent(note);
   const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
+
+  // Measure how many lines the (already 2-line-clamped) title actually renders to. Title
+  // wrapping changes with card width — which shifts across the responsive 1–4 col grid —
+  // so re-measure via ResizeObserver, not just once on mount.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [titleLines, setTitleLines] = useState(1);
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight);
+      if (lh > 0) setTitleLines(Math.max(1, Math.round(el.offsetHeight / lh)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [note.title]);
+  const summaryClamp = titleLines >= 2 ? "line-clamp-2" : "line-clamp-3";
 
   return (
     <Link
@@ -120,12 +140,15 @@ export function NoteCard({ note }: { note: Note }) {
         <span className="shrink-0 text-[11px] text-ink-soft">{formatDateShort(note.created_at)}</span>
       </div>
 
-      <h3 className="mt-3 min-h-[2.5em] font-serif text-2xl leading-[1.15] text-ink line-clamp-2">
+      <h3
+        ref={titleRef}
+        className="mt-2.5 font-serif text-2xl leading-[1.15] text-ink line-clamp-2"
+      >
         {note.title}
       </h3>
-      <p className="mt-2 min-h-[4.3em] text-sm text-ink-soft line-clamp-3">{note.ai_summary}</p>
+      <p className={`mt-1.5 text-sm text-ink-soft ${summaryClamp}`}>{note.ai_summary}</p>
 
-      <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
+      <div className="mt-auto flex items-center gap-2 pt-3 text-[11px] text-ink-soft">
         <img
           src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
           onError={(e) => {
@@ -165,14 +188,12 @@ export function NoteRow({ note }: { note: Note }) {
       )}
 
       <div className="min-w-0 flex-1">
-        <h3 className="text-base font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
+        <h3 className="text-sm font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
           <span className={`inline-flex shrink-0 items-center gap-1 font-medium ${accent.text}`}>
             <Icon className="h-3.5 w-3.5 shrink-0" />
             {noteLabel(note.content_type)}
           </span>
-          <span className="shrink-0">·</span>
-          <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
           <span className="shrink-0">·</span>
           <span className="shrink-0">{formatDateShort(note.created_at)}</span>
         </div>

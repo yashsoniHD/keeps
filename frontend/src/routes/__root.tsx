@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, Link, createRootRouteWithContext, useRouter } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
+import { CategoryMetaProvider } from "@/contexts/category-meta";
 import { ThemeProvider } from "@/lib/theme";
 
 function NotFoundComponent() {
@@ -68,9 +69,11 @@ function RootComponent() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <Outlet />
-        </QueryClientProvider>
+        <CategoryMetaProvider>
+          <QueryClientProvider client={queryClient}>
+            <Outlet />
+          </QueryClientProvider>
+        </CategoryMetaProvider>
       </AuthProvider>
     </ThemeProvider>
   );

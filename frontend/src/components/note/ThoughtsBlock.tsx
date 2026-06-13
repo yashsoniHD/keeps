@@ -21,12 +21,17 @@ export function ThoughtsBlock({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef(value);
 
-  // Reset when navigating between notes.
+  // Adopt the stored value only when navigating between notes — keyed on noteId, NOT
+  // value. A successful save calls onPatch, which updates the parent note and flows a new
+  // `value` back down; if this re-ran on `value`, it would overwrite text the user typed
+  // while the save was in flight (lost characters + cursor jump). The note's `value` is
+  // stable by the time a given note is mounted, so reading it on noteId change is safe.
   useEffect(() => {
     setText(value);
     lastSaved.current = value;
     setState("idle");
-  }, [noteId, value]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteId]);
 
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
 

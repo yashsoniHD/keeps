@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AlertCircle, ChevronLeft, Loader2, Send, WandSparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useCategoryMeta } from "@/contexts/category-meta";
 import { ask, ApiError, type AskCitation } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
@@ -56,6 +57,7 @@ function CitationChip({ citation }: { citation: AskCitation }) {
 
 function AskPage() {
   const { user, loading } = useAuth();
+  useCategoryMeta(); // reflect category icon/colour overrides on citation chips
   const navigate = useNavigate();
   const { q, send: autoSend } = Route.useSearch();
   const [messages, setMessages] = useState<Message[]>([]);

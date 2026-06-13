@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { getNote, getAnnotation, deleteNote } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
+import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
 import type { Note } from "@/lib/types";
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/notes/$noteId")({ component: NoteDetail }
 function NoteDetail() {
   const { noteId } = Route.useParams();
   const { user, loading } = useAuth();
+  useCategoryMeta(); // reflect category icon/colour overrides on the note view + badge
   const navigate = useNavigate();
   const [note, setNote] = useState<Note | null>(null);
   const [notFound, setNotFound] = useState(false);

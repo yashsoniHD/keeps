@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Search,
@@ -14,6 +15,7 @@ import {
   Layers,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useCategoryMeta } from "@/contexts/category-meta";
 import {
   watchNotes,
   watchPendingJobs,
@@ -31,6 +33,7 @@ import {
   type QueuedCapture,
 } from "@/lib/capture-queue";
 import { groupNotesByDate, noteLabel, sourceLabel } from "@/lib/note-meta";
+import { isIOS } from "@/lib/platform";
 import { FOCUS_RING } from "@/lib/ui";
 import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -49,6 +52,7 @@ const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
 
 function Feed() {
   const { user, loading } = useAuth();
+  useCategoryMeta(); // re-render the feed when category icon/colour overrides load or change
   const navigate = useNavigate();
   const [notes, setNotes] = useState<Note[]>([]);
   const [notesReady, setNotesReady] = useState(false);
@@ -341,6 +345,12 @@ function Feed() {
                       setSearchOpen(false);
                     }
                   }}
+                  onBlur={() => {
+                    // Dismissing the keyboard blurs the input — collapse the bar so an
+                    // empty search doesn't linger. A typed query stays open, since
+                    // scrolling results on mobile also blurs and shouldn't wipe them.
+                    if (!query.trim()) setSearchOpen(false);
+                  }}
                   placeholder="Search your notes"
                   className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
                 />
@@ -385,12 +395,15 @@ function Feed() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setSearchOpen(true)}
-                  aria-label="Search notes"
-                  title="Search"
+                  onClick={() => {
+                    setPendingUrl("");
+                    setShowAdd(true);
+                  }}
+                  aria-label="Add note"
+                  title="New note"
                   className={ICON_BTN}
                 >
-                  <Search className="h-4 w-4" />
+                  <Plus className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
@@ -563,14 +576,11 @@ function Feed() {
 
       <button
         type="button"
-        onClick={() => {
-          setPendingUrl("");
-          setShowAdd(true);
-        }}
-        aria-label="Add note"
+        onClick={() => setSearchOpen(true)}
+        aria-label="Search notes"
         className="fixed bottom-8 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95"
       >
-        <Plus className="h-6 w-6" />
+        <Search className="h-6 w-6" />
       </button>
 
       {showAdd && (
@@ -611,22 +621,24 @@ function SourceFilter({
   setSource: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // Anchor coords for the portaled menu. The menu is rendered into <body> (not here) so
+  // it escapes the header's backdrop-filter, which otherwise traps fixed-position children
+  // to the header's box — that's what let outside taps fall through to the notes below.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 8, left: r.left });
   }, [open]);
 
   const options = [{ id: "all", label: "All sources" }, ...sources.map((s) => ({ id: s, label: sourceLabel(s) }))];
 
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="Filter by source"
@@ -645,39 +657,48 @@ function SourceFilter({
         )}
       </button>
 
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 z-50 mt-2 max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-popover p-1.5 shadow-2xl"
-        >
-          {options.map((o) => {
-            const selected = source === o.id;
-            return (
-              <button
-                key={o.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => {
-                  setSource(o.id);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm capitalize transition-colors ${
-                  selected ? "bg-ink/5 text-ink" : "text-ink-soft hover:bg-ink/5 hover:text-ink"
-                }`}
-              >
-                {o.id === "all" ? (
-                  <Layers className="h-5 w-5 shrink-0 text-ink-soft" />
-                ) : (
-                  <SourceLogo domain={o.id} className="h-5 w-5 shrink-0 rounded" />
-                )}
-                <span className="flex-1 truncate">{o.label}</span>
-                {selected && <Check className="h-4 w-4 shrink-0 text-ink" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            {/* Full-viewport catcher at <body> root: an outside tap closes the menu AND is
+                consumed here, so it never falls through to (and opens) a note behind it. */}
+            <div className="fixed inset-0 z-[60]" aria-hidden onClick={() => setOpen(false)} />
+            <div
+              role="listbox"
+              style={{ top: pos.top, left: pos.left }}
+              className="fixed z-[61] max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-popover p-1.5 shadow-2xl"
+            >
+              {options.map((o) => {
+                const selected = source === o.id;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => {
+                      setSource(o.id);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm capitalize transition-colors ${
+                      selected ? "bg-ink/5 text-ink" : "text-ink-soft hover:bg-ink/5 hover:text-ink"
+                    }`}
+                  >
+                    {o.id === "all" ? (
+                      <Layers className="h-5 w-5 shrink-0 text-ink-soft" />
+                    ) : (
+                      <SourceLogo domain={o.id} className="h-5 w-5 shrink-0 rounded" />
+                    )}
+                    <span className="flex-1 truncate">{o.label}</span>
+                    {selected && <Check className="h-4 w-4 shrink-0 text-ink" />}
+                  </button>
+                );
+              })}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -693,13 +714,30 @@ function AddSheet({
   onCancel: () => void;
   onSubmit: (u: string) => void;
 }) {
+  // Auto-fill from the clipboard, best-effort and non-blocking. The modal is already
+  // mounted/painted by the time this effect runs, so the open is instant. We skip the
+  // read on iOS, where readText() can only proceed behind a blocking "Paste" system
+  // prompt — that's what was delaying the menu. Elsewhere (desktop/Android Chrome) the
+  // read is silent for a focused tab, so a copied link drops straight into the box and
+  // the user just taps Capture. We only adopt URL-shaped text and ignore everything else.
+  useEffect(() => {
+    if (url || isIOS()) return; // don't clobber an existing value; no prompt on iOS
+    navigator.clipboard
+      ?.readText?.()
+      .then((text) => {
+        const t = text.trim();
+        if (/^https?:\/\/\S+$/i.test(t) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(t)) setUrl(t);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div
       data-no-refresh
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-sm md:items-center md:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
     >
-      <div className="w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-2xl md:rounded-3xl">
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border md:hidden" />
+      <div className="w-full max-w-md rounded-3xl border border-border bg-card p-5 shadow-2xl">
         <h2 className="font-serif text-2xl text-ink">New note</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Paste any link: reel, video, recipe, product, article.
@@ -712,6 +750,7 @@ function AddSheet({
           className="mt-4 space-y-3"
         >
           <input
+            autoFocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://…"

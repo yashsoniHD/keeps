@@ -48,7 +48,7 @@ function PublicNote() {
           to="/"
           className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper"
         >
-          Go to Clip Note
+          Go to Clipnote
         </Link>
       </div>
     );

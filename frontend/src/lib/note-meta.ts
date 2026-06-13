@@ -95,8 +95,53 @@ function hashSlug(slug: string): number {
   return Math.abs(h);
 }
 
-// AI-invented categories get a stable icon + palette without any code change.
+// --- User overrides ------------------------------------------------------------
+// A category's icon + palette are auto-derived from its slug (above). But a user can
+// pin their own choice per category (Manage categories → pick icon/colour). Those live
+// on users/{uid}.category_meta and are loaded once into this module-level registry by
+// CategoryMetaProvider; noteAccent/noteIcon consult it first so the choice shows app-wide
+// (feed cards, chips, badges, note view) without threading props through every call site.
+export type CategoryMeta = { icon?: string; palette?: number };
+let OVERRIDES: Record<string, CategoryMeta> = {};
+
+export function setCategoryOverrides(map: Record<string, CategoryMeta> | null | undefined) {
+  OVERRIDES = map ?? {};
+}
+
+// The palettes a user can pick from, exposed for the colour picker. The dot class is the
+// swatch; the index is what gets stored (palette number → PALETTES[index]).
+export const PALETTE_COUNT = PALETTES.length;
+export const PALETTE_DOTS = PALETTES.map((p) => p.dot);
+
+// The curated icon set offered in the picker, keyed by a stable string name (that name is
+// what's persisted). Kept to a tidy, recognisable spread rather than all of lucide.
+export const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  Sparkles, Bookmark, Star, Tag, Lightbulb,
+  ChefHat, UtensilsCrossed, MapPin, Compass, Plane,
+  ShoppingBag, Wallet, PiggyBank, TrendingUp, Briefcase,
+  FileText, BookOpen, GraduationCap, Newspaper, Mic,
+  Dumbbell, HeartPulse, Trophy, Baby, PawPrint,
+  Clapperboard, Music, Gamepad2, Camera, Palette,
+  Cpu, Code2, AppWindow, Bot, Rocket,
+  Home, Hammer, Leaf, Car, Shirt,
+  Landmark, Globe, FlaskConical, Megaphone, CalendarDays,
+  MessageSquare,
+};
+
+export function iconByName(name: string | null | undefined): LucideIcon | null {
+  return (name && CATEGORY_ICONS[name]) || null;
+}
+
+// The accent for a specific palette index (for picker previews), safely wrapped.
+export function paletteAccent(index: number): NoteAccent {
+  return PALETTES[((index % PALETTES.length) + PALETTES.length) % PALETTES.length];
+}
+
+// AI-invented categories get a stable icon + palette without any code change — unless the
+// user has pinned a palette for the slug, which wins.
 export function noteAccent(contentType: string): NoteAccent {
+  const override = OVERRIDES[contentType]?.palette;
+  if (override != null && override >= 0 && override < PALETTES.length) return PALETTES[override];
   const known = KNOWN[contentType];
   const idx = known ? known.palette : hashSlug(contentType) % PALETTES.length;
   return PALETTES[idx];
@@ -146,6 +191,8 @@ const WORD_ICONS: Record<string, LucideIcon> = {
 const FALLBACK_ICONS: LucideIcon[] = [Sparkles, Star, Tag, Lightbulb, Globe, Bookmark];
 
 export function noteIcon(contentType: string): LucideIcon {
+  const pinned = iconByName(OVERRIDES[contentType]?.icon);
+  if (pinned) return pinned;
   const known = KNOWN[contentType]?.icon;
   if (known) return known;
   for (const word of contentType.split("-")) {

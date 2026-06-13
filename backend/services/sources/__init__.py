@@ -11,12 +11,12 @@ from urllib.parse import urlparse
 
 from models.note import ContentBundle
 from services.net_guard import BlockedURLError, assert_public_url_async
-from services.sources import youtube, social_video, reddit, product, generic
+from services.sources import youtube, social_video, reddit, product, twitter, generic
 
 log = logging.getLogger("clipnote.sources")
 
 # Ordered: first match wins. `generic` matches everything and must stay last.
-_STRATEGIES = [youtube, social_video, reddit, product, generic]
+_STRATEGIES = [youtube, social_video, reddit, product, twitter, generic]
 
 
 def resolve(url: str):

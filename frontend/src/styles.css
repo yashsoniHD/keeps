@@ -167,6 +167,18 @@
   }
 }
 
+/* iOS Safari auto-zooms (and won't zoom back out) when a focused input/textarea has a
+   font-size under 16px. Several fields use text-sm (14px). Bump form controls to 16px on
+   phone-width screens only — desktop keeps the smaller text and never triggers the zoom.
+   !important is needed to beat Tailwind's text-sm utility (equal-specificity class). */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 @utility paper-grain {
   background-image:
     radial-gradient(oklch(0.5 0.02 60 / 0.04) 1px, transparent 1px),
