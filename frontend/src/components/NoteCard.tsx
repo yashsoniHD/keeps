@@ -84,7 +84,9 @@ export function NoteCard({ note }: { note: Note }) {
         <div className="flex min-w-0 items-center gap-2">
           <CoverThumb note={note} className="h-9 w-9 shrink-0 rounded-lg" />
           <span className={`inline-flex min-w-0 items-center gap-1 text-xs font-medium ${accent.text}`}>
-            <Icon className="h-3.5 w-3.5 shrink-0" />
+            {/* The thumb already shows the icon when there's no cover — only repeat it
+                next to the label when a cover image takes the thumb's place. */}
+            {note.cover_image_url && <Icon className="h-3.5 w-3.5 shrink-0" />}
             <span className="truncate">{noteLabel(note.content_type)}</span>
           </span>
         </div>
@@ -135,7 +137,7 @@ export function NoteRow({ note }: { note: Note }) {
         <h3 className="text-base font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
           <span className={`inline-flex shrink-0 items-center gap-1 font-medium ${accent.text}`}>
-            <Icon className="h-3.5 w-3.5 shrink-0" />
+            {note.cover_image_url && <Icon className="h-3.5 w-3.5 shrink-0" />}
             {noteLabel(note.content_type)}
           </span>
           <span className="shrink-0">·</span>

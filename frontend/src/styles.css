@@ -107,28 +107,29 @@
 }
 
 .dark {
-  --paper: oklch(0.18 0.015 60);
-  --ink: oklch(0.96 0.01 80);
-  --ink-soft: oklch(0.7 0.02 70);
+  /* Neutral near-black — chroma 0 so surfaces read jet black, not brown. */
+  --paper: oklch(0.14 0 0);
+  --ink: oklch(0.96 0 0);
+  --ink-soft: oklch(0.70 0 0);
   --background: var(--paper);
   --foreground: var(--ink);
-  --card: oklch(0.22 0.015 60);
+  --card: oklch(0.18 0 0);
   --card-foreground: var(--ink);
-  --popover: oklch(0.22 0.015 60);
+  --popover: oklch(0.18 0 0);
   --popover-foreground: var(--ink);
   --primary: var(--ink);
   --primary-foreground: var(--paper);
-  --secondary: oklch(0.26 0.015 60);
+  --secondary: oklch(0.23 0 0);
   --secondary-foreground: var(--ink);
-  --muted: oklch(0.26 0.015 60);
+  --muted: oklch(0.23 0 0);
   --muted-foreground: var(--ink-soft);
-  --accent: oklch(0.3 0.02 60);
+  --accent: oklch(0.26 0 0);
   --accent-foreground: var(--ink);
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.55 0.04 60);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.55 0 0);
 
   /* type accents — base nudged lighter for legibility on charcoal; -soft inverts from
      near-white fills to dark, low-chroma tints that sit just above the card surface. */

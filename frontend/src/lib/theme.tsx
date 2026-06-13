@@ -15,7 +15,7 @@ type Resolved = "light" | "dark";
 
 const STORAGE_KEY = "clipnote-theme";
 // Browser-chrome colors (status bar / address bar). Light mirrors --paper, dark --paper.
-const THEME_COLOR: Record<Resolved, string> = { light: "#faf8f3", dark: "#1c1917" };
+const THEME_COLOR: Record<Resolved, string> = { light: "#faf8f3", dark: "#141414" };
 
 function readStored(): Theme {
   try {
