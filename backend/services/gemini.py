@@ -89,7 +89,7 @@ open the source again — your note must be MORE useful than the source.
 Output is STRUCTURED JSON ONLY — no HTML, no markdown, no styling. Shape:
 {
   "content_type": "<echo the slug you were given — do not change it>",
-  "title": "concise, specific note title",
+  "title": "concise, specific note title in SENTENCE CASE (capitalize only the first word and proper nouns/brand names/acronyms, e.g. 'Easy weeknight paneer butter masala', 'A weekend in Lisbon', 'Sony WH-1000XM5 review')",
   "ai_summary": "2 conversational, specific sentences about THIS content (mention actual details)",
   "cover_image_prompt": "a vivid visual scene for a cover image",
   "data": { ...per the schema below... }
