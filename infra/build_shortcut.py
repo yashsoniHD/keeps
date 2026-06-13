@@ -58,7 +58,7 @@ workflow = {
             "Category": "Parameter",
             "DefaultValue": "",
             "ParameterKey": "WFTextActionText",
-            "Text": "Paste your Clipnote token (Settings → Capture from your phone → Create iPhone token)",
+            "Text": "Your Clipnote token is already copied to your clipboard — just paste it below.",
         }
     ],
     "WFWorkflowInputContentItemClasses": [

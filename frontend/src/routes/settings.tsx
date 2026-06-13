@@ -36,11 +36,11 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 // The published copy carries the "Paste your Clipnote token" import question (verified
 // via the icloud.com/shortcuts/api/records/<id> payload) — no token is baked in.
 // Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
-const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/a3ff9cb521f54dfcb8d82a5773050848";
+const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/3570d02ffb974d16ad6b6ea6fa08cfa5";
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://clipnote.web.app";
-const APP_SHARE_TEXT = "Clip Note: save any link as a beautifully structured note you'll actually re-read.";
+const APP_SHARE_TEXT = "Clipnote: save any link as a beautifully structured note you'll actually re-read.";
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
@@ -58,7 +58,7 @@ function Settings() {
   };
 
   const handleShareApp = async () => {
-    const shareData = { title: "Clip Note", text: APP_SHARE_TEXT, url: APP_URL };
+    const shareData = { title: "Clipnote", text: APP_SHARE_TEXT, url: APP_URL };
     if (navigator.share && navigator.canShare?.(shareData)) {
       try {
         await navigator.share(shareData);
@@ -414,8 +414,8 @@ function ConnectPhone() {
             </div>
             <p className="mt-2 text-xs text-ink-soft">
               {copied
-                ? "Copied to your clipboard ✓. Just paste when the Shortcut asks."
-                : "Tap copy, then paste when the Shortcut asks."}
+                ? "Copied to your clipboard ✓. Just paste it when the Shortcut asks."
+                : "Tap copy, then paste it when the Shortcut asks."}
             </p>
           </div>
 
