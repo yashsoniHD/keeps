@@ -64,6 +64,8 @@ from routers.jobs import router as jobs_router          # noqa: E402
 from routers.tokens import router as tokens_router      # noqa: E402
 from routers.ask import router as ask_router            # noqa: E402
 from routers.admin import router as admin_router        # noqa: E402
+from routers.search import router as search_router      # noqa: E402
+from routers.categories import router as categories_router  # noqa: E402
 
 app.include_router(ingest_router, prefix="/api")
 app.include_router(process_router, prefix="/api")
@@ -72,3 +74,5 @@ app.include_router(jobs_router, prefix="/api")
 app.include_router(tokens_router, prefix="/api")
 app.include_router(ask_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(search_router, prefix="/api")
+app.include_router(categories_router, prefix="/api")

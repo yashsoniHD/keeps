@@ -1,11 +1,15 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { RotateCcw } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { RotateCcw, Sparkles, ArrowRight } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { ingest } from "@/lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
+import { TypeBadge } from "./note/TypeBadge";
+import { SourcePill } from "./note/SourcePill";
+import { formatDate } from "@/lib/note-meta";
 import { AISummaryBlock } from "./note/AISummaryBlock";
+import { ThoughtsBlock } from "./note/ThoughtsBlock";
 import { RecipeNote } from "./note/templates/RecipeNote";
 import { ItineraryNote } from "./note/templates/ItineraryNote";
 import { ProductNote } from "./note/templates/ProductNote";
@@ -92,13 +96,72 @@ function FallbackBanner({ note }: { note: Note }) {
   );
 }
 
-export function NoteContent({ note, onDelete }: { note: Note; onDelete?: () => void }) {
+// Header for the public /p/{id} view: branded, no owner controls (share/delete) and no
+// back-link into the private feed. The wordmark + bottom CTA both route to sign-up.
+function PublicNoteHeader({ note }: { note: Note }) {
+  return (
+    <header className="mb-8 flex flex-col gap-5">
+      <Link to="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
+          <Sparkles className="h-3.5 w-3.5" />
+        </span>
+        Clip Note
+      </Link>
+      <div className="flex flex-wrap items-center gap-2">
+        <TypeBadge type={note.content_type} size="md" />
+        <SourcePill domain={note.source_domain} url={note.source_url} />
+        <span className="text-xs text-ink-soft">{formatDate(note.created_at)}</span>
+      </div>
+      <h1 className="font-serif text-4xl leading-[1.05] text-ink md:text-6xl">{note.title}</h1>
+    </header>
+  );
+}
+
+// Bottom-of-note conversion prompt shown only on the public view.
+function PublicSignupCTA() {
+  return (
+    <div className="mt-12 flex flex-col items-start gap-3 rounded-3xl border border-border bg-card p-6 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="font-serif text-xl text-ink">Saved with Clip Note</p>
+        <p className="mt-1 text-sm text-ink-soft">
+          Turn any link — recipe, video, product, article — into a structured note you'll
+          actually re-read.
+        </p>
+      </div>
+      <Link
+        to="/"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95"
+      >
+        Sign up free
+        <ArrowRight className="h-4 w-4" />
+      </Link>
+    </div>
+  );
+}
+
+export function NoteContent({
+  note,
+  onDelete,
+  onPatch,
+  variant = "owner",
+}: {
+  note: Note;
+  onDelete?: () => void;
+  onPatch?: (patch: Partial<Note>) => void;
+  variant?: "owner" | "public";
+}) {
+  const isPublic = variant === "public";
   // ProductNote lays out its own image beside the buy panel.
   const showCover = note.cover_image_url && note.content_type !== "product";
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
-      <NoteHeader note={note} onDelete={onDelete} />
-      {note.is_fallback && <FallbackBanner note={note} />}
+      {isPublic ? (
+        <PublicNoteHeader note={note} />
+      ) : (
+        <NoteHeader note={note} onDelete={onDelete} onPatch={onPatch} />
+      )}
+      {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
+      {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
       {showCover && (
         <div className="mb-8 overflow-hidden rounded-3xl border border-border">
           <img
@@ -115,6 +178,11 @@ export function NoteContent({ note, onDelete }: { note: Note; onDelete?: () => v
       <div className="mt-8">
         <SafeNoteBody note={note} />
       </div>
+      {/* Private annotation — owner view only, at the very bottom of the note. */}
+      {!isPublic && (
+        <ThoughtsBlock noteId={note.id} value={note.user_note ?? ""} onPatch={onPatch} />
+      )}
+      {isPublic && <PublicSignupCTA />}
     </article>
   );
 }

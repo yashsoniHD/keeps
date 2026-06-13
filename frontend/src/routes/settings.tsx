@@ -3,24 +3,24 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
   LogOut,
-  Trash2,
   Smartphone,
   Copy,
   Check,
   X,
   Download,
   BarChart3,
+  Share2,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ADMIN_EMAILS } from "@/routes/admin";
 import {
-  deleteAllNotes,
   createToken,
   listTokens,
   revokeToken,
   type ShortcutToken,
 } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
+import { CategoriesSection } from "@/components/CategoriesSection";
 import { isStandalone } from "@/lib/platform";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
@@ -34,12 +34,15 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 // Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
 const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/a3ff9cb521f54dfcb8d82a5773050848";
 
+// Where the app lives — shared via the "Share the app" button below.
+const APP_URL = "https://clipnote.web.app";
+const APP_SHARE_TEXT = "Clip Note — save any link as a beautifully structured note you'll actually re-read.";
+
 function Settings() {
   const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
-  const [clearConfirm, setClearConfirm] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  const [clearError, setClearError] = useState<string | null>(null);
+  const [signOutConfirm, setSignOutConfirm] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
@@ -50,21 +53,22 @@ function Settings() {
     navigate({ to: "/login" });
   };
 
-  const handleClearNotes = async () => {
-    if (!clearConfirm) {
-      setClearConfirm(true);
+  const handleShareApp = async () => {
+    const shareData = { title: "Clip Note", text: APP_SHARE_TEXT, url: APP_URL };
+    if (navigator.share && navigator.canShare?.(shareData)) {
+      try {
+        await navigator.share(shareData);
+      } catch {
+        // User dismissed the share sheet — not an error.
+      }
       return;
     }
-    setClearing(true);
-    setClearError(null);
     try {
-      await deleteAllNotes();
-      navigate({ to: "/" });
-    } catch (e) {
-      setClearError(e instanceof Error ? e.message : "Couldn't clear notes.");
-    } finally {
-      setClearing(false);
-      setClearConfirm(false);
+      await navigator.clipboard.writeText(`${APP_SHARE_TEXT}\n\n${APP_URL}`);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      // Clipboard blocked (insecure context, denied permission) — nothing to do.
     }
   };
 
@@ -102,8 +106,17 @@ function Settings() {
 
         <ConnectPhone />
 
+        <CategoriesSection />
+
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
+          <button
+            onClick={handleShareApp}
+            className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
+          >
+            {shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+            {shareCopied ? "Link copied!" : "Share the app"}
+          </button>
           {!!user.email && ADMIN_EMAILS.has(user.email.toLowerCase()) && (
             <Link
               to="/admin"
@@ -114,34 +127,42 @@ function Settings() {
             </Link>
           )}
           <button
-            onClick={handleSignOut}
+            onClick={() => setSignOutConfirm(true)}
             className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
           >
             <LogOut className="h-4 w-4" />
             Sign out
           </button>
         </section>
-
-        <section className="mt-4 rounded-3xl border border-destructive/30 bg-card p-6">
-          <h2 className="text-xs uppercase tracking-wider text-destructive">Danger zone</h2>
-          <p className="mt-2 text-sm text-ink-soft">
-            This permanently deletes all your notes. Cannot be undone.
-          </p>
-          <button
-            onClick={handleClearNotes}
-            disabled={clearing}
-            className={`mt-4 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-colors ${
-              clearConfirm
-                ? "bg-destructive text-white"
-                : "border border-destructive/30 text-destructive hover:bg-destructive/10"
-            }`}
-          >
-            <Trash2 className="h-4 w-4" />
-            {clearing ? "Clearing…" : clearConfirm ? "Tap again to confirm" : "Clear all notes"}
-          </button>
-          {clearError && <p className="mt-3 text-sm text-destructive">{clearError}</p>}
-        </section>
       </div>
+
+      {signOutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-sm md:items-center md:p-4">
+          <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-2xl md:rounded-3xl">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border md:hidden" />
+            <h2 className="font-serif text-2xl text-ink">Sign out?</h2>
+            <p className="mt-1 text-sm text-ink-soft">
+              You'll need to sign in again with Google to get back to your notes.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSignOutConfirm(false)}
+                className="flex-1 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="flex-1 rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

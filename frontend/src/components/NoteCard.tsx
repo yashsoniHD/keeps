@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, X } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import {
-  formatDate,
   formatDateShort,
   noteAccent,
   noteIcon,
@@ -40,12 +39,37 @@ export function DeleteButton({ onDelete }: { onDelete: () => void }) {
   );
 }
 
-// Uniform card: no cover preview — every note gets the same anatomy (chip + date,
+// Cover image with a built-in fallback: the type-accented icon placeholder sits behind
+// the image, so a missing OR broken cover reveals an intentional visual rather than a
+// blank box. Every card gets *something* — a feed of dead tiles invites no return.
+export function CoverThumb({ note, className = "" }: { note: Note; className?: string }) {
+  const accent = noteAccent(note.content_type);
+  const Icon = noteIcon(note.content_type);
+  return (
+    <div className={`relative overflow-hidden ${accent.soft} ${className}`}>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <Icon className={`h-1/3 max-h-10 w-1/3 max-w-10 opacity-70 ${accent.text}`} />
+      </div>
+      {note.cover_image_url && (
+        <img
+          src={note.cover_image_url}
+          alt=""
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = "none"; // reveal the placeholder behind it
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Uniform card: no cover preview — every note gets the same anatomy (icon chip + date,
 // title, summary, source footer). min-heights on title/summary reserve their full
 // line-clamp space so cards stay equal-sized even when text runs short.
 export function NoteCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
-  const Icon = noteIcon(note.content_type);
   const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
 
   return (
@@ -54,17 +78,17 @@ export function NoteCard({ note }: { note: Note }) {
       params={{ noteId: note.id }}
       className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${accent.ring}`}
     >
-      <div className="flex items-center justify-between">
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${accent.chip}`}
-        >
-          <Icon className="h-3 w-3" />
-          {noteLabel(note.content_type)}
-        </span>
-        <span className="text-[11px] text-ink-soft">{formatDate(note.created_at)}</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <CoverThumb note={note} className="h-9 w-9 shrink-0 rounded-lg" />
+          <span className={`truncate text-xs font-medium ${accent.text}`}>
+            {noteLabel(note.content_type)}
+          </span>
+        </div>
+        <span className="shrink-0 text-[11px] text-ink-soft">{formatDateShort(note.created_at)}</span>
       </div>
 
-      <h3 className="mt-3 min-h-[2.5em] font-serif text-xl leading-tight text-ink line-clamp-2">
+      <h3 className="mt-3 min-h-[2.5em] font-serif text-xl font-semibold leading-tight text-ink line-clamp-2">
         {note.title}
       </h3>
       <p className="mt-2 min-h-[4.3em] text-sm text-ink-soft line-clamp-3">{note.ai_summary}</p>
@@ -91,7 +115,6 @@ export function NoteCard({ note }: { note: Note }) {
 // titles stretch rows past the viewport on phones.
 export function NoteRow({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
-  const Icon = noteIcon(note.content_type);
 
   return (
     <Link
@@ -99,28 +122,13 @@ export function NoteRow({ note }: { note: Note }) {
       params={{ noteId: note.id }}
       className="group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent"
     >
-      {note.cover_image_url ? (
-        <img
-          src={note.cover_image_url}
-          alt=""
-          loading="lazy"
-          className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60 object-cover"
-          onError={(e) => {
-            // Swap the broken image for the type chip so the row stays aligned.
-            const img = e.currentTarget;
-            img.style.display = "none";
-            (img.nextElementSibling as HTMLElement | null)?.classList.remove("hidden");
-          }}
-        />
-      ) : null}
-      <span
-        className={`${note.cover_image_url ? "hidden" : ""} flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg ${accent.chip}`}
-      >
-        <Icon className="h-5 w-5" />
-      </span>
+      <CoverThumb
+        note={note}
+        className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60"
+      />
 
       <div className="min-w-0 flex-1">
-        <h3 className="font-serif text-base leading-snug text-ink line-clamp-2">{note.title}</h3>
+        <h3 className="text-base font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
           <span className={`shrink-0 font-medium ${accent.text}`}>
             {noteLabel(note.content_type)}

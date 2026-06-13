@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Search,
@@ -6,11 +6,12 @@ import {
   Plus,
   LayoutGrid,
   List,
-  Filter,
   WandSparkles,
   Settings,
   AlertCircle,
   X,
+  Check,
+  Layers,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -20,7 +21,7 @@ import {
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
-import { ingest } from "@/lib/api";
+import { ingest, searchNotes } from "@/lib/api";
 import {
   enqueueCapture,
   isQueueableError,
@@ -50,6 +51,7 @@ function Feed() {
   const [active, setActive] = useState<string>("all");
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>(
     () => (localStorage.getItem("clipnote.layout") as Layout) || "standard",
   );
@@ -195,17 +197,57 @@ function Feed() {
     [notes],
   );
 
+  // Browse view: the live feed filtered only by the type/source chips. Text queries no
+  // longer filter this slice — they run server-side semantic search (below) over the
+  // whole corpus, not just the loaded window.
   const filtered = useMemo(() => {
     return notes.filter((n) => {
       if (active !== "all" && n.content_type !== active) return false;
       if (source !== "all" && n.source_domain !== source) return false;
-      if (query.trim()) {
-        const q = query.toLowerCase();
-        return n.title.toLowerCase().includes(q) || n.ai_summary.toLowerCase().includes(q);
-      }
       return true;
     });
-  }, [notes, active, source, query]);
+  }, [notes, active, source]);
+
+  // Semantic search: debounced server call over all the user's notes (Firestore Vector
+  // Search). Empty/short queries fall back to the browse feed. Results are projected
+  // (no created_at/data), which NoteCard renders fine.
+  const trimmedQuery = query.trim();
+  const searchActive = trimmedQuery.length >= 3;
+  const [searchResults, setSearchResults] = useState<Note[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!searchActive) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      try {
+        const results = await searchNotes(trimmedQuery);
+        setSearchResults(
+          results.map((r) => ({ ...r, source_url: "", source: "web", data: {} }) as unknown as Note),
+        );
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [trimmedQuery, searchActive]);
+
+  // What the feed actually renders: search results (re-filtered by the chips) when a
+  // query is active, otherwise the browse feed.
+  const displayNotes = useMemo(() => {
+    if (!searchActive) return filtered;
+    return (searchResults ?? []).filter((n) => {
+      if (active !== "all" && n.content_type !== active) return false;
+      if (source !== "all" && n.source_domain !== source) return false;
+      return true;
+    });
+  }, [searchActive, searchResults, filtered, active, source]);
 
   // Processing cards show only on the default view — an in-flight job has no type/title
   // yet to match a filter or search. Merge server jobs with not-yet-acknowledged local
@@ -264,110 +306,122 @@ function Feed() {
     <AppShell>
       <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 pt-4 pb-3 md:px-8">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
-                <Sparkles className="h-4 w-4" />
-              </span>
-              <span className="font-serif text-2xl text-ink">Clipnote</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={toggleLayout}
-                aria-label={
-                  layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"
-                }
-                title={layout === "standard" ? "Condensed view" : "Card view"}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
-              >
-                {layout === "standard" ? (
-                  <List className="h-4 w-4" />
-                ) : (
-                  <LayoutGrid className="h-4 w-4" />
+          {searchOpen ? (
+            <div className="mb-3 flex items-center gap-2">
+              <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card py-2.5 pl-4 pr-1.5">
+                <Search className="h-4 w-4 shrink-0 text-ink-soft" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setQuery("");
+                      setSearchOpen(false);
+                    }
+                  }}
+                  placeholder="Search your notes"
+                  className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
+                />
+                {query.trim() && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate({
+                        to: "/ask",
+                        search: { q: query.trim(), send: true },
+                      })
+                    }
+                    aria-label="Ask AI"
+                    title="Ask AI"
+                    className="-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95"
+                  >
+                    <WandSparkles className="h-4 w-4" />
+                    Ask AI
+                  </button>
                 )}
-              </button>
-              <Link
-                to="/settings"
-                aria-label="Settings"
-                title="Settings"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
-              >
-                <Settings className="h-4 w-4" />
-              </Link>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card py-2.5 pl-4 pr-1.5">
-              <Search className="h-4 w-4 shrink-0 text-ink-soft" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search your notes"
-                className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
-              />
+              </div>
               <button
                 type="button"
-                onClick={() =>
-                  navigate({
-                    to: "/ask",
-                    search: query.trim() ? { q: query.trim(), send: true } : {},
-                  })
-                }
-                aria-label="AI search"
-                title="AI search"
-                className="-my-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform active:scale-95"
+                onClick={() => {
+                  setQuery("");
+                  setSearchOpen(false);
+                }}
+                aria-label="Close search"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
               >
-                <WandSparkles className="h-4 w-4" />
+                <X className="h-4 w-4" />
               </button>
             </div>
-
-            {sources.length > 1 && (
-              <div
-                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                  source !== "all"
-                    ? "border-ink bg-ink text-paper"
-                    : "border-border bg-card text-ink-soft hover:text-ink"
-                }`}
-              >
-                <Filter className="h-4 w-4" />
-                <select
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                  aria-label="Filter by source"
-                  className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-                >
-                  <option value="all">All sources</option>
-                  {sources.map((s) => (
-                    <option key={s} value={s}>
-                      {sourceLabel(s)}
-                    </option>
-                  ))}
-                </select>
+          ) : (
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <span className="font-serif text-2xl text-ink">Clipnote</span>
               </div>
-            )}
-          </div>
-
-          {categories.length > 0 && (
-            <div className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
-              {[
-                { id: "all", label: "All" },
-                ...categories.map((c) => ({ id: c, label: noteLabel(c) })),
-              ].map((f) => (
+              <div className="flex items-center gap-2">
                 <button
-                  key={f.id}
                   type="button"
-                  onClick={() => setActive(f.id)}
-                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                    active === f.id
-                      ? "bg-ink text-paper"
-                      : "border border-border bg-card text-ink-soft hover:text-ink"
-                  }`}
+                  onClick={() => setSearchOpen(true)}
+                  aria-label="Search notes"
+                  title="Search"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
                 >
-                  {f.label}
+                  <Search className="h-4 w-4" />
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={toggleLayout}
+                  aria-label={
+                    layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"
+                  }
+                  title={layout === "standard" ? "Condensed view" : "Card view"}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+                >
+                  {layout === "standard" ? (
+                    <List className="h-4 w-4" />
+                  ) : (
+                    <LayoutGrid className="h-4 w-4" />
+                  )}
+                </button>
+                <Link
+                  to="/settings"
+                  aria-label="Settings"
+                  title="Settings"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+                >
+                  <Settings className="h-4 w-4" />
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {(categories.length > 0 || sources.length > 1) && (
+            <div className="flex items-center gap-2">
+              {sources.length > 1 && (
+                <SourceFilter sources={sources} source={source} setSource={setSource} />
+              )}
+              <div className="-mx-1 flex flex-1 gap-1.5 overflow-x-auto px-1 py-1">
+                {[
+                  { id: "all", label: "All" },
+                  ...categories.map((c) => ({ id: c, label: noteLabel(c) })),
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setActive(f.id)}
+                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                      active === f.id
+                        ? "bg-ink text-paper"
+                        : "border border-border bg-card text-ink-soft hover:text-ink"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -409,7 +463,7 @@ function Feed() {
           />
         )}
 
-        {!notesReady && !feedError ? (
+        {(!notesReady && !feedError) || (searchActive && searching && searchResults === null) ? (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 8 }, (_, i) => (
               <div
@@ -418,18 +472,18 @@ function Feed() {
               />
             ))}
           </section>
-        ) : filtered.length === 0 &&
+        ) : displayNotes.length === 0 &&
           pendingJobs.length === 0 &&
           failedJobs.length === 0 &&
           queuedJobs.length === 0 ? (
-          showGuide ? null : (
+          showGuide && !searchActive ? null : (
             <EmptyState
-              hasNotes={notes.length > 0 || active !== "all" || source !== "all" || !!query.trim()}
+              hasNotes={notes.length > 0 || active !== "all" || source !== "all" || searchActive}
             />
           )
         ) : layout === "condensed" ? (
           <NoteRowList
-            notes={filtered}
+            notes={displayNotes}
             jobs={pendingJobs}
             queuedJobs={queuedJobs}
             failedJobs={failedJobs}
@@ -447,7 +501,7 @@ function Feed() {
             {pendingJobs.map((j) => (
               <ProcessingCard key={j.id} job={j} />
             ))}
-            {filtered.map((n) => (
+            {displayNotes.map((n) => (
               <ErrorBoundary key={n.id} label="feed-card" fallback={<FallbackNoteCard note={n} />}>
                 <NoteCard note={n} />
               </ErrorBoundary>
@@ -455,7 +509,7 @@ function Feed() {
           </section>
         )}
 
-        {notesReady && notes.length >= max && (
+        {notesReady && !searchActive && notes.length >= max && (
           <div className="mt-6 flex justify-center">
             <button
               type="button"
@@ -492,6 +546,103 @@ function Feed() {
   );
 }
 
+// Platform logo for a source domain. Lucide has no brand icons, so we pull the
+// site's favicon (Google's service returns a generic globe for unknown domains).
+function SourceLogo({ domain, className }: { domain: string; className?: string }) {
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+      alt=""
+      aria-hidden
+      loading="lazy"
+      className={className}
+    />
+  );
+}
+
+// Source filter: a custom dropdown (native <select> can't render logos) showing
+// each platform's favicon beside its name, on a white menu.
+function SourceFilter({
+  sources,
+  source,
+  setSource,
+}: {
+  sources: string[];
+  source: string;
+  setSource: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const options = [{ id: "all", label: "All sources" }, ...sources.map((s) => ({ id: s, label: sourceLabel(s) }))];
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Filter by source"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${
+          source !== "all"
+            ? "border-ink bg-card"
+            : "border-border bg-card text-ink-soft hover:text-ink"
+        }`}
+      >
+        {source !== "all" ? (
+          <SourceLogo domain={source} className="h-5 w-5 rounded" />
+        ) : (
+          <Layers className="h-4 w-4" />
+        )}
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 z-50 mt-2 max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-white p-1.5 shadow-2xl"
+        >
+          {options.map((o) => {
+            const selected = source === o.id;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => {
+                  setSource(o.id);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm capitalize transition-colors ${
+                  selected ? "bg-ink/5 text-ink" : "text-ink-soft hover:bg-ink/5 hover:text-ink"
+                }`}
+              >
+                {o.id === "all" ? (
+                  <Layers className="h-5 w-5 shrink-0 text-ink-soft" />
+                ) : (
+                  <SourceLogo domain={o.id} className="h-5 w-5 shrink-0 rounded" />
+                )}
+                <span className="flex-1 truncate">{o.label}</span>
+                {selected && <Check className="h-4 w-4 shrink-0 text-ink" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AddSheet({
   url,
   setUrl,
@@ -522,7 +673,6 @@ function AddSheet({
           className="mt-4 space-y-3"
         >
           <input
-            autoFocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://…"

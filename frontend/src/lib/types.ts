@@ -6,6 +6,7 @@ export interface Note {
   content_type: string;
   title: string;
   ai_summary: string;
+  user_note?: string; // owner's private annotation — never shown on public /p/{id}
   source_url: string;
   source_domain: string;
   source: "web" | "shortcut" | "pwa";
@@ -13,6 +14,7 @@ export interface Note {
   data: Record<string, unknown>;
   acquisition?: string;
   is_fallback?: boolean; // salvage "bookmark" note — content couldn't be processed
+  is_public?: boolean; // owner shared it — readable via /p/{id} without login
 
   created_at: Timestamp;
   updated_at: Timestamp;

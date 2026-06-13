@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { ask, ApiError, type AskCitation } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
+import { useKeyboardPin } from "@/lib/use-keyboard-inset";
 
 interface AskSearch {
   q?: string;
@@ -65,6 +66,7 @@ function AskPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoSent = useRef(false);
+  const inputBarRef = useKeyboardPin<HTMLDivElement>();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -143,7 +145,7 @@ function AskPage() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-5">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-28">
         {messages.length === 0 && !sending ? (
           <div className="flex flex-col items-center pt-14 text-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-summary-soft text-summary">
@@ -222,7 +224,10 @@ function AskPage() {
         )}
       </main>
 
-      <div className="sticky bottom-0 border-t border-border bg-background/90 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <div
+        ref={inputBarRef}
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/90 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+      >
         <form
           className="mx-auto flex w-full max-w-2xl items-center gap-2"
           onSubmit={(e) => {

@@ -15,6 +15,36 @@ import {
   AppWindow,
   Compass,
   Bot,
+  Baby,
+  Camera,
+  Car,
+  CalendarDays,
+  Code2,
+  Cpu,
+  FlaskConical,
+  Gamepad2,
+  Globe,
+  Hammer,
+  HeartPulse,
+  Home,
+  Leaf,
+  Lightbulb,
+  Megaphone,
+  Mic,
+  Music,
+  Newspaper,
+  Palette,
+  PawPrint,
+  PiggyBank,
+  Plane,
+  Rocket,
+  Shirt,
+  Star,
+  Tag,
+  TrendingUp,
+  Trophy,
+  UtensilsCrossed,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import type { Timestamp } from "firebase/firestore";
@@ -71,8 +101,57 @@ export function noteAccent(contentType: string): NoteAccent {
   return PALETTES[idx];
 }
 
+// Keyword → icon for invented slugs ("home-renovation-ideas" → Hammer). First
+// matching word wins, so put the most specific sense of an ambiguous word here.
+const WORD_ICONS: Record<string, LucideIcon> = {
+  recipe: ChefHat, cooking: ChefHat, baking: ChefHat,
+  food: UtensilsCrossed, restaurant: UtensilsCrossed, dining: UtensilsCrossed,
+  travel: Compass, trip: Plane, flight: Plane, vacation: Plane,
+  fitness: Dumbbell, gym: Dumbbell, exercise: Dumbbell,
+  health: HeartPulse, wellness: HeartPulse, yoga: HeartPulse, mental: HeartPulse,
+  finance: PiggyBank, financial: PiggyBank, saving: PiggyBank,
+  investing: TrendingUp, investment: TrendingUp, stock: TrendingUp, stocks: TrendingUp,
+  money: Wallet, budget: Wallet,
+  news: Newspaper, politics: Landmark, history: Landmark,
+  podcast: Mic, interview: Mic,
+  music: Music, song: Music, playlist: Music,
+  movie: Clapperboard, film: Clapperboard, tv: Clapperboard,
+  photo: Camera, photography: Camera,
+  art: Palette, design: Palette, craft: Palette,
+  science: FlaskConical, research: FlaskConical,
+  gaming: Gamepad2, game: Gamepad2, games: Gamepad2,
+  fashion: Shirt, style: Shirt, outfit: Shirt,
+  home: Home, interior: Home, decor: Home,
+  diy: Hammer, renovation: Hammer, repair: Hammer,
+  garden: Leaf, gardening: Leaf, plant: Leaf, plants: Leaf, sustainability: Leaf,
+  parenting: Baby, kids: Baby, baby: Baby,
+  pet: PawPrint, pets: PawPrint, dog: PawPrint, cat: PawPrint,
+  car: Car, cars: Car, auto: Car, automotive: Car, bike: Car,
+  sports: Trophy, sport: Trophy, cricket: Trophy, football: Trophy,
+  event: CalendarDays, events: CalendarDays, festival: CalendarDays,
+  tech: Cpu, technology: Cpu, gadget: Cpu, gadgets: Cpu,
+  coding: Code2, programming: Code2, developer: Code2, software: AppWindow, app: AppWindow,
+  career: Briefcase, job: Briefcase, jobs: Briefcase, business: Briefcase,
+  startup: Rocket, entrepreneurship: Rocket,
+  marketing: Megaphone, social: Megaphone,
+  book: BookOpen, books: BookOpen, reading: BookOpen,
+  learning: GraduationCap, education: GraduationCap, course: GraduationCap, tutorial: GraduationCap,
+  productivity: Lightbulb, motivation: Lightbulb, idea: Lightbulb, ideas: Lightbulb,
+  culture: Globe, language: Globe, world: Globe,
+};
+
+// Last resort for slugs with no recognizable keyword: a stable pick from a small
+// varied pool, so unknown types still don't all collapse to one sparkle.
+const FALLBACK_ICONS: LucideIcon[] = [Sparkles, Star, Tag, Lightbulb, Globe, Bookmark];
+
 export function noteIcon(contentType: string): LucideIcon {
-  return KNOWN[contentType]?.icon ?? Sparkles;
+  const known = KNOWN[contentType]?.icon;
+  if (known) return known;
+  for (const word of contentType.split("-")) {
+    const icon = WORD_ICONS[word];
+    if (icon) return icon;
+  }
+  return FALLBACK_ICONS[hashSlug(contentType) % FALLBACK_ICONS.length];
 }
 
 // Filler words the AI tends to append to invented slugs; stripping them keeps
@@ -102,9 +181,16 @@ const SOURCE_ALIASES: Record<string, string> = {
   fb: "facebook",
 };
 
+// Country-code second-level labels ("amazon.co.uk") that aren't the brand.
+const SECOND_LEVEL_TLDS = new Set(["co", "com", "net", "org", "ac", "gov", "edu"]);
+
+// The brand is the registrable label, not the first one — "open.substack.com"
+// must read "substack", not "open".
 export function sourceLabel(domain: string): string {
-  const first = domain.replace(/^www\./, "").split(".")[0];
-  return SOURCE_ALIASES[first] ?? first;
+  const parts = domain.replace(/^www\./, "").split(".").filter(Boolean);
+  let label = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] ?? domain);
+  if (SECOND_LEVEL_TLDS.has(label) && parts.length >= 3) label = parts[parts.length - 3];
+  return SOURCE_ALIASES[label] ?? label;
 }
 
 export function formatDate(ts?: Timestamp): string {

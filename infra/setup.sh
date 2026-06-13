@@ -53,6 +53,21 @@ gcloud tasks queues create clip-note-jobs \
 # Media bucket (created already during Phase 0; idempotent)
 gcloud storage buckets create "gs://clip-note-media-${PROJECT}" --location=us-central1 || true
 
+# Covers bucket: PUBLIC-read, separate from the media bucket (which holds private video
+# downloads). Note covers are re-hosted here so they're browser-displayable by https URL
+# and don't expire like hot-linked source thumbnails. The runtime SA already has
+# roles/storage.objectUser at the project level, so it can write here without extra grants.
+gcloud storage buckets create "gs://clip-note-covers-${PROJECT}" --location=us-central1 || true
+gcloud storage buckets add-iam-policy-binding "gs://clip-note-covers-${PROJECT}" \
+  --member=allUsers --role=roles/storage.objectViewer || true
+
+# Bind COVERS_BUCKET on the Cloud Run service — WITHOUT this env var the durable-cover
+# code (services/covers.py) short-circuits to None and every note saves a blank cover.
+# --update-env-vars merges, so other env (CLOUD_STORAGE_BUCKET, …) is preserved, and a
+# subsequent `gcloud run deploy --image …` keeps env vars across image pushes.
+gcloud run services update clip-note-api --region us-central1 \
+  --update-env-vars "COVERS_BUCKET=clip-note-covers-${PROJECT}" || true
+
 # --- Data safety + observability (applied to the live project 2026-06-11) ---
 
 # Firestore: point-in-time recovery (7-day version retention) + daily backups, 30-day retention.
@@ -71,6 +86,15 @@ gcloud monitoring uptime create "Clip Note API health" \
 #     --type=email --channel-labels=email_address=<you>
 #   gcloud alpha monitoring policies create --policy-from-file=infra/alerts/<file>.json
 # Cloud Run runtime flags (applied live): --max-instances=10 (cost ceiling), 1Gi, timeout 600s.
+
+# Semantic search vector index on notes.embedding (COSINE, 768d, user_id equality prefix).
+# `firebase deploy --only firestore:indexes` creates this from infra/firestore.indexes.json
+# (vectorConfig). If the installed Firebase CLI predates vectorConfig support, create it
+# directly with gcloud instead:
+#   gcloud firestore indexes composite create \
+#     --collection-group=notes --query-scope=COLLECTION \
+#     --field-config=field-path=user_id,order=ascending \
+#     --field-config=field-path=embedding,vector-config='{"dimension":768,"flat":"{}"}'
 
 echo ""
 echo "Done. Project: $PROJECT  SA: $SA"

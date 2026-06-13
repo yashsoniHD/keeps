@@ -19,6 +19,16 @@ class Settings:
     GEMINI_LITE_MODEL: str = os.getenv("GEMINI_LITE_MODEL", "gemini-3.1-flash-lite")
     IMAGEN_MODEL: str = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
 
+    # Semantic search embeddings (Firestore Vector Search). text-embedding-005 is a
+    # REGIONAL model (us-central1) — unlike the 3.x chat models it is NOT on the global
+    # endpoint, so it uses GOOGLE_CLOUD_LOCATION. 768 dims = its native size; the vector
+    # index dimension in infra MUST match this exactly.
+    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "text-embedding-005")
+    EMBED_LOCATION: str = os.getenv("EMBED_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"))
+    EMBED_DIM: int = int(os.getenv("EMBED_DIM", "768"))
+    # Top-K notes returned by a semantic search.
+    SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "20"))
+
     CLOUD_TASKS_QUEUE: str = os.getenv("CLOUD_TASKS_QUEUE", "clip-note-jobs")
     CLOUD_TASKS_LOCATION: str = os.getenv("CLOUD_TASKS_LOCATION", "us-central1")
     CLOUD_TASKS_WORKER_URL: str = os.getenv("CLOUD_TASKS_WORKER_URL", "http://localhost:8080")
@@ -26,6 +36,13 @@ class Settings:
     CLOUD_TASKS_SA_EMAIL: str = os.getenv("CLOUD_TASKS_SA_EMAIL", "")
 
     CLOUD_STORAGE_BUCKET: str = os.getenv("CLOUD_STORAGE_BUCKET", "")
+    # Public-read bucket for note cover images. Kept separate from the media bucket
+    # (which holds private video downloads) so covers can be served to the browser by
+    # https URL — persisting them here fixes expiring/hot-linked source thumbnails.
+    COVERS_BUCKET: str = os.getenv("COVERS_BUCKET", "")
+
+    # Public-facing app origin — used to build shareable note links (/p/{id}).
+    PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", "https://clipnote.web.app")
 
     TEMP_DOWNLOAD_DIR: str = os.getenv("TEMP_DOWNLOAD_DIR", "/tmp/clip_note_downloads")
 
@@ -37,6 +54,9 @@ class Settings:
     DAILY_GLOBAL_ASK_CAP: int = int(os.getenv("DAILY_GLOBAL_ASK_CAP", "300"))
     # How many full notes get sent to the answering model per ask.
     ASK_MAX_GROUNDED_NOTES: int = int(os.getenv("ASK_MAX_GROUNDED_NOTES", "12"))
+    # Candidate notes the vector shortlist hands the lite selector per ask (hybrid
+    # retrieval). Larger than ASK_MAX_GROUNDED_NOTES so the selector has room to choose.
+    ASK_SHORTLIST_K: int = int(os.getenv("ASK_SHORTLIST_K", "25"))
 
     # Direct-URI video analysis cap. YouTube videos longer than this fall back to the
     # transcript path instead of being sent to Gemini whole.

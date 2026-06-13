@@ -2,12 +2,20 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { formatDate } from "@/lib/note-meta";
-import { TypeBadge } from "./TypeBadge";
+import { CategoryEditor } from "./CategoryEditor";
 import { SourcePill } from "./SourcePill";
 import { ShareButton } from "./ShareButton";
 import { DeleteButton } from "@/components/NoteCard";
 
-export function NoteHeader({ note, onDelete }: { note: Note; onDelete?: () => void }) {
+export function NoteHeader({
+  note,
+  onDelete,
+  onPatch,
+}: {
+  note: Note;
+  onDelete?: () => void;
+  onPatch?: (patch: { content_type: string }) => void;
+}) {
   return (
     <header className="mb-8 flex flex-col gap-5">
       <div className="flex items-center justify-between">
@@ -25,7 +33,7 @@ export function NoteHeader({ note, onDelete }: { note: Note; onDelete?: () => vo
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <TypeBadge type={note.content_type} size="md" />
+        <CategoryEditor type={note.content_type} noteId={note.id} onPatch={onPatch} />
         <SourcePill domain={note.source_domain} url={note.source_url} />
         <span className="text-xs text-ink-soft">{formatDate(note.created_at)}</span>
       </div>

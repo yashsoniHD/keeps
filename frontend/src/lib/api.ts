@@ -46,6 +46,66 @@ export async function ingest(url: string): Promise<{ job_id: string; status: str
   return res.json();
 }
 
+// Owner edits to a note: a private annotation (user_note) and/or recategorisation
+// (content_type). Writes route through the backend (Firestore forbids client writes);
+// the feed's onSnapshot listener reflects the change live.
+export async function updateNote(
+  id: string,
+  updates: { user_note?: string; content_type?: string },
+): Promise<void> {
+  const res = await apiFetch(`/api/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the note."), res.status);
+}
+
+// --- Categories (manage the user's taxonomy) ---
+
+// The taxonomy joined with per-type note counts. Rename/delete re-tag the affected
+// notes server-side (Firestore forbids client writes to notes/), so they live here.
+export async function listCategories(): Promise<{ slug: string; count: number }[]> {
+  const res = await apiFetch("/api/categories");
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't load your categories."), res.status);
+  return res.json();
+}
+
+export async function createCategory(name: string): Promise<{ slug: string; count: number }> {
+  const res = await apiFetch("/api/categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't create the category."), res.status);
+  return res.json();
+}
+
+export async function renameCategory(
+  slug: string,
+  newName: string,
+): Promise<{ slug: string; count: number }> {
+  const res = await apiFetch(`/api/categories/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_name: newName }),
+  });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't rename the category."), res.status);
+  return res.json();
+}
+
+export async function deleteCategory(
+  slug: string,
+  moveTo?: string,
+): Promise<{ moved_to: string; count: number }> {
+  const qs = moveTo ? `?move_to=${encodeURIComponent(moveTo)}` : "";
+  const res = await apiFetch(`/api/categories/${encodeURIComponent(slug)}${qs}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete the category."), res.status);
+  return res.json();
+}
+
 // --- Ask AI (chat grounded in saved notes) ---
 
 export interface AskCitation {
@@ -81,9 +141,38 @@ export async function ask(question: string, history: AskTurn[]): Promise<AskResu
   return res.json();
 }
 
-export async function deleteAllNotes(): Promise<void> {
-  const res = await apiFetch("/api/notes", { method: "DELETE" });
-  if (!res.ok) throw new Error("Couldn't clear notes.");
+// --- Shareable public notes ---
+
+// Make a note publicly readable; returns the /p/{id} link to share.
+export async function shareNote(id: string): Promise<{ is_public: boolean; url: string }> {
+  const res = await apiFetch(`/api/notes/${id}/share`, { method: "POST" });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't create a share link."), res.status);
+  return res.json();
+}
+
+// Revoke public access — the shared link stops resolving.
+export async function unshareNote(id: string): Promise<void> {
+  const res = await apiFetch(`/api/notes/${id}/share`, { method: "DELETE" });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't make the note private."), res.status);
+}
+
+// --- Semantic search (Firestore Vector Search, scoped to the user's notes) ---
+
+export interface SearchResult {
+  id: string;
+  content_type: string;
+  title: string;
+  ai_summary: string;
+  source_domain: string;
+  cover_image_url: string | null;
+}
+
+export async function searchNotes(q: string): Promise<SearchResult[]> {
+  const res = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Search failed."), res.status);
+  const data = (await res.json()) as { results?: SearchResult[] };
+  return data.results ?? [];
 }
 
 // --- Personal Access Tokens (iOS shortcut) ---

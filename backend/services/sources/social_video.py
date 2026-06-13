@@ -93,7 +93,20 @@ async def acquire(url: str) -> ContentBundle:
     try:
         file_path, info = await asyncio.to_thread(_download, url)
         meta = _metadata(info, url)
-        images = [t for t in [info.get("thumbnail")] if t]
+
+        images: list[str] = []
+        if file_path:
+            # Durable cover from local bytes — Instagram's CDN thumbnail is referer-gated,
+            # datacenter-IP blocked, and time-signed (expires in days). A frame from the
+            # file we already downloaded is reliable and permanent.
+            from services.covers import extract_video_frame
+            frame_url = await extract_video_frame(file_path)
+            if frame_url:
+                images = [frame_url]
+        # Fallback only when we have no local frame: the platform thumbnail URL
+        # (process.py will attempt to re-host it; placeholder if that also fails).
+        if not images and info.get("thumbnail"):
+            images = [info["thumbnail"]]
 
         if file_path and settings.CLOUD_STORAGE_BUCKET:
             gcs_uri = await asyncio.to_thread(_upload_to_gcs, file_path)

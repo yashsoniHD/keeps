@@ -8,6 +8,7 @@ import {
   setDoc,
   deleteDoc,
   doc,
+  arrayUnion,
   onSnapshot,
   type Unsubscribe,
 } from "firebase/firestore";
@@ -43,6 +44,13 @@ export async function getNote(noteId: string): Promise<Note | null> {
   const snap = await getDoc(doc(db, "notes", noteId));
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as Note;
+}
+
+// The owner's private annotation lives in a separate owner-only doc (so it never rides
+// along on a publicly shared note). Returns "" when there's no annotation yet.
+export async function getAnnotation(noteId: string): Promise<string> {
+  const snap = await getDoc(doc(db, "annotations", noteId));
+  return snap.exists() ? ((snap.data().user_note ?? "") as string) : "";
 }
 
 // Security rules allow owners to delete their own notes, so this needs no API call —
@@ -94,6 +102,22 @@ export function watchPendingJobs(
 export async function getUserCategories(userId: string): Promise<string[]> {
   const snap = await getDoc(doc(db, "users", userId));
   return snap.exists() ? ((snap.data().categories ?? []) as string[]).sort() : [];
+}
+
+// kebab-case a label into a category slug, matching the backend's normalize_slug.
+export function slugifyCategory(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Add a category to users/{uid}.categories (idempotent via arrayUnion). The users doc is
+// owner-writable per Firestore rules, so this needs no backend round-trip. Returns the slug.
+export async function addUserCategory(userId: string, label: string): Promise<string> {
+  const slug = slugifyCategory(label);
+  if (slug) await setDoc(doc(db, "users", userId), { categories: arrayUnion(slug) }, { merge: true });
+  return slug;
 }
 
 // Getting-started guide flag lives on the user doc (not localStorage) so dismissing

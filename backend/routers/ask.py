@@ -11,10 +11,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.cloud import firestore as fs
+from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+from google.cloud.firestore_v1.vector import Vector
 
 from config import settings
 from models.ask import AskRequest, AskResponse, Citation
 from services.auth_dep import require_user
+from services.embeddings import embedding_service
 from services.firebase import flush_usage, get_db
 from services.gemini import gemini_service
 from services.usage_meter import start_metering
@@ -36,6 +39,32 @@ INDEX_FIELDS = ["content_type", "title", "ai_summary", "source_domain", "cover_i
 async def _fetch_note_index(db, user_id: str) -> list[dict]:
     query = db.collection("notes").where("user_id", "==", user_id).select(INDEX_FIELDS)
     return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
+
+
+async def _vector_shortlist(db, user_id: str, question: str) -> list[dict] | None:
+    """Top-K candidate notes by semantic similarity to the question (Firestore Vector
+    Search). Hybrid retrieval: this shortlist replaces loading the whole corpus, then the
+    lite model still picks the final notes from it. Returns None when the query embedding
+    is unavailable so the caller falls back to the full projected index (which also covers
+    notes saved before embeddings existed)."""
+    try:
+        query_vec = await embedding_service.embed_query(question)
+    except Exception as e:
+        log.warning("ask shortlist embedding failed, falling back to full index: %s: %s",
+                    type(e).__name__, e, extra={"user_id": user_id})
+        return None
+    if not query_vec:
+        return None
+    vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
+        vector_field="embedding",
+        query_vector=Vector(query_vec),
+        distance_measure=DistanceMeasure.COSINE,
+        limit=settings.ASK_SHORTLIST_K,
+    )
+    return [
+        {"id": doc.id, **{f: (doc.to_dict() or {}).get(f) for f in INDEX_FIELDS}}
+        async for doc in vector_query.stream()
+    ]
 
 
 async def _fetch_notes_by_ids(db, user_id: str, ids: list[str]) -> list[dict]:
@@ -78,7 +107,11 @@ async def _enforce_ask_caps(db, user_id: str) -> None:
 async def ask(body: AskRequest, user_id: str = Depends(require_user)):
     db = get_db()
 
-    index = await _fetch_note_index(db, user_id)
+    # Hybrid retrieval: a semantic vector shortlist first; fall back to the full projected
+    # index if embeddings are unavailable or matched nothing (e.g. notes not yet embedded).
+    index = await _vector_shortlist(db, user_id, body.question)
+    if not index:
+        index = await _fetch_note_index(db, user_id)
     if not index:
         # No AI cost incurred, so no cap consumed.
         return AskResponse(answer=NO_NOTES_ANSWER)

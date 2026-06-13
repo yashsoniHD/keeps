@@ -6,10 +6,20 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
-    // Notes: owner reads/deletes; created and updated only by the backend.
+    // Notes: owner reads/deletes; anyone may read a note the owner has shared
+    // (is_public == true) — that powers the public /p/{id} link. Created and updated
+    // only by the backend (which toggles is_public via the admin SDK).
     match /notes/{noteId} {
-      allow read, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
+      allow read: if resource.data.is_public == true
+                  || (request.auth != null && request.auth.uid == resource.data.user_id);
+      allow delete: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow create, update: if false;
+    }
+    // Private per-note annotations (owner's "your thoughts"). Kept OUT of the note doc
+    // so a publicly shared note never exposes them. Owner reads; backend admin SDK writes.
+    match /annotations/{noteId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
+      allow write: if false;
     }
     // Jobs: owner reads (live status via onSnapshot); written only by the backend.
     match /jobs/{jobId} {

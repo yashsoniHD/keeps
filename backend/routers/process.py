@@ -21,12 +21,15 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
 from google.auth.transport import requests as google_requests
 from google.cloud import firestore as fs
+from google.cloud.firestore_v1.vector import Vector
 from google.genai import errors as genai_errors
 from google.oauth2 import id_token
 
 from config import settings
 from models.note import ContentBundle
 from services import sources
+from services.covers import persist_cover
+from services.embeddings import embedding_service
 from services.firebase import (
     add_user_category,
     firestore_safe,
@@ -40,6 +43,21 @@ from services.usage_meter import start_metering
 
 router = APIRouter(tags=["process"])
 log = logging.getLogger("clipnote.process")
+
+
+async def _note_embedding(title: str, ai_summary: str = "") -> Vector | None:
+    """Embed a note's text for semantic search. Non-fatal: on any failure the note is
+    still written (search just misses it until a backfill re-embeds it)."""
+    text = "\n".join(p for p in (title, ai_summary) if p).strip()
+    if not text:
+        return None
+    try:
+        vec = await embedding_service.embed_document(text)
+        return Vector(vec) if vec else None
+    except Exception as e:
+        log.warning("note embedding failed, writing note without it: %s: %s",
+                    type(e).__name__, e)
+        return None
 
 # A transient failure below this many attempts re-raises as 500 (Cloud Tasks retries,
 # max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
@@ -107,7 +125,8 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str,
                     type(e).__name__, e, extra={"url": url, "user_id": user_id})
 
     note_id = str(uuid.uuid4())
-    await db.collection("notes").document(note_id).set({
+    embedding = await _note_embedding(title or domain)
+    note_doc = {
         "user_id": user_id,
         "content_type": "bookmark",
         "title": title or domain,
@@ -122,7 +141,10 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str,
         "is_fallback": True,
         "created_at": now,
         "updated_at": now,
-    })
+    }
+    if embedding is not None:
+        note_doc["embedding"] = embedding
+    await db.collection("notes").document(note_id).set(note_doc)
     return note_id
 
 
@@ -192,10 +214,15 @@ async def process_job(job_id: str, request: Request):
             raise ValueError("Extraction produced empty or suspiciously short data")
 
         cover_image_url = bundle.images[0] if bundle.images else None
+        # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
+        # Skip frames we already extracted (those are covers-bucket URLs).
+        if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
+            cover_image_url = await persist_cover(cover_image_url) or cover_image_url
         source_domain = url.split("/")[2].replace("www.", "") if "://" in url else url
 
         note_id = str(uuid.uuid4())
-        await db.collection("notes").document(note_id).set({
+        embedding = await _note_embedding(extracted.title, extracted.ai_summary)
+        note_doc = {
             "user_id": user_id,
             "content_type": extracted.content_type,
             "title": extracted.title,
@@ -208,7 +235,10 @@ async def process_job(job_id: str, request: Request):
             "acquisition": bundle.strategy,
             "created_at": now,
             "updated_at": now,
-        })
+        }
+        if embedding is not None:
+            note_doc["embedding"] = embedding
+        await db.collection("notes").document(note_id).set(note_doc)
         await add_user_category(user_id, extracted.content_type)
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "updated_at": datetime.now(timezone.utc)})

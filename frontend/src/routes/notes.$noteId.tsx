@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
-import { getNote, deleteNote } from "@/lib/firestore";
+import { getNote, getAnnotation, deleteNote } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
@@ -29,9 +29,14 @@ function NoteDetail() {
     if (user && noteId) {
       setLoadError(false);
       getNote(noteId)
-        .then((n) => {
-          if (!n || n.user_id !== user.uid) setNotFound(true);
-          else setNote(n);
+        .then(async (n) => {
+          if (!n || n.user_id !== user.uid) {
+            setNotFound(true);
+            return;
+          }
+          // Merge the private annotation (separate owner-only doc) onto the note.
+          const userNote = await getAnnotation(noteId).catch(() => "");
+          setNote({ ...n, user_note: userNote });
         })
         .catch(() => setLoadError(true));
     }
@@ -70,6 +75,7 @@ function NoteDetail() {
     <AppShell>
       <NoteContent
         note={note}
+        onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
         onDelete={async () => {
           await deleteNote(note.id);
           navigate({ to: "/" });

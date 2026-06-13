@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import firebase_admin
 from firebase_admin import auth
-from google.cloud.firestore_v1 import AsyncClient, ArrayUnion, Increment
+from google.cloud.firestore_v1 import AsyncClient, ArrayRemove, ArrayUnion, Increment
 
 from config import settings
 from services.usage_meter import UsageMeter
@@ -81,6 +81,50 @@ async def add_user_category(uid: str, slug: str) -> None:
     await get_db().collection("users").document(uid).set(
         {"categories": ArrayUnion([slug])}, merge=True
     )
+
+
+async def remove_user_category(uid: str, slug: str) -> None:
+    """Drops a content_type slug from users/{uid}.categories (idempotent via ArrayRemove)."""
+    await get_db().collection("users").document(uid).set(
+        {"categories": ArrayRemove([slug])}, merge=True
+    )
+
+
+async def count_notes_by_type(uid: str) -> dict[str, int]:
+    """Tally of the user's notes by content_type, in one streamed pass — used by the
+    Categories management UI (cheaper than one aggregation query per category)."""
+    counts: dict[str, int] = {}
+    query = get_db().collection("notes").where("user_id", "==", uid).select(["content_type"])
+    async for doc in query.stream():
+        ct = (doc.to_dict() or {}).get("content_type")
+        if ct:
+            counts[ct] = counts.get(ct, 0) + 1
+    return counts
+
+
+async def retag_notes(uid: str, old_slug: str, new_slug: str) -> int:
+    """Re-tag every note the user owns from one content_type to another (a category
+    rename or delete-with-fallback). Batched at ≤450 writes (Firestore's 500-op cap).
+    Returns the number of notes re-tagged. No-op-safe when old_slug == new_slug."""
+    if old_slug == new_slug:
+        return 0
+    db = get_db()
+    query = db.collection("notes").where("user_id", "==", uid).where("content_type", "==", old_slug)
+    now = datetime.now(timezone.utc)
+    batch = db.batch()
+    pending = 0
+    total = 0
+    async for doc in query.stream():
+        batch.update(doc.reference, {"content_type": new_slug, "updated_at": now})
+        pending += 1
+        total += 1
+        if pending >= 450:
+            await batch.commit()
+            batch = db.batch()
+            pending = 0
+    if pending:
+        await batch.commit()
+    return total
 
 
 async def ensure_user_doc(uid: str, *, display_name: str | None = None,
