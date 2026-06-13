@@ -87,7 +87,7 @@ User pastes URL
 [Cloud Tasks calls /api/process/{job_id}]  (OIDC-authenticated; idempotent — no-op if already completed)
   → Update job {status: "processing"}
   → Detect: video URL → yt-dlp (transcript-first)  OR  webpage → BeautifulSoup
-  → Cover image: og:image → yt-dlp thumbnail → first <img> → gradient placeholder  (Imagen 3 deferred: ENABLE_IMAGEN=false)
+  → Cover image: og:image → yt-dlp thumbnail → first <img> → Imagen (if ENABLE_IMAGEN, capped) → frontend gradient hero
   → Gemini → {content_type, title, ai_summary, cover_image_prompt, data{}}   (structured data only — no HTML)
   → Write Firestore: notes/{note_id}
   → Update job {status: "completed", note_id}
@@ -103,7 +103,7 @@ User pastes URL
 - **Single Cloud Run service** — handles both fast ingest path and Cloud Tasks worker endpoint; **OIDC token (not a shared secret)** on `/api/process` keeps it private even though the service allows unauthenticated front-end calls
 - **Structured data, not stored HTML** — Gemini returns a structured `data` map; React templates render it (`RecipeNote`, `ItineraryNote`, `ProductNote`, `SummaryNote`, and a `GenericNote` fallback for AI-invented types). This keeps the design restylable, cheaper (fewer output tokens), consistent, and free of `dangerouslySetInnerHTML`. **Do not have the model emit HTML.**
 - **Dynamic note types** — Gemini invents `content_type` slugs, matched/normalized against the user's existing `categories` array (`users/{uid}.categories`) — no full-collection scan per ingest; `GenericNote` renders any type without a dedicated template
-- **Imagen 3 fallback — DEFERRED for MVP (`ENABLE_IMAGEN=false`).** Covers come from og:image → video thumbnail → first `<img>` → gradient placeholder. The Imagen code path stays in place (visual types only, called only when no cover is found) but is gated off by config; turn it on only after validating users care about generated covers. Imagen is the exception, not the default — it is a real cost line.
+- **Imagen cover fallback — IMPLEMENTED, gated off by default (`ENABLE_IMAGEN=false`).** Covers come from og:image → video thumbnail → first `<img>`; only a note that would otherwise be coverless triggers Imagen (`backend/services/imagen.py`, `generate_cover` — regional Vertex client, called from `process.py` *before* the note doc is written, so the detail view's one-time read sees it). Generation is best-effort: any miss (flag off, daily cap, RAI-filter, error) leaves the cover null and the **frontend renders a gradient + type-icon hero** (`NoteContent.tsx` `CoverHero`) — the detail view is never empty. Imagen is the exception, not the default — a real cost line — so it is capped: `MAX_IMAGES_PER_USER_PER_DAY` + `DAILY_GLOBAL_IMAGE_CAP` via a transactional `reserve_image_slot` (returns False instead of raising — a capped note still gets created), metered to `users/{uid}.lifetime_images` + `system/usage-{date}.image_count`, and priced in the admin dashboard at `IMAGEN_PRICE_PER_IMAGE`. Before turning it on: verify `IMAGEN_MODEL` (`imagen-3.0-generate-002` may be superseded) + region against the live Vertex catalog, request a quota increase, then set `ENABLE_IMAGEN=true` on Cloud Run.
 - **Cost guardrails are mandatory** — budget is ~₹30k (~$360 ≈ a few thousand notes *total*). Per-user daily ingest cap + per-user note cap + a global daily kill-switch counter, enforced in `/api/ingest`. Set a GCP billing budget alert. Transcript-first video handling (below) keeps the most expensive path cheap.
 
 ---

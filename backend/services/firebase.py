@@ -181,6 +181,51 @@ async def flush_usage(user_id: str, meter: UsageMeter) -> None:
         log.warning("usage flush failed for %s: %s: %s", user_id, type(e).__name__, e)
 
 
+async def reserve_image_slot(user_id: str) -> bool:
+    """Transactionally claim one AI-cover-generation slot for today, enforcing the
+    per-user and global daily caps. Returns True if claimed (caller may generate), False
+    if a cap is hit (caller keeps the gradient fallback). Never raises — a capped note
+    must still be created. The `image_count` it bumps powers both the caps and the admin
+    'images today' figure."""
+    from google.cloud import firestore as fs
+
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    @fs.async_transactional
+    async def _claim(tx) -> bool:
+        user_ref = db.collection("usage").document(f"{user_id}-{today}")
+        global_ref = db.collection("system").document(f"usage-{today}")
+        user_snap = await user_ref.get(transaction=tx)
+        global_snap = await global_ref.get(transaction=tx)
+        user_n = (user_snap.to_dict() or {}).get("image_count", 0)
+        global_n = (global_snap.to_dict() or {}).get("image_count", 0)
+        if user_n >= settings.MAX_IMAGES_PER_USER_PER_DAY:
+            return False
+        if global_n >= settings.DAILY_GLOBAL_IMAGE_CAP:
+            return False
+        tx.set(user_ref, {"user_id": user_id, "date": today, "image_count": user_n + 1}, merge=True)
+        tx.set(global_ref, {"date": today, "image_count": global_n + 1}, merge=True)
+        return True
+
+    try:
+        return await _claim(db.transaction())
+    except Exception as e:  # noqa: BLE001 — capping is best-effort; never fail a note.
+        log.warning("image slot reservation failed for %s: %s: %s", user_id, type(e).__name__, e)
+        return False
+
+
+async def record_image_generated(user_id: str) -> None:
+    """Bump the per-user lifetime AI-cover count (powers the admin per-user cost column).
+    Best-effort — a metering write must never fail the underlying capture."""
+    try:
+        await get_db().collection("users").document(user_id).set(
+            {"lifetime_images": Increment(1)}, merge=True
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("image meter write failed for %s: %s: %s", user_id, type(e).__name__, e)
+
+
 async def list_auth_users() -> list[dict]:
     """Enumerate all Firebase Auth users — the source of truth for identity (email,
     name, signup time, last sign-in), which the users/{uid} Firestore docs don't carry.

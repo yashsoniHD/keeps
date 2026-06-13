@@ -7,7 +7,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
 import { TypeBadge } from "./note/TypeBadge";
 import { SourcePill } from "./note/SourcePill";
-import { formatDate } from "@/lib/note-meta";
+import { formatDate, noteAccent, noteIcon } from "@/lib/note-meta";
 import { AISummaryBlock } from "./note/AISummaryBlock";
 import { ThoughtsBlock } from "./note/ThoughtsBlock";
 import { RecipeNote } from "./note/templates/RecipeNote";
@@ -139,6 +139,39 @@ function PublicSignupCTA() {
   );
 }
 
+// The note's hero. A real cover image when one exists (and loads); otherwise a styled
+// gradient + faded type icon so the detail view never reads as empty — the same accent
+// system the feed cards use (note-meta), scaled up. Also the safety net when an AI cover
+// is disabled, fails to generate, or hits a daily cap.
+function CoverHero({ note }: { note: Note }) {
+  const [broken, setBroken] = useState(false);
+  const accent = noteAccent(note.content_type);
+  const Icon = noteIcon(note.content_type);
+  const showImage = Boolean(note.cover_image_url) && !broken;
+
+  if (showImage) {
+    return (
+      <div className="mb-8 overflow-hidden rounded-3xl border border-border">
+        <img
+          src={note.cover_image_url!}
+          alt=""
+          className="h-72 w-full object-cover md:h-96"
+          onError={() => setBroken(true)} // reveal the gradient fallback below
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`relative mb-8 flex h-56 w-full items-center justify-center overflow-hidden rounded-3xl border border-border md:h-72 ${accent.soft}`}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-ink/[0.06]" />
+      <Icon className={`relative h-20 w-20 opacity-40 md:h-28 md:w-28 ${accent.text}`} />
+    </div>
+  );
+}
+
 export function NoteContent({
   note,
   onDelete,
@@ -151,8 +184,8 @@ export function NoteContent({
   variant?: "owner" | "public";
 }) {
   const isPublic = variant === "public";
-  // ProductNote lays out its own image beside the buy panel.
-  const showCover = note.cover_image_url && note.content_type !== "product";
+  // ProductNote lays out its own image beside the buy panel — it skips the shared hero.
+  const showHero = note.content_type !== "product";
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
       {isPublic ? (
@@ -162,18 +195,7 @@ export function NoteContent({
       )}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
       {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
-      {showCover && (
-        <div className="mb-8 overflow-hidden rounded-3xl border border-border">
-          <img
-            src={note.cover_image_url!}
-            alt=""
-            className="h-72 w-full object-cover md:h-96"
-            onError={(e) => {
-              (e.currentTarget.parentElement as HTMLElement).style.display = "none";
-            }}
-          />
-        </div>
-      )}
+      {showHero && <CoverHero note={note} />}
       <AISummaryBlock summary={note.ai_summary} />
       <div className="mt-8">
         <SafeNoteBody note={note} />

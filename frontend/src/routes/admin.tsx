@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, RefreshCw, Users, FileText, Coins, AlertTriangle } from "lucide-react";
+import { ArrowLeft, RefreshCw, Users, FileText, Coins, AlertTriangle, Image } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { adminStats, type AdminStats } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
@@ -130,8 +130,10 @@ function AdminPage() {
               <StatCard label="Tokens" value={fmt(stats.totals.tokens)} />
               <StatCard label="Asks today" value={fmt(stats.totals.asks_today)} />
               <StatCard
-                label="Avg ₹/user"
-                value={inr(stats.totals.users ? stats.totals.cost_inr / stats.totals.users : 0)}
+                icon={Image}
+                label="AI covers"
+                value={fmt(stats.totals.images)}
+                sub={`${fmt(stats.totals.images_today)} today`}
               />
             </div>
 
@@ -144,6 +146,7 @@ function AdminPage() {
                       <th className="px-4 py-3 font-medium">User</th>
                       <th className="px-4 py-3 text-right font-medium">Notes</th>
                       <th className="px-4 py-3 text-right font-medium">Tokens</th>
+                      <th className="px-4 py-3 text-right font-medium">AI covers</th>
                       <th className="px-4 py-3 text-right font-medium">AI calls</th>
                       <th className="px-4 py-3 text-right font-medium">Cost</th>
                       <th className="px-4 py-3 font-medium">Joined</th>
@@ -165,6 +168,9 @@ function AdminPage() {
                           <div className="text-[10px]">
                             {fmt(u.tokens_in)} in · {fmt(u.tokens_out)} out
                           </div>
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-ink-soft">
+                          {fmt(u.images)}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-ink-soft">
                           {fmt(u.ai_calls)}
@@ -196,7 +202,7 @@ function AdminPage() {
                     ))}
                     {stats.users.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-ink-soft">
+                        <td colSpan={8} className="px-4 py-8 text-center text-ink-soft">
                           No users yet.
                         </td>
                       </tr>

@@ -76,9 +76,15 @@ class Settings:
     # Optional Jina Reader key (r.jina.ai works keyless at low volume; key raises limits).
     JINA_API_KEY: str = os.getenv("JINA_API_KEY", "")
 
-    # Imagen covers DEFERRED for MVP. Covers come from og:image → thumbnail → gradient.
+    # AI-generated covers (Imagen). Off by default — a real cost line. When on, a note
+    # that would otherwise be coverless gets one generated image (the frontend gradient
+    # hero is the fallback when off / failed / capped). Daily caps mirror the note caps;
+    # price is USD per generated image (verify against live Vertex pricing before enabling).
     ENABLE_IMAGEN: bool = os.getenv("ENABLE_IMAGEN", "false").lower() == "true"
     VISUAL_CONTENT_TYPES: set[str] = {"recipe", "product", "itinerary", "travel", "place", "fashion", "workout"}
+    MAX_IMAGES_PER_USER_PER_DAY: int = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "20"))
+    DAILY_GLOBAL_IMAGE_CAP: int = int(os.getenv("DAILY_GLOBAL_IMAGE_CAP", "200"))
+    IMAGEN_PRICE_PER_IMAGE: float = float(os.getenv("IMAGEN_PRICE_PER_IMAGE", "0.04"))
 
     # --- Admin dashboard ---
     # Emails allowed to read /api/admin/stats (comma-separated). Gating is by verified

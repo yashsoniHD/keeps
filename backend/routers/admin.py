@@ -34,14 +34,16 @@ async def require_admin(authorization: str | None = Header(default=None)) -> str
     return claims["uid"]
 
 
-def _cost_usd(ti_main: int, to_main: int, ti_lite: int, to_lite: int) -> float:
-    """Per-tier token totals → USD, using config prices (USD per 1M tokens)."""
-    return (
+def _cost_usd(ti_main: int, to_main: int, ti_lite: int, to_lite: int, images: int = 0) -> float:
+    """Per-tier token totals (+ generated images) → USD, using config prices
+    (tokens priced per 1M; images per-image)."""
+    token_cost = (
         ti_main * settings.GEMINI_PRICE_IN
         + to_main * settings.GEMINI_PRICE_OUT
         + ti_lite * settings.GEMINI_LITE_PRICE_IN
         + to_lite * settings.GEMINI_LITE_PRICE_OUT
     ) / 1_000_000
+    return token_cost + images * settings.IMAGEN_PRICE_PER_IMAGE
 
 
 @router.get("/admin/stats")
@@ -72,7 +74,7 @@ async def admin_stats(_: str = Depends(require_admin)):
             active7.add(uid)
 
     per_user = []
-    total_cost = total_tokens = 0
+    total_cost = total_tokens = total_images = 0
     for u in auth_users:
         uid = u["uid"]
         prof = user_docs.get(uid, {})
@@ -80,10 +82,12 @@ async def admin_stats(_: str = Depends(require_admin)):
         to_main = prof.get("lifetime_tokens_out_main", 0)
         ti_lite = prof.get("lifetime_tokens_in_lite", 0)
         to_lite = prof.get("lifetime_tokens_out_lite", 0)
-        cost = _cost_usd(ti_main, to_main, ti_lite, to_lite)
+        images = prof.get("lifetime_images", 0)
+        cost = _cost_usd(ti_main, to_main, ti_lite, to_lite, images)
         tokens = ti_main + to_main + ti_lite + to_lite
         total_cost += cost
         total_tokens += tokens
+        total_images += images
 
         notes_agg = await db.collection("notes").where("user_id", "==", uid).count().get()
         notes = notes_agg[0][0].value
@@ -98,6 +102,7 @@ async def admin_stats(_: str = Depends(require_admin)):
             "tokens_in": ti_main + ti_lite,
             "tokens_out": to_main + to_lite,
             "tokens": tokens,
+            "images": images,
             "ai_calls": prof.get("lifetime_ai_calls", 0),
             "cost_usd": round(cost, 4),
             "cost_inr": round(cost * settings.USD_TO_INR, 2),
@@ -122,13 +127,15 @@ async def admin_stats(_: str = Depends(require_admin)):
             "active_7d": len(active7),
             "active_30d": len(active30),
             "tokens": total_tokens,
+            "images": total_images,
             "cost_usd": round(total_cost, 2),
             "cost_inr": round(total_cost * settings.USD_TO_INR, 2),
             "jobs": jobs_total,
             "jobs_failed": jobs_failed,
             "notes_today": sys_today.get("note_count", 0),
             "asks_today": sys_today.get("ask_count", 0),
+            "images_today": sys_today.get("image_count", 0),
         },
-        "pricing_note": "Cost uses configured Gemini prices — verify GEMINI_PRICE_* against live Vertex pricing.",
+        "pricing_note": "Cost uses configured Gemini + Imagen prices — verify GEMINI_PRICE_* and IMAGEN_PRICE_PER_IMAGE against live Vertex pricing.",
         "users": per_user,
     }

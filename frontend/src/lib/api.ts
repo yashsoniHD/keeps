@@ -217,6 +217,7 @@ export interface AdminUserRow {
   tokens_in: number;
   tokens_out: number;
   tokens: number;
+  images: number;
   ai_calls: number;
   cost_usd: number;
   cost_inr: number;
@@ -232,12 +233,14 @@ export interface AdminStats {
     active_7d: number;
     active_30d: number;
     tokens: number;
+    images: number;
     cost_usd: number;
     cost_inr: number;
     jobs: number;
     jobs_failed: number;
     notes_today: number;
     asks_today: number;
+    images_today: number;
   };
   pricing_note: string;
   users: AdminUserRow[];

@@ -36,8 +36,11 @@ from services.firebase import (
     flush_usage,
     get_db,
     get_user_categories,
+    record_image_generated,
+    reserve_image_slot,
 )
 from services.gemini import gemini_service
+from services.imagen import generate_cover
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.usage_meter import start_metering
 
@@ -218,6 +221,16 @@ async def process_job(job_id: str, request: Request):
         # Skip frames we already extracted (those are covers-bucket URLs).
         if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
             cover_image_url = await persist_cover(cover_image_url) or cover_image_url
+        # Last resort: generate a cover with Imagen (gated, capped). Only when the note
+        # would otherwise be coverless — real source imagery always wins. A miss (off,
+        # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
+        if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
+            if await reserve_image_slot(user_id):
+                cover_image_url = await generate_cover(
+                    extracted.cover_image_prompt, extracted.content_type
+                )
+                if cover_image_url:
+                    await record_image_generated(user_id)
         source_domain = url.split("/")[2].replace("www.", "") if "://" in url else url
 
         note_id = str(uuid.uuid4())

@@ -28,7 +28,9 @@ def _public_url(bucket: str, blob_name: str) -> str:
     return f"https://storage.googleapis.com/{bucket}/{blob_name}"
 
 
-def _upload_cover(data: bytes, suffix: str, content_type: str) -> str:
+def upload_cover_bytes(data: bytes, suffix: str, content_type: str) -> str:
+    """Upload raw image bytes to the public covers bucket; return the durable https URL.
+    Synchronous (blocking GCS SDK) — call via asyncio.to_thread from async code."""
     from google.cloud import storage
 
     client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
@@ -37,6 +39,10 @@ def _upload_cover(data: bytes, suffix: str, content_type: str) -> str:
     blob = bucket.blob(blob_name)
     blob.upload_from_string(data, content_type=content_type)
     return _public_url(settings.COVERS_BUCKET, blob_name)
+
+
+# Back-compat alias for existing call sites within this module.
+_upload_cover = upload_cover_bytes
 
 
 async def persist_cover(src_url: str) -> str | None:
