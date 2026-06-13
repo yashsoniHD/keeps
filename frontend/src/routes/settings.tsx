@@ -36,7 +36,7 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 // The published copy carries the "Paste your Clipnote token" import question (verified
 // via the icloud.com/shortcuts/api/records/<id> payload) — no token is baked in.
 // Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
-const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/3570d02ffb974d16ad6b6ea6fa08cfa5";
+const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/d3ba89f721d54d1ba2e89185f6472eae";
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://clipnote.web.app";
