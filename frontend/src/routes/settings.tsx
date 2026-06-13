@@ -25,7 +25,7 @@ import { AppShell } from "@/components/AppShell";
 import { CategoriesSection } from "@/components/CategoriesSection";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/lib/theme";
-import { isStandalone } from "@/lib/platform";
+import { getInstallPrompt, isAndroid, isIOS, isStandalone } from "@/lib/platform";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -108,11 +108,11 @@ function Settings() {
           </div>
         </section>
 
-        <ConnectPhone />
-
         <CategoriesSection />
 
         <AppearanceSection />
+
+        <ConnectPhone />
 
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
@@ -206,6 +206,19 @@ function ConnectPhone() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Surface only the instructions that match the device. Desktop (neither) sees both,
+  // since we can't tell which phone they'll set up — and may be installing on desktop too.
+  const ios = isIOS();
+  const android = isAndroid();
+  const showIOS = ios || (!ios && !android);
+  const showAndroid = android || (!ios && !android);
+
+  const installPrompt = getInstallPrompt();
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+  };
+
   const refresh = useCallback(() => {
     listTokens()
       .then(setTokens)
@@ -274,17 +287,32 @@ function ConnectPhone() {
       </h2>
 
       <div className="mt-4 space-y-2 text-sm text-ink-soft">
-        <p>
-          <strong className="text-ink">Android / desktop:</strong> install Clipnote from the browser
-          menu ("Add to Home screen"), and it then appears in your share sheet.
-        </p>
-        <p>
-          <strong className="text-ink">iPhone:</strong> one tap sets up a Shortcut so any app's
-          share sheet can save straight to Clipnote.
-        </p>
+        {showAndroid && (
+          <p>
+            <strong className="text-ink">Android:</strong> install Clipnote from the browser menu
+            ("Add to Home screen"), and it then appears in your share sheet.
+          </p>
+        )}
+        {showIOS && (
+          <p>
+            <strong className="text-ink">iPhone:</strong> one tap sets up a Shortcut so any app's
+            share sheet can save straight to Clipnote.
+          </p>
+        )}
       </div>
 
-      {!newToken && (
+      {showAndroid && installPrompt && (
+        <button
+          type="button"
+          onClick={handleInstall}
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+        >
+          <Download className="h-4 w-4" />
+          Install Clipnote
+        </button>
+      )}
+
+      {showIOS && !newToken && (
         <button
           type="button"
           onClick={handleAdd}
@@ -295,7 +323,7 @@ function ConnectPhone() {
         </button>
       )}
 
-      {newToken && (
+      {showIOS && newToken && (
         <div className="mt-4 rounded-2xl border border-border bg-paper p-4">
           {SHORTCUT_ICLOUD_LINK ? (
             <>

@@ -75,8 +75,9 @@ export function CoverThumb({
   );
 }
 
-// A note "has a cover" only if a URL exists AND it actually loaded — a broken image
-// reveals CoverThumb's placeholder icon, so the label must not repeat it.
+// A note "has a cover" only if a URL exists AND it actually loaded. Cards render the
+// thumbnail solely on this signal, so a missing or broken cover shows no tile at all —
+// the type icon beside the label carries the visual instead.
 function useCoverPresent(note: Note) {
   const [broken, setBroken] = useState(false);
   return {
@@ -102,15 +103,17 @@ export function NoteCard({ note }: { note: Note }) {
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <CoverThumb
-            note={note}
-            className="h-9 w-9 shrink-0 rounded-lg"
-            onImageError={onImageError}
-          />
+          {/* The type icon always rides with the label; the cover thumbnail only appears
+              when the note actually has a (working) cover image — no placeholder tiles. */}
+          {hasCover && (
+            <CoverThumb
+              note={note}
+              className="h-9 w-9 shrink-0 rounded-lg"
+              onImageError={onImageError}
+            />
+          )}
           <span className={`inline-flex min-w-0 items-center gap-1 text-xs font-medium ${accent.text}`}>
-            {/* The thumb already shows the icon when there's no cover — only repeat it
-                next to the label when a cover image actually takes the thumb's place. */}
-            {hasCover && <Icon className="h-3.5 w-3.5 shrink-0" />}
+            <Icon className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{noteLabel(note.content_type)}</span>
           </span>
         </div>
@@ -153,17 +156,19 @@ export function NoteRow({ note }: { note: Note }) {
       params={{ noteId: note.id }}
       className={`group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent ${FOCUS_RING}`}
     >
-      <CoverThumb
-        note={note}
-        className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60"
-        onImageError={onImageError}
-      />
+      {hasCover && (
+        <CoverThumb
+          note={note}
+          className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60"
+          onImageError={onImageError}
+        />
+      )}
 
       <div className="min-w-0 flex-1">
         <h3 className="text-base font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
           <span className={`inline-flex shrink-0 items-center gap-1 font-medium ${accent.text}`}>
-            {hasCover && <Icon className="h-3.5 w-3.5 shrink-0" />}
+            <Icon className="h-3.5 w-3.5 shrink-0" />
             {noteLabel(note.content_type)}
           </span>
           <span className="shrink-0">·</span>
