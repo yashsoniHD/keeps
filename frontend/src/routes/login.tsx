@@ -45,7 +45,7 @@ function LoginPage() {
         </div>
         <h1 className="font-serif text-4xl text-ink">Clipnote</h1>
         <p className="mt-2 text-sm text-ink-soft">
-          Reels, videos, products, articles — saved as structured notes you'll actually re-read.
+          Reels, videos, products, articles: saved as structured notes you'll actually re-read.
         </p>
         <button
           onClick={handleSignIn}

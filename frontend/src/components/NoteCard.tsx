@@ -9,6 +9,7 @@ import {
   noteLabel,
   sourceLabel,
 } from "@/lib/note-meta";
+import { FOCUS_RING } from "@/lib/ui";
 
 // Two-tap delete; used inside the note view (NoteHeader), not on feed cards.
 export function DeleteButton({ onDelete }: { onDelete: () => void }) {
@@ -70,19 +71,21 @@ export function CoverThumb({ note, className = "" }: { note: Note; className?: s
 // line-clamp space so cards stay equal-sized even when text runs short.
 export function NoteCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
+  const Icon = noteIcon(note.content_type);
   const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
 
   return (
     <Link
       to="/notes/$noteId"
       params={{ noteId: note.id }}
-      className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${accent.ring}`}
+      className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <CoverThumb note={note} className="h-9 w-9 shrink-0 rounded-lg" />
-          <span className={`truncate text-xs font-medium ${accent.text}`}>
-            {noteLabel(note.content_type)}
+          <span className={`inline-flex min-w-0 items-center gap-1 text-xs font-medium ${accent.text}`}>
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{noteLabel(note.content_type)}</span>
           </span>
         </div>
         <span className="shrink-0 text-[11px] text-ink-soft">{formatDateShort(note.created_at)}</span>
@@ -102,7 +105,7 @@ export function NoteCard({ note }: { note: Note }) {
           alt=""
           className="h-3.5 w-3.5 rounded-sm"
         />
-        <span className="truncate">{sourceLabel(note.source_domain)}</span>
+        <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
         {price && <span className="ml-auto font-serif text-sm text-ink">{price}</span>}
       </div>
     </Link>
@@ -115,12 +118,13 @@ export function NoteCard({ note }: { note: Note }) {
 // titles stretch rows past the viewport on phones.
 export function NoteRow({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
+  const Icon = noteIcon(note.content_type);
 
   return (
     <Link
       to="/notes/$noteId"
       params={{ noteId: note.id }}
-      className="group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent"
+      className={`group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent ${FOCUS_RING}`}
     >
       <CoverThumb
         note={note}
@@ -130,11 +134,12 @@ export function NoteRow({ note }: { note: Note }) {
       <div className="min-w-0 flex-1">
         <h3 className="text-base font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
-          <span className={`shrink-0 font-medium ${accent.text}`}>
+          <span className={`inline-flex shrink-0 items-center gap-1 font-medium ${accent.text}`}>
+            <Icon className="h-3.5 w-3.5 shrink-0" />
             {noteLabel(note.content_type)}
           </span>
           <span className="shrink-0">·</span>
-          <span className="truncate">{sourceLabel(note.source_domain)}</span>
+          <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
           <span className="shrink-0">·</span>
           <span className="shrink-0">{formatDateShort(note.created_at)}</span>
         </div>
@@ -234,7 +239,7 @@ export function ProcessingCard({ job, label = "Processing" }: { job: Job; label?
           alt=""
           className="h-3.5 w-3.5 rounded-sm"
         />
-        <span className="truncate">{sourceLabel(domain)}</span>
+        <span className="truncate capitalize">{sourceLabel(domain)}</span>
       </div>
     </div>
   );
@@ -277,7 +282,7 @@ export function FailedCard({
       </p>
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-4">
-        <span className="truncate text-[11px] text-ink-soft">{sourceLabel(domain)}</span>
+        <span className="truncate capitalize text-[11px] text-ink-soft">{sourceLabel(domain)}</span>
         <button
           type="button"
           onClick={() => onRetry(job)}
@@ -311,7 +316,7 @@ export function FailedRow({
         <div className="mt-1 flex items-center gap-1.5 text-xs text-ink-soft">
           <span className="font-medium text-destructive">Couldn't save</span>
           <span>·</span>
-          <span className="truncate">{sourceLabel(domain)}</span>
+          <span className="truncate capitalize">{sourceLabel(domain)}</span>
         </div>
       </div>
       <button
@@ -350,7 +355,7 @@ export function ProcessingRow({ job, label = "Processing" }: { job: Job; label?:
         <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-soft">
           <span className="font-medium">{label}</span>
           <span>·</span>
-          <span className="truncate">{sourceLabel(domain)}</span>
+          <span className="truncate capitalize">{sourceLabel(domain)}</span>
         </div>
       </div>
     </div>

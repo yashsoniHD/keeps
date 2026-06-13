@@ -10,6 +10,8 @@ import {
   Download,
   BarChart3,
   Share2,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ADMIN_EMAILS } from "@/routes/admin";
@@ -21,6 +23,8 @@ import {
 } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { CategoriesSection } from "@/components/CategoriesSection";
+import { Switch } from "@/components/ui/switch";
+import { useTheme } from "@/lib/theme";
 import { isStandalone } from "@/lib/platform";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
@@ -36,7 +40,7 @@ const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/a3ff9cb521f54dfcb
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://clipnote.web.app";
-const APP_SHARE_TEXT = "Clip Note — save any link as a beautifully structured note you'll actually re-read.";
+const APP_SHARE_TEXT = "Clip Note: save any link as a beautifully structured note you'll actually re-read.";
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
@@ -108,6 +112,8 @@ function Settings() {
 
         <CategoriesSection />
 
+        <AppearanceSection />
+
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
           <button
@@ -164,6 +170,32 @@ function Settings() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+// Theme control. A manual toggle commits an explicit light/dark choice (dropping the
+// "follow system" default); the resolved value drives both the icon and the switch state.
+function AppearanceSection() {
+  const { resolved, setTheme } = useTheme();
+  const isDark = resolved === "dark";
+  return (
+    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
+      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
+        {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+        Appearance
+      </h2>
+      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3">
+        <span>
+          <span className="block text-sm font-medium text-ink">Dark mode</span>
+          <span className="block text-xs text-ink-soft">Switch between light and dark themes.</span>
+        </span>
+        <Switch
+          checked={isDark}
+          onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
+          aria-label="Toggle dark mode"
+        />
+      </label>
+    </section>
   );
 }
 
@@ -244,7 +276,7 @@ function ConnectPhone() {
       <div className="mt-4 space-y-2 text-sm text-ink-soft">
         <p>
           <strong className="text-ink">Android / desktop:</strong> install Clipnote from the browser
-          menu ("Add to Home screen") — it then appears in your share sheet.
+          menu ("Add to Home screen"), and it then appears in your share sheet.
         </p>
         <p>
           <strong className="text-ink">iPhone:</strong> one tap sets up a Shortcut so any app's
@@ -278,12 +310,12 @@ function ConnectPhone() {
               </a>
               <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
                 <li>
-                  Tap <strong className="text-ink">Add the Shortcut</strong> — the Shortcuts app
-                  opens.
+                  Tap <strong className="text-ink">Add the Shortcut</strong> to open the Shortcuts
+                  app.
                 </li>
                 <li>
                   Tap <strong className="text-ink">Add Shortcut</strong>, then{" "}
-                  <strong className="text-ink">paste when asked</strong> — your token is already
+                  <strong className="text-ink">paste when asked</strong>. Your token is already
                   copied.
                 </li>
                 <li>
@@ -309,8 +341,8 @@ function ConnectPhone() {
                 <li>
                   Tap the <strong className="text-ink">downloads (↓) icon</strong> in Safari's
                   address bar, then tap{" "}
-                  <strong className="text-ink">Save to Clipnote.shortcut</strong> — the Shortcuts
-                  app opens.
+                  <strong className="text-ink">Save to Clipnote.shortcut</strong> to open the
+                  Shortcuts app.
                 </li>
                 <li>
                   Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when
@@ -323,7 +355,7 @@ function ConnectPhone() {
               </ol>
               {isStandalone() && (
                 <p className="mt-3 text-xs text-ink-soft">
-                  You're in the installed app, where iPhone can't show downloads — open{" "}
+                  You're in the installed app, where iPhone can't show downloads. Open{" "}
                   <strong className="text-ink">{window.location.host}/settings</strong> in Safari
                   for this step.
                 </p>
@@ -333,7 +365,7 @@ function ConnectPhone() {
 
           <div className="mt-4 border-t border-border pt-3">
             <div className="text-xs uppercase tracking-wider text-ink-soft">
-              Your token — shown only once
+              Your token, shown only once
             </div>
             <div className="mt-2 flex items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs text-ink">
@@ -354,7 +386,7 @@ function ConnectPhone() {
             </div>
             <p className="mt-2 text-xs text-ink-soft">
               {copied
-                ? "Copied to your clipboard ✓ — just paste when the Shortcut asks."
+                ? "Copied to your clipboard ✓. Just paste when the Shortcut asks."
                 : "Tap copy, then paste when the Shortcut asks."}
             </p>
           </div>
@@ -364,7 +396,7 @@ function ConnectPhone() {
             onClick={() => setNewToken(null)}
             className="mt-4 text-sm text-ink-soft underline hover:text-ink"
           >
-            Done — hide token
+            Hide token
           </button>
         </div>
       )}

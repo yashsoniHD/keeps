@@ -51,7 +51,7 @@ export function GettingStarted({
           <strong>Add to Home Screen</strong>.
         </>
       ) : installPrompt ? (
-        "One tap — Clipnote opens like a native app."
+        "One tap, and Clipnote opens like a native app."
       ) : (
         <>
           In your browser menu, choose <strong>Install app</strong> /{" "}
@@ -75,7 +75,7 @@ export function GettingStarted({
       title: "Set up the shortcut",
       detail: ios ? (
         <>
-          In <strong>Settings → Capture from your phone</strong>, add the iPhone shortcut — then any
+          In <strong>Settings → Capture from your phone</strong>, add the iPhone shortcut, then any
           app's share sheet saves to Clipnote.
         </>
       ) : (
@@ -98,7 +98,7 @@ export function GettingStarted({
       done: notesCount > 0,
       icon: Compass,
       title: "Save your first link",
-      detail: "Paste any URL — recipe, reel, product, article — and watch it become a note.",
+      detail: "Paste any URL (recipe, reel, product, article) and watch it become a note.",
       action: (
         <button
           type="button"

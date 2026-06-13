@@ -48,6 +48,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Timestamp } from "firebase/firestore";
+import type { Note } from "@/lib/types";
 
 export interface NoteAccent {
   dot: string;
@@ -205,4 +206,60 @@ export function formatDateShort(ts?: Timestamp): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "2-digit";
   return d.toLocaleDateString("en-IN", opts);
+}
+
+export interface NoteGroup {
+  key: string;
+  label: string;
+  notes: Note[];
+}
+
+// Bucket a feed (already sorted newest-first) into dated sections so the home screen
+// reads as recent activity rather than one endless list: Today / Yesterday / This Week /
+// This Month / "Month YYYY" for older. Order follows first-appearance, which — given the
+// pre-sorted input — is already newest group first, with each group's notes still in order.
+const DAY_MS = 86_400_000;
+
+export function groupNotesByDate(notes: Note[]): NoteGroup[] {
+  const now = new Date();
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const today = startOfDay(now);
+  const yesterday = today - DAY_MS;
+  const weekStart = today - 6 * DAY_MS; // today + the previous 6 days count as "this week"
+
+  const order: string[] = [];
+  const groups = new Map<string, NoteGroup>();
+  const add = (key: string, label: string, note: Note) => {
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, label, notes: [] };
+      groups.set(key, g);
+      order.push(key);
+    }
+    g.notes.push(note);
+  };
+
+  for (const n of notes) {
+    const d = n.created_at?.toDate?.();
+    if (!d) {
+      add("earlier", "Earlier", n);
+      continue;
+    }
+    const day = startOfDay(d);
+    if (day === today) add("today", "Today", n);
+    else if (day === yesterday) add("yesterday", "Yesterday", n);
+    else if (day >= weekStart) add("week", "This Week", n);
+    else if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth())
+      add("month", "This Month", n);
+    else {
+      add(
+        `${d.getFullYear()}-${d.getMonth()}`,
+        d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+        n,
+      );
+    }
+  }
+
+  return order.map((k) => groups.get(k)!);
 }

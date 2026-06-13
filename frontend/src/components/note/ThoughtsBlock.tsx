@@ -68,7 +68,7 @@ export function ThoughtsBlock({
           scheduleSave(text);
         }}
         rows={3}
-        placeholder="Add a note to your future self — why you saved this, what to try…"
+        placeholder="Add a note to your future self: why you saved this, what to try…"
         className="w-full resize-y bg-transparent text-sm leading-relaxed text-ink outline-none placeholder:text-ink-soft"
       />
     </section>

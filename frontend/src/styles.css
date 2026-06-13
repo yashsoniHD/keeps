@@ -129,6 +129,25 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.55 0.04 60);
+
+  /* type accents — base nudged lighter for legibility on charcoal; -soft inverts from
+     near-white fills to dark, low-chroma tints that sit just above the card surface. */
+  --recipe: oklch(0.72 0.15 38);
+  --recipe-soft: oklch(0.30 0.05 40);
+  --itinerary: oklch(0.70 0.11 155);
+  --itinerary-soft: oklch(0.30 0.04 155);
+  --product: oklch(0.68 0.14 265);
+  --product-soft: oklch(0.31 0.05 265);
+  --summary: oklch(0.76 0.13 80);
+  --summary-soft: oklch(0.32 0.05 80);
+  --media: oklch(0.70 0.16 330);
+  --media-soft: oklch(0.31 0.05 330);
+  --tech: oklch(0.70 0.12 230);
+  --tech-soft: oklch(0.30 0.04 230);
+  --business: oklch(0.68 0.10 195);
+  --business-soft: oklch(0.30 0.04 195);
+  --health: oklch(0.72 0.15 10);
+  --health-soft: oklch(0.31 0.05 10);
 }
 
 @layer base {

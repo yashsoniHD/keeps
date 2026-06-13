@@ -39,7 +39,7 @@ function NoteBody({ note }: { note: Note }) {
 function PlainBody({ note }: { note: Note }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 text-sm text-ink-soft">
-      This note's details couldn't be displayed —{" "}
+      This note's details couldn't be displayed;{" "}
       <a href={note.source_url} target="_blank" rel="noreferrer" className="underline">
         open the original
       </a>{" "}
@@ -82,7 +82,7 @@ function FallbackBanner({ note }: { note: Note }) {
   };
   return (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/50 px-4 py-3 text-sm text-ink-soft">
-      <span>Limited preview — we saved the link, but couldn't process the content.</span>
+      <span>Limited preview. We saved the link, but couldn't process the content.</span>
       <button
         type="button"
         onClick={retry}
@@ -124,7 +124,7 @@ function PublicSignupCTA() {
       <div>
         <p className="font-serif text-xl text-ink">Saved with Clip Note</p>
         <p className="mt-1 text-sm text-ink-soft">
-          Turn any link — recipe, video, product, article — into a structured note you'll
+          Turn any link (recipe, video, product, article) into a structured note you'll
           actually re-read.
         </p>
       </div>

@@ -43,7 +43,7 @@ function PublicNote() {
         <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-ink text-paper">
           <Sparkles className="h-6 w-6" />
         </span>
-        <p className="text-ink-soft">This note isn't available — it may be private or removed.</p>
+        <p className="text-ink-soft">This note isn't available. It may be private or removed.</p>
         <Link
           to="/"
           className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper"

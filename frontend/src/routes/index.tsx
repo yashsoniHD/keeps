@@ -29,7 +29,8 @@ import {
   replayQueue,
   type QueuedCapture,
 } from "@/lib/capture-queue";
-import { noteLabel, sourceLabel } from "@/lib/note-meta";
+import { groupNotesByDate, noteLabel, sourceLabel } from "@/lib/note-meta";
+import { FOCUS_RING } from "@/lib/ui";
 import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
@@ -39,6 +40,11 @@ import type { Note, Job } from "@/lib/types";
 export const Route = createFileRoute("/")({ component: Feed });
 
 type Layout = "standard" | "condensed";
+
+// Round header icon button: 40px tap target, hairline border, with the shared focus ring.
+// (The + FAB is intentionally left without a focus ring.)
+const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
+const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
 
 function Feed() {
   const { user, loading } = useAuth();
@@ -249,6 +255,13 @@ function Feed() {
     });
   }, [searchActive, searchResults, filtered, active, source]);
 
+  // Date-bucketed feed (Today / Yesterday / This Week / …). Search results stay flat —
+  // grouping a relevance-ranked list by recency would be misleading.
+  const dateGroups = useMemo(
+    () => (searchActive ? null : groupNotesByDate(displayNotes)),
+    [searchActive, displayNotes],
+  );
+
   // Processing cards show only on the default view — an in-flight job has no type/title
   // yet to match a filter or search. Merge server jobs with not-yet-acknowledged local
   // placeholders, drop any whose note already landed (the brief completion overlap).
@@ -334,7 +347,7 @@ function Feed() {
                     }
                     aria-label="Ask AI"
                     title="Ask AI"
-                    className="-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95"
+                    className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
                   >
                     <WandSparkles className="h-4 w-4" />
                     Ask AI
@@ -348,7 +361,7 @@ function Feed() {
                   setSearchOpen(false);
                 }}
                 aria-label="Close search"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+                className={`shrink-0 ${ICON_BTN}`}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -367,7 +380,7 @@ function Feed() {
                   onClick={() => setSearchOpen(true)}
                   aria-label="Search notes"
                   title="Search"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+                  className={ICON_BTN}
                 >
                   <Search className="h-4 w-4" />
                 </button>
@@ -378,7 +391,7 @@ function Feed() {
                     layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"
                   }
                   title={layout === "standard" ? "Condensed view" : "Card view"}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+                  className={ICON_BTN}
                 >
                   {layout === "standard" ? (
                     <List className="h-4 w-4" />
@@ -390,7 +403,7 @@ function Feed() {
                   to="/settings"
                   aria-label="Settings"
                   title="Settings"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink"
+                  className={ICON_BTN}
                 >
                   <Settings className="h-4 w-4" />
                 </Link>
@@ -412,7 +425,7 @@ function Feed() {
                     key={f.id}
                     type="button"
                     onClick={() => setActive(f.id)}
-                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
                       active === f.id
                         ? "bg-ink text-paper"
                         : "border border-border bg-card text-ink-soft hover:text-ink"
@@ -481,32 +494,50 @@ function Feed() {
               hasNotes={notes.length > 0 || active !== "all" || source !== "all" || searchActive}
             />
           )
-        ) : layout === "condensed" ? (
-          <NoteRowList
-            notes={displayNotes}
-            jobs={pendingJobs}
-            queuedJobs={queuedJobs}
-            failedJobs={failedJobs}
-            onRetry={retryJob}
-            onDismiss={dismissJob}
-          />
         ) : (
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {failedJobs.map((j) => (
-              <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
-            ))}
-            {queuedJobs.map((j) => (
-              <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
-            ))}
-            {pendingJobs.map((j) => (
-              <ProcessingCard key={j.id} job={j} />
-            ))}
-            {displayNotes.map((n) => (
-              <ErrorBoundary key={n.id} label="feed-card" fallback={<FallbackNoteCard note={n} />}>
-                <NoteCard note={n} />
-              </ErrorBoundary>
-            ))}
-          </section>
+          <div className="space-y-8">
+            {/* In-flight captures ("just now") sit above the dated groups. */}
+            {(failedJobs.length > 0 || queuedJobs.length > 0 || pendingJobs.length > 0) &&
+              (layout === "condensed" ? (
+                <NoteRowList
+                  notes={[]}
+                  jobs={pendingJobs}
+                  queuedJobs={queuedJobs}
+                  failedJobs={failedJobs}
+                  onRetry={retryJob}
+                  onDismiss={dismissJob}
+                />
+              ) : (
+                <section className={GRID_CLS}>
+                  {failedJobs.map((j) => (
+                    <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
+                  ))}
+                  {queuedJobs.map((j) => (
+                    <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
+                  ))}
+                  {pendingJobs.map((j) => (
+                    <ProcessingCard key={j.id} job={j} />
+                  ))}
+                </section>
+              ))}
+
+            {dateGroups ? (
+              dateGroups.map((g) => (
+                <div key={g.key}>
+                  <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">{g.label}</h2>
+                  {layout === "condensed" ? (
+                    <NoteRowList notes={g.notes} />
+                  ) : (
+                    <NoteGrid notes={g.notes} />
+                  )}
+                </div>
+              ))
+            ) : layout === "condensed" ? (
+              <NoteRowList notes={displayNotes} />
+            ) : (
+              <NoteGrid notes={displayNotes} />
+            )}
+          </div>
         )}
 
         {notesReady && !searchActive && notes.length >= max && (
@@ -561,7 +592,7 @@ function SourceLogo({ domain, className }: { domain: string; className?: string 
 }
 
 // Source filter: a custom dropdown (native <select> can't render logos) showing
-// each platform's favicon beside its name, on a white menu.
+// each platform's favicon beside its name, on a popover surface.
 function SourceFilter({
   sources,
   source,
@@ -593,7 +624,7 @@ function SourceFilter({
         aria-label="Filter by source"
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${
+        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
           source !== "all"
             ? "border-ink bg-card"
             : "border-border bg-card text-ink-soft hover:text-ink"
@@ -609,7 +640,7 @@ function SourceFilter({
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 z-50 mt-2 max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-white p-1.5 shadow-2xl"
+          className="absolute left-0 z-50 mt-2 max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-popover p-1.5 shadow-2xl"
         >
           {options.map((o) => {
             const selected = source === o.id;
@@ -663,7 +694,7 @@ function AddSheet({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border md:hidden" />
         <h2 className="font-serif text-2xl text-ink">New note</h2>
         <p className="mt-1 text-sm text-ink-soft">
-          Paste any link — reel, video, recipe, product, article.
+          Paste any link: reel, video, recipe, product, article.
         </p>
         <form
           onSubmit={(e) => {
@@ -703,6 +734,20 @@ function AddSheet({
   );
 }
 
+// A responsive grid of note cards, each isolated by an error boundary so one bad note
+// can't blank the whole feed.
+function NoteGrid({ notes }: { notes: Note[] }) {
+  return (
+    <section className={GRID_CLS}>
+      {notes.map((n) => (
+        <ErrorBoundary key={n.id} label="feed-card" fallback={<FallbackNoteCard note={n} />}>
+          <NoteCard note={n} />
+        </ErrorBoundary>
+      ))}
+    </section>
+  );
+}
+
 // Boundary fallback for a feed card whose data breaks NoteCard's render: title-only,
 // still clickable (the detail route has its own deeper fallback ladder).
 function FallbackNoteCard({ note }: { note: Note }) {
@@ -713,7 +758,7 @@ function FallbackNoteCard({ note }: { note: Note }) {
       className="flex min-w-0 flex-col justify-center rounded-2xl border border-border bg-card p-4"
     >
       <h3 className="font-serif text-xl leading-tight text-ink line-clamp-2">{note.title}</h3>
-      <p className="mt-2 text-sm text-ink-soft">Preview unavailable — tap to open.</p>
+      <p className="mt-2 text-sm text-ink-soft">Preview unavailable. Tap to open.</p>
     </Link>
   );
 }

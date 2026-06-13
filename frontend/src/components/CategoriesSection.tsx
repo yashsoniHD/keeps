@@ -143,7 +143,7 @@ function CategoryManager({
         <div className="mt-3 flex-1 overflow-y-auto px-5 pb-5">
           {categories.length === 0 ? (
             <p className="py-6 text-center text-sm text-ink-soft">
-              No categories yet — add one above, or they'll appear as you save notes.
+              No categories yet. Add one above, or they'll appear as you save notes.
             </p>
           ) : (
             <ul className="divide-y divide-border">

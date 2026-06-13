@@ -15,7 +15,7 @@ export function SourcePill({ domain, url }: { domain: string; url: string }) {
         alt=""
         className="h-3.5 w-3.5 rounded-sm"
       />
-      <span>{sourceLabel(domain)}</span>
+      <span className="capitalize">{sourceLabel(domain)}</span>
       <ExternalLink className="h-3 w-3 opacity-60" />
     </a>
   );

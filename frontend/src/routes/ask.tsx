@@ -153,7 +153,7 @@ function AskPage() {
             </span>
             <h2 className="mt-4 font-serif text-2xl text-ink">Ask anything about your notes</h2>
             <p className="mt-1.5 max-w-sm text-sm text-ink-soft">
-              Answers come only from what you've saved — every reply links back to the notes it
+              Answers come only from what you've saved, and every reply links back to the notes it
               used.
             </p>
             <div className="mt-6 flex w-full max-w-md flex-col gap-2">

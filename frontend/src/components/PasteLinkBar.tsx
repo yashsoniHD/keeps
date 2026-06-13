@@ -27,7 +27,7 @@ export function PasteLinkBar({ variant = "default" }: { variant?: "default" | "c
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste any link — article, reel, recipe, product…"
+          placeholder="Paste any link: article, reel, recipe, product…"
           className={`flex-1 bg-transparent outline-none placeholder:text-ink-soft ${
             big ? "py-2.5 text-base" : "py-1.5 text-sm"
           }`}
