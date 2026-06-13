@@ -83,6 +83,16 @@ async def add_user_category(uid: str, slug: str) -> None:
     )
 
 
+async def add_user_source(uid: str, domain: str) -> None:
+    """Adds a source domain to users/{uid}.sources (idempotent via ArrayUnion) so the
+    feed's source filter reflects the whole corpus, not just the loaded/filtered window."""
+    if not domain:
+        return
+    await get_db().collection("users").document(uid).set(
+        {"sources": ArrayUnion([domain])}, merge=True
+    )
+
+
 async def remove_user_category(uid: str, slug: str) -> None:
     """Drops a content_type slug from users/{uid}.categories (idempotent via ArrayRemove)."""
     await get_db().collection("users").document(uid).set(

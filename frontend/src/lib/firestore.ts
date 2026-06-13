@@ -104,6 +104,13 @@ export async function getUserCategories(userId: string): Promise<string[]> {
   return snap.exists() ? ((snap.data().categories ?? []) as string[]).sort() : [];
 }
 
+// One doc read against users/{uid}.sources — the whole-corpus source list, so the feed's
+// source filter stays stable instead of collapsing to the category-filtered window.
+export async function getUserSources(userId: string): Promise<string[]> {
+  const snap = await getDoc(doc(db, "users", userId));
+  return snap.exists() ? ((snap.data().sources ?? []) as string[]).sort() : [];
+}
+
 // kebab-case a label into a category slug, matching the backend's normalize_slug.
 export function slugifyCategory(raw: string): string {
   return raw

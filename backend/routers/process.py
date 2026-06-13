@@ -32,6 +32,7 @@ from services.covers import persist_cover
 from services.embeddings import embedding_service
 from services.firebase import (
     add_user_category,
+    add_user_source,
     firestore_safe,
     flush_usage,
     get_db,
@@ -253,6 +254,7 @@ async def process_job(job_id: str, request: Request):
             note_doc["embedding"] = embedding
         await db.collection("notes").document(note_id).set(note_doc)
         await add_user_category(user_id, extracted.content_type)
+        await add_user_source(user_id, source_domain)
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "updated_at": datetime.now(timezone.utc)})
         log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
@@ -288,8 +290,9 @@ async def process_job(job_id: str, request: Request):
                                           bundle=bundle, now=datetime.now(timezone.utc))
             try:
                 await add_user_category(user_id, "bookmark")
+                await add_user_source(user_id, _domain_of(url))
             except Exception:
-                pass  # category chip is cosmetic — never fail the salvage over it
+                pass  # category/source chips are cosmetic — never fail the salvage over it
             await job_ref.update({"status": "completed", "note_id": note_id,
                                   "error": f"salvaged: {type(e).__name__}: {e}"[:500],
                                   "updated_at": datetime.now(timezone.utc)})

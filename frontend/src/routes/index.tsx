@@ -18,6 +18,7 @@ import {
   watchNotes,
   watchPendingJobs,
   getUserCategories,
+  getUserSources,
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
@@ -54,6 +55,7 @@ function Feed() {
   const [feedError, setFeedError] = useState(false);
   const [max, setMax] = useState(50);
   const [userCategories, setUserCategories] = useState<string[]>([]);
+  const [userSources, setUserSources] = useState<string[]>([]);
   const [active, setActive] = useState<string>("all");
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
@@ -105,6 +107,9 @@ function Feed() {
     if (!user) return;
     getUserCategories(user.uid)
       .then(setUserCategories)
+      .catch(() => {});
+    getUserSources(user.uid)
+      .then(setUserSources)
       .catch(() => {});
   }, [user]);
 
@@ -198,9 +203,12 @@ function Feed() {
     () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
     [notes, userCategories],
   );
+  // Sources come from users/{uid}.sources (whole-corpus source of truth) unioned with
+  // loaded notes, so the source filter doesn't vanish when a server-side category filter
+  // narrows the loaded notes to a single domain — same trick as the category chips above.
   const sources = useMemo(
-    () => Array.from(new Set(notes.map((n) => n.source_domain))).sort(),
-    [notes],
+    () => Array.from(new Set([...userSources, ...notes.map((n) => n.source_domain)])).sort(),
+    [notes, userSources],
   );
 
   // Browse view: the live feed filtered only by the type/source chips. Text queries no

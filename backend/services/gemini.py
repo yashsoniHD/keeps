@@ -51,19 +51,34 @@ CATEGORY_SYSTEM = """You assign a content category to saved content.
 Return ONLY valid JSON: {"content_type": "slug"} — lowercase-kebab-case.
 
 Rules, in priority order:
-1. Pick the MOST SPECIFIC type that fits what the content IS USED FOR, not its medium.
-   A cooking video is "recipe". A gym/exercise video is "workout". A product review or
-   product page is "product". A trip plan or destination guide is "itinerary".
-2. Prefer one of the user's existing categories when the content clearly fits it.
-3. "summary" is ONLY for genuinely prose content with no actionable structure:
+1. REUSE the user's existing categories. If one of the user's existing categories
+   semantically fits the content, you MUST return that exact slug — do not invent a
+   near-synonym. (If the user has "restaurants", a cafe/ice-cream/breakfast spot is
+   "restaurants", NOT "place"/"cafe"/"food". If they have "travel", a trip plan is
+   "travel", not "itinerary".)
+2. When no existing category fits, pick the MOST SPECIFIC type that fits what the
+   content IS USED FOR, not its medium. Prefer these known types when one applies:
+   - "recipe" — a dish to cook (a cooking video/post).
+   - "workout" — a gym/exercise routine.
+   - "product" — a product page or product review.
+   - "itinerary" — a MULTI-stop or multi-day trip plan across a destination.
+   - "place" — a SINGLE venue worth visiting: a restaurant, cafe, bar, dessert/
+     ice-cream shop, bakery, food stall, attraction, viewpoint, or hotel. A reel
+     recommending one spot is "place", NOT "itinerary".
+   - "book" — a book recommendation/review.
+   - "summary" — see rule 4.
+3. Single venue vs trip: one restaurant/cafe/shop/attraction = "place"; a route or
+   day-by-day plan covering several stops = "itinerary". Never use a vague "travel"
+   slug for a single venue — use "place".
+4. "summary" is ONLY for genuinely prose content with no actionable structure:
    essays, news articles, opinion pieces, talks. NEVER use "summary" for anything
    with steps, items, specs, exercises, or places.
-4. NEVER return "general", "misc", "other", or "video" — invent a specific new slug instead
+5. NEVER return "general", "misc", "other", or "video" — invent a specific new slug instead
    (e.g. "books", "home-decor", "career").
-5. Slugs are SHORT: one word, two only when needed ("home-decor", not
+6. Slugs are SHORT: one word, two only when needed ("home-decor", not
    "home-decor-ideas"). Never append filler like -recommendations, -guide, -ideas,
    -advice, -list, -tips.
-6. Discussion threads, Q&A, comment collections, and anecdote threads are NOT plans.
+7. Discussion threads, Q&A, comment collections, and anecdote threads are NOT plans.
    A forum thread about workouts is "fitness-discussion", not "workout". Only classify as
    recipe/workout/itinerary when the source actually CONTAINS that artifact."""
 
