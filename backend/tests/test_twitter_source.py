@@ -41,6 +41,47 @@ async def test_acquire_parses_text_media_and_quote(monkeypatch):
     assert bundle.strategy == "twitter_syndication"
 
 
+async def test_acquire_expands_long_form_note_tweet(monkeypatch):
+    """A note_tweet marker means syndication's `text` is a truncated preview — acquire must
+    swap in the full body from the mirror."""
+    truncated = {
+        "text": "Today we reduced headcount by 22%. The business is the strongest it's ever",
+        "user": {"name": "Zeb Evans", "screen_name": "DJ_CURFEW"},
+        "note_tweet": {"id": "Tm90ZVR3..."},
+    }
+    full = "Today we reduced headcount by 22%. " + ("the full essay body … " * 50)
+
+    async def fake_fetch(tweet_id):
+        return truncated
+
+    async def fake_note(tweet_id):
+        return full
+
+    monkeypatch.setattr(tw, "_fetch", fake_fetch)
+    monkeypatch.setattr(tw, "_fetch_note_text", fake_note)
+
+    bundle = await tw.acquire("https://x.com/DJ_CURFEW/status/2057522382315929802")
+    assert bundle.text == full.strip()[:28000]
+    assert len(bundle.text) > 200  # not the truncated preview
+
+
+async def test_long_form_falls_back_to_preview_when_mirror_down(monkeypatch):
+    """If the mirror is unreachable, keep the truncated preview rather than failing."""
+    truncated = {"text": "preview only", "user": {"screen_name": "x"}, "note_tweet": {"id": "z"}}
+
+    async def fake_fetch(tweet_id):
+        return truncated
+
+    async def fake_note(tweet_id):
+        return None
+
+    monkeypatch.setattr(tw, "_fetch", fake_fetch)
+    monkeypatch.setattr(tw, "_fetch_note_text", fake_note)
+
+    bundle = await tw.acquire("https://x.com/x/status/123")
+    assert bundle.text == "preview only"
+
+
 async def test_acquire_without_tweet_id_raises(monkeypatch):
     """A profile/home URL has no /status/<id> → acquire raises so the resolver falls back
     to the generic scraper rather than 500ing."""

@@ -9,17 +9,25 @@ Scope: text + media thumbnail only (no video download). The endpoint returns jus
 linked tweet, not an entire thread — quoted-tweet text is folded in for context.
 """
 import asyncio
+import logging
 import math
 import re
 
+import httpx
+
 from models.note import ContentBundle
 from services.net_guard import guarded_async_client
+
+log = logging.getLogger("clipnote.sources")
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 _DOMAINS = ("twitter.com", "x.com", "mobile.twitter.com")
 _ID_RE = re.compile(r"/status(?:es)?/(\d+)")
 _SYNDICATION = "https://cdn.syndication.twimg.com/tweet-result"
+# Long-form ("note") tweets: the syndication endpoint returns only a ~280-char preview plus a
+# note_tweet node id it won't expand. These first-party-friendly mirrors return the full body.
+_NOTE_MIRRORS = ("https://api.fxtwitter.com/status/", "https://api.vxtwitter.com/Twitter/status/")
 
 
 def matches(url: str) -> bool:
@@ -59,6 +67,25 @@ async def _fetch(tweet_id: str) -> dict:
         resp = await client.get(_SYNDICATION, params=params)
     resp.raise_for_status()
     return resp.json()
+
+
+async def _fetch_note_text(tweet_id: str) -> str | None:
+    """Best-effort full body of a long-form note tweet. Fixed-domain mirrors (no SSRF gate
+    needed); returns None if both are unreachable so we fall back to the truncated preview."""
+    for base in _NOTE_MIRRORS:
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True,
+                                         headers={"User-Agent": _UA}) as client:
+                resp = await client.get(base + tweet_id)
+            resp.raise_for_status()
+            payload = resp.json()
+            tweet = payload.get("tweet") or payload
+            text = (tweet.get("text") or tweet.get("full_text") or "").strip()
+            if text:
+                return text
+        except Exception as e:
+            log.info("note-tweet mirror %s failed: %s", base, str(e)[:120])
+    return None
 
 
 def _media_urls(tweet: dict) -> list[str]:
@@ -111,7 +138,13 @@ async def acquire(url: str) -> ContentBundle:
         if delay:
             await asyncio.sleep(delay)
         try:
-            return _bundle(await _fetch(tweet_id))
+            data = await _fetch(tweet_id)
+            # Long-form tweet: syndication's `text` is a truncated preview — pull the full body.
+            if data.get("note_tweet"):
+                full = await _fetch_note_text(tweet_id)
+                if full:
+                    data["text"] = full
+            return _bundle(data)
         except Exception as e:
             last_error = e
     raise RuntimeError(f"syndication fetch failed for tweet {tweet_id}: {last_error}")

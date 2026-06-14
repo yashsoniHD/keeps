@@ -279,6 +279,34 @@ async def reserve_image_slot(user_id: str) -> bool:
         return False
 
 
+async def reserve_apify_slot() -> bool:
+    """Transactionally claim one paid-scrape (Apify) slot for today against the global
+    daily cap. Returns True if claimed (caller may call Apify), False if the cap is hit
+    (caller falls through to the free og-caption path). Never raises — a capped capture
+    must still produce a note. Global-only: Apify is the last resort before caption-only,
+    so the ceiling guards the budget rather than rationing per user."""
+    from google.cloud import firestore as fs
+
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    @fs.async_transactional
+    async def _claim(tx) -> bool:
+        global_ref = db.collection("system").document(f"usage-{today}")
+        global_snap = await global_ref.get(transaction=tx)
+        global_n = (global_snap.to_dict() or {}).get("apify_count", 0)
+        if global_n >= settings.APIFY_DAILY_GLOBAL_CAP:
+            return False
+        tx.set(global_ref, {"date": today, "apify_count": global_n + 1}, merge=True)
+        return True
+
+    try:
+        return await _claim(db.transaction())
+    except Exception as e:  # noqa: BLE001 — capping is best-effort; never fail a capture.
+        log.warning("apify slot reservation failed: %s: %s", type(e).__name__, e)
+        return False
+
+
 async def record_image_generated(user_id: str) -> None:
     """Bump the per-user lifetime AI-cover count (powers the admin per-user cost column).
     Best-effort — a metering write must never fail the underlying capture."""
