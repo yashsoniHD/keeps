@@ -150,14 +150,20 @@ export interface AskResult {
   artifact?: AskArtifact | null; // present when the user asked to consolidate notes
 }
 
-export async function ask(question: string, history: AskTurn[]): Promise<AskResult> {
+export async function ask(
+  question: string,
+  history: AskTurn[],
+  noteId?: string,
+): Promise<AskResult> {
   // Minutes EAST of UTC, so the backend resolves "today"/"this week" against the user's
   // local day (getTimezoneOffset is minutes to ADD to local to reach UTC, hence the negation).
   const tz_offset_minutes = -new Date().getTimezoneOffset();
   const res = await apiFetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, history, tz_offset_minutes }),
+    // note_id scopes the chat to a focal note ("this note first, then all") when opened
+    // from a note's page; omitted means corpus-wide.
+    body: JSON.stringify({ question, history, tz_offset_minutes, note_id: noteId ?? null }),
   });
   if (!res.ok) {
     throw new ApiError(

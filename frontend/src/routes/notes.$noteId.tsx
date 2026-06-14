@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { getNote, getAnnotation, deleteNote } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
+import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
@@ -15,6 +16,7 @@ function NoteDetail() {
   const { user, loading } = useAuth();
   useCategoryMeta(); // reflect category icon/colour overrides on the note view + badge
   const navigate = useNavigate();
+  const { setFocalNote } = useAsk();
   const [note, setNote] = useState<Note | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -43,6 +45,12 @@ function NoteDetail() {
         .catch(() => setLoadError(true));
     }
   }, [user, noteId]);
+
+  // Scope the global Ask-AI FAB to this note while it's open ("this note first, then all").
+  useEffect(() => {
+    if (note) setFocalNote({ id: note.id, title: note.title });
+    return () => setFocalNote(null);
+  }, [note, setFocalNote]);
 
   if (loadError) {
     return (

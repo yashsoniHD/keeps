@@ -13,9 +13,17 @@ import {
   X,
   Check,
   Layers,
+  MoreVertical,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import {
   watchNotes,
   watchPendingJobs,
@@ -83,6 +91,7 @@ function Feed() {
   const { user, loading } = useAuth();
   useCategoryMeta(); // re-render the feed when category icon/colour overrides load or change
   const navigate = useNavigate();
+  const { openChat } = useAsk();
   const [notes, setNotes] = useState<Note[]>([]);
   const [notesReady, setNotesReady] = useState(false);
   const [feedError, setFeedError] = useState(false);
@@ -397,12 +406,12 @@ function Feed() {
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() =>
-                    navigate({
-                      to: "/ask",
-                      search: query.trim() ? { q: query.trim(), send: true } : {},
-                    })
-                  }
+                  onClick={() => {
+                    // Hand the typed query to the global Ask-AI overlay (seeds + auto-sends).
+                    openChat(query.trim() || undefined);
+                    setQuery("");
+                    setSearchOpen(false);
+                  }}
                   aria-label="Ask AI"
                   title="Ask AI"
                   className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
@@ -434,39 +443,45 @@ function Feed() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setPendingUrl("");
-                    setShowAdd(true);
-                  }}
-                  aria-label="Add note"
-                  title="New note"
+                  onClick={() => setSearchOpen(true)}
+                  aria-label="Search notes"
+                  title="Search"
                   className={ICON_BTN}
                 >
-                  <Plus className="h-4 w-4" />
+                  <Search className="h-4 w-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={toggleLayout}
-                  aria-label={
-                    layout === "standard" ? "Switch to condensed layout" : "Switch to card layout"
-                  }
-                  title={layout === "standard" ? "Condensed view" : "Card view"}
-                  className={ICON_BTN}
-                >
-                  {layout === "standard" ? (
-                    <List className="h-4 w-4" />
-                  ) : (
-                    <LayoutGrid className="h-4 w-4" />
-                  )}
-                </button>
-                <Link
-                  to="/settings"
-                  aria-label="Settings"
-                  title="Settings"
-                  className={ICON_BTN}
-                >
-                  <Settings className="h-4 w-4" />
-                </Link>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button type="button" aria-label="More options" title="More" className={ICON_BTN}>
+                      <MoreVertical className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setPendingUrl("");
+                        setShowAdd(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4" />
+                      New note
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={toggleLayout}>
+                      {layout === "standard" ? (
+                        <List className="h-4 w-4" />
+                      ) : (
+                        <LayoutGrid className="h-4 w-4" />
+                      )}
+                      {layout === "standard" ? "Condensed view" : "Card view"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/settings">
+                        <Settings className="h-4 w-4" />
+                        Settings
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           )}
@@ -637,14 +652,8 @@ function Feed() {
         )}
       </main>
 
-      <button
-        type="button"
-        onClick={() => setSearchOpen(true)}
-        aria-label="Search notes"
-        className="fixed bottom-8 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95"
-      >
-        <Search className="h-6 w-6" />
-      </button>
+      {/* The bottom-right FAB is now the global Ask-AI button (components/ask/AskFab.tsx);
+          search moved to the top bar. */}
 
       {showAdd && (
         <AddSheet
