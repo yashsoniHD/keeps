@@ -63,6 +63,7 @@ class AskPlan(BaseModel):
     topic: str | None = None                       # semantic query for vector (may differ from raw message)
     period: Period | None = None                   # temporal filter; backend → exact bounds
     content_types: list[str] = Field(default_factory=list)
+    source: str | None = None                      # site/app the note came from ("pinterest", "nytimes")
     exhaustive: bool = False                        # "all/every/consolidate" → full filtered set, not top-K
     output: Literal["prose", "itinerary", "meal_plan", "comparison", "checklist"] = "prose"
     note_ids: list[str] = Field(default_factory=list)

@@ -182,6 +182,28 @@ async def _fetch_notes_by_window(db, user_id: str, after: datetime, before: date
     return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
 
 
+async def _fetch_notes_by_source(db, user_id: str, source: str, cap: int) -> list[dict]:
+    """Notes whose source_domain contains the keyword (e.g. "pinterest" → "in.pinterest.com").
+    Firestore can't substring-match, so scan the newest notes (using the existing
+    user_id+created_at index) and filter in Python — cheap reads, no extra index, and it
+    tolerates subdomains and the user's `sources` list being stale."""
+    keyword = source.lower().strip()
+    if not keyword:
+        return []
+    query = (
+        db.collection("notes").where("user_id", "==", user_id)
+        .order_by("created_at", direction="DESCENDING").limit(300)
+    )
+    matched = []
+    async for doc in query.stream():
+        domain = ((doc.to_dict() or {}).get("source_domain") or "").lower()
+        if keyword in domain:
+            matched.append({"id": doc.id, **doc.to_dict()})
+            if len(matched) >= cap:
+                break
+    return matched
+
+
 async def _fetch_notes_by_types(db, user_id: str, content_types: list[str],
                                 cap: int) -> list[dict]:
     variants = _type_variants(content_types)
@@ -199,6 +221,14 @@ async def _retrieve_notes(db, user_id: str, plan: AskPlan, pool: list[dict],
                           tz_offset_minutes: int, now_utc: datetime) -> tuple[list[dict], int]:
     """Build the grounding note set from the plan. Returns (notes_to_answer_from,
     total_matched) so the caller can report coverage when the set was capped."""
+    # Source-scoped ("my Pinterest notes"), optionally narrowed by type.
+    if plan.source:
+        matched = await _fetch_notes_by_source(db, user_id, plan.source,
+                                               settings.ASK_EXHAUSTIVE_CAP)
+        matched = _filter_types(matched, plan.content_types)
+        cap = settings.ASK_EXHAUSTIVE_CAP if plan.exhaustive else settings.ASK_MAX_GROUNDED_NOTES
+        return matched[:cap], len(matched)
+
     # Temporal: date-bounded query (optionally narrowed by type).
     if plan.period:
         bounds = _period_bounds(plan.period, tz_offset_minutes, now_utc)
@@ -248,6 +278,16 @@ async def _enforce_ask_caps(db, user_id: str) -> None:
     await _bump(transaction)
 
 
+async def _general_answer(question: str, history: list[dict]) -> str:
+    """A plain conversational answer (no notes, no citations). Degrades to a friendly
+    message instead of a 500 if the model stage fails."""
+    try:
+        return (await gemini_service.answer_chat(question, history)).answer_markdown
+    except Exception as e:
+        log.error("ask chat stage failed: %s: %s", type(e).__name__, e)
+        return "Sorry — I couldn't put together an answer just now. Please try again."
+
+
 @router.post("/ask", response_model=AskResponse)
 async def ask(body: AskRequest, user_id: str = Depends(require_user)):
     db = get_db()
@@ -274,18 +314,24 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
 
         # General conversation / general-knowledge → answer plainly, no notes, no citations.
         if plan.scope == "general":
-            chat = await gemini_service.answer_chat(body.question, history)
-            return AskResponse(answer=chat.answer_markdown)
+            return AskResponse(answer=await _general_answer(body.question, history))
 
         notes, matched_total = await _retrieve_notes(
             db, user_id, plan, pool, body.tz_offset_minutes, now_utc
         )
         if not notes:
-            if not pool:
-                return AskResponse(answer=NO_NOTES_ANSWER)
+            # Specific, scoped misses get a specific message; an open-ended miss (no
+            # time/source/type filter) falls back to a plain answer rather than a dead end —
+            # this catches general questions the planner mis-tagged as note-scoped.
             if plan.period:
                 return AskResponse(answer=f"You didn't save anything {_period_label(plan.period)}.")
-            return AskResponse(answer=NOTHING_FOUND_ANSWER)
+            if plan.source:
+                return AskResponse(answer=f"I couldn't find any notes from {plan.source}.")
+            if plan.content_types:
+                return AskResponse(answer=NOTHING_FOUND_ANSWER)
+            if not pool:
+                return AskResponse(answer=NO_NOTES_ANSWER)
+            return AskResponse(answer=await _general_answer(body.question, history))
 
         coverage = (
             f"Based on {len(notes)} of {matched_total} matching notes."

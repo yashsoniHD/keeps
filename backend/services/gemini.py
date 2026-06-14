@@ -217,23 +217,28 @@ date, and a JSON index of candidate notes (id, type, title, summary, saved date)
 Return ONLY valid JSON:
 {"intent":"answer|aggregate|create","scope":"notes|general","topic":str|null,
  "period":"today|yesterday|this_week|last_week|this_month|recent"|null,
- "content_types":[slug,...],"exhaustive":bool,
+ "content_types":[slug,...],"source":str|null,"exhaustive":bool,
  "output":"prose|itinerary|meal_plan|comparison|checklist","note_ids":[id,...]}
 
 How to fill it:
-- scope: "notes" if the message is about the user's saved notes/content; "general" if it is
-  small talk or a general-knowledge question unrelated to their notes (then note_ids = []).
-  Judge follow-ups from the conversation — "and who directed it?" after a movie note is "notes";
-  "what's the capital of France" is "general".
+- scope: "notes" only if the message is about the user's saved notes/content. Use "general"
+  for small talk OR any general-knowledge question you could answer on your own that does not
+  reference their saved content (then note_ids = []). Judge follow-ups from the conversation —
+  "and who directed it?" after a movie note is "notes"; "what's the capital of France",
+  "explain X", "write me a poem" are "general". When unsure between the two, prefer "general"
+  unless the message clearly points at their saved content.
 - intent: "answer" normally; "aggregate" for counting / how-many / breakdown questions;
   "create" ONLY if the user asks to make/save a NEW note.
 - period: set when the message is time-scoped ("today", "yesterday", "this week",
   "lately"/"recently" = recent). Resolve relative to today's date given. Otherwise null.
 - content_types: the note types the message targets — reuse the exact slugs that appear in the
   index when they fit (e.g. "recipe", "place"). Empty if it spans everything or is unclear.
+- source: set when the user references WHERE a note came from — a website or app — e.g. "my
+  Pinterest notes", "the recipe I saved from Instagram", "that NYT article". Use a short
+  lowercase keyword (pinterest, instagram, youtube, nytimes, amazon). Otherwise null.
 - exhaustive: true when the user wants ALL of something ("all my recipes", "consolidate my trip
-  notes", "compare every laptop"). For period or exhaustive requests, leave note_ids EMPTY —
-  retrieval fetches the full filtered set itself.
+  notes", "compare every laptop", "everything I saved from Pinterest"). For period, source, or
+  exhaustive requests, leave note_ids EMPTY — retrieval fetches the full filtered set itself.
 - output: "prose" by default. Use itinerary/meal_plan/comparison/checklist only when the user
   explicitly wants that artifact built.
 - note_ids: for an ordinary topic question (no period, not exhaustive), pick the relevant ids

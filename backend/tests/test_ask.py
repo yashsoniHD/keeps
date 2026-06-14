@@ -184,6 +184,39 @@ async def test_zero_notes_notes_scope_short_circuits(fake_db, monkeypatch):
     assert res.answer == ask_mod.NO_NOTES_ANSWER
 
 
+async def test_source_filter_routes_to_source_fetch(fake_db, monkeypatch):
+    async def by_source(db, user_id, source, cap):
+        assert source == "pinterest"
+        return [NOTE_N1]
+
+    monkeypatch.setattr(ask_mod, "_fetch_notes_by_source", by_source)
+    calls = _gemini(monkeypatch, AskPlan(scope="notes", source="pinterest"))
+    res = await ask_mod.ask(AskRequest(question="find my pinterest note"), user_id="u")
+    assert [n["id"] for n in calls["answer"][0]] == ["n1"]  # came from the source fetch
+    assert res.answer == "Watch Dune."
+
+
+async def test_source_empty_returns_specific_message(fake_db, monkeypatch):
+    async def by_source(db, user_id, source, cap):
+        return []
+
+    monkeypatch.setattr(ask_mod, "_fetch_notes_by_source", by_source)
+    _gemini(monkeypatch, AskPlan(scope="notes", source="pinterest"))
+    res = await ask_mod.ask(AskRequest(question="find my pinterest note"), user_id="u")
+    assert res.answer == "I couldn't find any notes from pinterest."
+
+
+async def test_open_ended_miss_falls_back_to_general(fake_db, monkeypatch):
+    # Planner mis-tagged a general question as note-scoped, and nothing matched: rather than
+    # dead-ending with "couldn't find anything in your notes", answer it generally.
+    calls = _gemini(monkeypatch, AskPlan(scope="notes", note_ids=[]))
+    res = await ask_mod.ask(AskRequest(question="tell me a joke"), user_id="u")
+    assert res.answer == "Paris is the capital of France."  # stubbed general chat
+    assert res.citations == []
+    assert calls["chat"] == ["tell me a joke"]
+    assert calls["answer"] == []
+
+
 async def test_consolidation_returns_artifact_and_skips_prose(fake_db, monkeypatch):
     art = ArtifactNote(
         title="3 days in Tokyo", ai_summary="A packed weekend.", content_type="itinerary",
