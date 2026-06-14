@@ -23,6 +23,7 @@ from services.auth_dep import require_user
 from services.embeddings import embedding_service
 from services.firebase import flush_usage, get_db
 from services.gemini import gemini_service, normalize_slug
+from services.source_alias import source_matches
 from services.usage_meter import start_metering
 
 log = logging.getLogger("clipnote.ask")
@@ -43,35 +44,8 @@ _PERIOD_LABELS = {
     "last_week": "last week", "this_month": "this month", "recent": "recently",
 }
 
-# Maps a domain fragment → the canonical brand the user names ("find my Pinterest notes").
-# A naive substring match misses short-link domains (pin.it ⊄ "pinterest", youtu.be ⊄
-# "youtube"), which is exactly how Pinterest/YouTube/Twitter links are stored — so resolve
-# both the user's keyword and each note's source_domain to a canonical brand before matching.
-_SOURCE_ALIASES = {
-    "pin.it": "pinterest", "pinterest": "pinterest",
-    "youtu.be": "youtube", "youtube": "youtube",
-    "amzn": "amazon", "amazon": "amazon",
-    "x.com": "twitter", "twitter": "twitter",
-    "fb.com": "facebook", "fb.watch": "facebook", "facebook": "facebook",
-    "instagr.am": "instagram", "instagram": "instagram",
-    "redd.it": "reddit", "reddit": "reddit",
-    "tiktok": "tiktok", "vm.tiktok": "tiktok",
-    "substack": "substack",
-}
-
-
-def _canonical_source(value: str) -> str:
-    """Resolve a source_domain or a user keyword to a canonical brand. Exact short-domain
-    hits win first (pin.it, youtu.be, x.com), then any alias substring, then the registrable
-    label as a fallback ("open.substack.com" → "substack")."""
-    v = value.lower().strip().replace("www.", "")
-    if v in _SOURCE_ALIASES:
-        return _SOURCE_ALIASES[v]
-    for key, canon in _SOURCE_ALIASES.items():
-        if key in v:
-            return canon
-    parts = [p for p in v.split(".") if p]
-    return parts[-2] if len(parts) >= 2 else (parts[0] if parts else v)
+# Brand-aware source matching ("find my Pinterest notes" → pin.it short links) lives in a
+# shared module so the search bar resolves the same aliases. See services/source_alias.py.
 
 
 def _period_label(period: str) -> str:
@@ -221,7 +195,6 @@ async def _fetch_notes_by_source(db, user_id: str, source: str, cap: int) -> lis
     keyword = source.lower().strip()
     if not keyword:
         return []
-    canon_kw = _canonical_source(keyword)
     query = (
         db.collection("notes").where("user_id", "==", user_id)
         .order_by("created_at", direction="DESCENDING").limit(300)
@@ -229,7 +202,7 @@ async def _fetch_notes_by_source(db, user_id: str, source: str, cap: int) -> lis
     matched = []
     async for doc in query.stream():
         domain = ((doc.to_dict() or {}).get("source_domain") or "").lower()
-        if keyword in domain or _canonical_source(domain) == canon_kw:
+        if source_matches(domain, keyword):
             matched.append({"id": doc.id, **doc.to_dict()})
             if len(matched) >= cap:
                 break

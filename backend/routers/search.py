@@ -19,6 +19,7 @@ from config import settings
 from services.auth_dep import require_user
 from services.embeddings import embedding_service
 from services.firebase import get_db
+from services.source_alias import source_matches
 
 log = logging.getLogger("clipnote.search")
 
@@ -26,6 +27,35 @@ router = APIRouter(tags=["search"])
 
 # Same fields as the feed card / ask citation — enough to render a result, no `data`.
 RESULT_FIELDS = ("id", "content_type", "title", "ai_summary", "source_domain", "cover_image_url")
+
+
+def _project(doc_id: str, d: dict) -> dict:
+    return {
+        "id": doc_id,
+        "content_type": d.get("content_type", ""),
+        "title": d.get("title", ""),
+        "ai_summary": d.get("ai_summary", ""),
+        "source_domain": d.get("source_domain", ""),
+        "cover_image_url": d.get("cover_image_url"),
+    }
+
+
+async def _notes_by_source(db, user_id: str, keyword: str) -> list[dict]:
+    """Notes saved from a named brand ("pinterest" → pin.it links). Scans the newest notes
+    (existing user_id+created_at index) and filters in Python — Firestore can't substring-
+    match. Brand-aware via source_alias, so short-link domains count."""
+    query = (
+        db.collection("notes").where("user_id", "==", user_id)
+        .order_by("created_at", direction="DESCENDING").limit(300)
+    )
+    out = []
+    async for doc in query.stream():
+        d = doc.to_dict() or {}
+        if source_matches(d.get("source_domain", ""), keyword):
+            out.append(_project(doc.id, d))
+            if len(out) >= settings.SEARCH_LIMIT:
+                break
+    return out
 
 
 @router.get("/search")
@@ -37,32 +67,38 @@ async def search(
     if not q:
         return {"results": []}
 
+    db = get_db()
+
+    # A one-word query is often a source name ("pinterest", "youtube"). Vector search alone
+    # misses these — a recipe note isn't semantically "pinterest" — so look up notes by brand
+    # and surface them first, ahead of the semantic results.
+    source_hits: list[dict] = []
+    if " " not in q and len(q) <= 20:
+        try:
+            source_hits = await _notes_by_source(db, user_id, q)
+        except Exception as e:
+            log.warning("source lookup failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
+
+    vector_hits: list[dict] = []
     try:
         query_vec = await embedding_service.embed_query(q)
     except Exception as e:
         log.error("query embedding failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
-        return {"results": []}
-    if not query_vec:
-        return {"results": []}
+        query_vec = None
+    if query_vec:
+        vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
+            vector_field="embedding",
+            query_vector=Vector(query_vec),
+            distance_measure=DistanceMeasure.COSINE,
+            limit=settings.SEARCH_LIMIT,
+        )
+        vector_hits = [_project(doc.id, doc.to_dict() or {}) async for doc in vector_query.stream()]
 
-    db = get_db()
-    vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
-        vector_field="embedding",
-        query_vector=Vector(query_vec),
-        distance_measure=DistanceMeasure.COSINE,
-        limit=settings.SEARCH_LIMIT,
-    )
-    docs = [doc async for doc in vector_query.stream()]
-
-    results = []
-    for doc in docs:
-        d = doc.to_dict() or {}
-        results.append({
-            "id": doc.id,
-            "content_type": d.get("content_type", ""),
-            "title": d.get("title", ""),
-            "ai_summary": d.get("ai_summary", ""),
-            "source_domain": d.get("source_domain", ""),
-            "cover_image_url": d.get("cover_image_url"),
-        })
-    return {"results": results}
+    # Source matches first (exact intent), then semantic, deduped and capped.
+    seen, results = set(), []
+    for d in (*source_hits, *vector_hits):
+        if d["id"] in seen:
+            continue
+        seen.add(d["id"])
+        results.append(d)
+    return {"results": results[: settings.SEARCH_LIMIT]}

@@ -278,7 +278,8 @@ async def test_zero_notes_general_scope_still_answers(fake_db, monkeypatch):
     ],
 )
 def test_canonical_source_resolves_short_links(value, expected):
-    assert ask_mod._canonical_source(value) == expected
+    from services.source_alias import canonical_source
+    assert canonical_source(value) == expected
 
 
 async def test_source_fetch_matches_short_link_domain(fake_db, monkeypatch):
