@@ -476,10 +476,17 @@ function Feed() {
               {sources.length > 1 && (
                 <SourceFilter sources={sources} source={source} setSource={setSource} />
               )}
-              <div className="relative min-w-0 flex-1">
+              <div className="min-w-0 flex-1">
+                {/* Edge fades via a mask on the scroller itself — fades the actual chips to
+                    transparent, so it's background-agnostic (no opaque-overlay seam against the
+                    translucent, blurred header) and only fades the side that actually overflows. */}
                 <div
                   ref={catScrollRef}
                   className="-mx-1 flex gap-1.5 overflow-x-auto px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  style={{
+                    WebkitMaskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
+                    maskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
+                  }}
                 >
                 <button
                   type="button"
@@ -511,12 +518,6 @@ function Feed() {
                   );
                 })}
                 </div>
-                {!catAtStart && (
-                  <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent" />
-                )}
-                {!catAtEnd && (
-                  <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent" />
-                )}
               </div>
             </div>
           )}

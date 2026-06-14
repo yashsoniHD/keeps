@@ -156,73 +156,47 @@ function PublicSignupCTA() {
   );
 }
 
-// The note's hero. A real cover image when one exists (and loads); otherwise a styled
-// gradient + faded type icon so the detail view never reads as empty — the same accent
-// system the feed cards use (note-meta), scaled up. Also the safety net when an AI cover
-// is disabled, fails to generate, or hits a daily cap.
-//
-// Cover sizing is aspect-ratio aware: a wide, sizeable image (article/recipe/travel hero)
-// gets a full-width banner, while a square/portrait/small image (typically a creator face,
-// avatar, or logo from a social video) gets a compact left-aligned card instead of being
-// stretched across a banner. We measure off-screen first so there's no resize flash —
-// product notes already render their own image and skip this hero entirely.
-function CoverHero({ note }: { note: Note }) {
-  const [broken, setBroken] = useState(false);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const accent = noteAccent(note.content_type);
-  const Icon = noteIcon(note.content_type);
+// Aspect-ratio of the cover decides the hero layout: a wide, sizeable image
+// (article/recipe/travel hero) becomes a full-width banner; a square/portrait/small image
+// (a creator face or reel thumbnail from a social video) is "compact" and gets paired
+// beside the AI summary by NoteContent, so it never floats over dead space. We measure the
+// image off-screen first so the choice doesn't flash. "loading" reuses the banner-shaped
+// fallback; "none" covers no-cover and broken images alike.
+type CoverKind = "loading" | "none" | "banner" | "compact";
 
-  const url = note.cover_image_url;
+function useCoverKind(url?: string | null): CoverKind {
+  const [kind, setKind] = useState<CoverKind>(url ? "loading" : "none");
   useEffect(() => {
-    setBroken(false);
-    setDims(null);
-    if (!url) return;
+    if (!url) {
+      setKind("none");
+      return;
+    }
+    setKind("loading");
     const img = new Image();
-    img.onload = () => setDims({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => setBroken(true);
+    img.onload = () =>
+      setKind(
+        img.naturalWidth >= 480 && img.naturalWidth / img.naturalHeight >= 1.3
+          ? "banner"
+          : "compact",
+      );
+    img.onerror = () => setKind("none");
     img.src = url;
   }, [url]);
+  return kind;
+}
 
-  // Gradient + faded-icon fallback: no cover, a broken one, or while we measure the image
-  // (the placeholder reads as intentional, so the measuring step isn't a blank flash).
-  if (!url || broken || !dims) {
-    return (
-      <div
-        className={`relative mb-8 flex h-56 w-full items-center justify-center overflow-hidden rounded-3xl border border-border md:h-72 ${accent.soft}`}
-      >
-        <div className="absolute inset-0 bg-gradient-to-br from-transparent to-ink/[0.06]" />
-        <Icon className={`relative h-20 w-20 opacity-40 md:h-28 md:w-28 ${accent.text}`} />
-      </div>
-    );
-  }
-
-  const isBanner = dims.w >= 480 && dims.w / dims.h >= 1.3;
-
-  if (isBanner) {
-    return (
-      <div className="mb-8 overflow-hidden rounded-3xl border border-border">
-        <img
-          src={url}
-          alt=""
-          className="h-56 w-full object-cover md:h-72"
-          onError={() => setBroken(true)}
-        />
-      </div>
-    );
-  }
-
-  // Compact thumbnail: small/portrait image (e.g. a creator face) in a left-aligned panel
-  // that hugs the image, so it reads as a deliberate object rather than a stretched banner.
+// Gradient + faded type-icon stand-in so the detail view never reads as empty — the same
+// accent system the feed cards use (note-meta), scaled up. Used when there's no cover, a
+// broken one, or while measuring; also the safety net when an AI cover is capped/disabled.
+function CoverFallback({ note, className = "" }: { note: Note; className?: string }) {
+  const accent = noteAccent(note.content_type);
+  const Icon = noteIcon(note.content_type);
   return (
-    <div className="mb-8 flex">
-      <div className={`overflow-hidden rounded-3xl border border-border ${accent.soft}`}>
-        <img
-          src={url}
-          alt=""
-          className="h-44 w-44 object-cover md:h-52 md:w-52"
-          onError={() => setBroken(true)}
-        />
-      </div>
+    <div
+      className={`relative flex items-center justify-center overflow-hidden rounded-3xl border border-border ${accent.soft} ${className}`}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-ink/[0.06]" />
+      <Icon className={`relative h-20 w-20 opacity-40 md:h-28 md:w-28 ${accent.text}`} />
     </div>
   );
 }
@@ -243,6 +217,8 @@ export function NoteContent({
   // Key off the structural template (not the editable category) so a recategorised
   // product doesn't render both its own image and the shared hero.
   const showHero = resolveTemplate(note) !== "product";
+  const coverKind = useCoverKind(showHero ? note.cover_image_url : null);
+  const url = note.cover_image_url;
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
       {isPublic ? (
@@ -252,8 +228,30 @@ export function NoteContent({
       )}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
       {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
-      {showHero && <CoverHero note={note} />}
-      <AISummaryBlock summary={note.ai_summary} />
+      {showHero && coverKind === "compact" && url ? (
+        // Portrait/small cover (reel thumbnail, creator face): pair it with the AI summary
+        // so the note doesn't open with a lonely thumbnail beside a wall of empty space.
+        <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-start">
+          <div
+            className={`shrink-0 overflow-hidden rounded-3xl border border-border ${noteAccent(note.content_type).soft}`}
+          >
+            <img src={url} alt="" className="h-64 w-full object-cover sm:h-60 sm:w-48" />
+          </div>
+          <AISummaryBlock summary={note.ai_summary} className="min-w-0 flex-1 sm:self-stretch" />
+        </div>
+      ) : (
+        <>
+          {showHero &&
+            (coverKind === "banner" && url ? (
+              <div className="mb-8 overflow-hidden rounded-3xl border border-border">
+                <img src={url} alt="" className="h-56 w-full object-cover md:h-72" />
+              </div>
+            ) : (
+              <CoverFallback note={note} className="mb-8 h-56 w-full md:h-72" />
+            ))}
+          <AISummaryBlock summary={note.ai_summary} />
+        </>
+      )}
       <div className="mt-8">
         <SafeNoteBody note={note} />
       </div>
