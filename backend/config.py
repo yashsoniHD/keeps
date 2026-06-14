@@ -54,9 +54,15 @@ class Settings:
     DAILY_GLOBAL_ASK_CAP: int = int(os.getenv("DAILY_GLOBAL_ASK_CAP", "300"))
     # How many full notes get sent to the answering model per ask.
     ASK_MAX_GROUNDED_NOTES: int = int(os.getenv("ASK_MAX_GROUNDED_NOTES", "12"))
-    # Candidate notes the vector shortlist hands the lite selector per ask (hybrid
-    # retrieval). Larger than ASK_MAX_GROUNDED_NOTES so the selector has room to choose.
+    # Candidate notes the vector shortlist hands the lite planner per ask (hybrid
+    # retrieval). Larger than ASK_MAX_GROUNDED_NOTES so the planner has room to choose.
     ASK_SHORTLIST_K: int = int(os.getenv("ASK_SHORTLIST_K", "25"))
+    # Most-recent notes always added to the planner's candidate pool (alongside the
+    # vector shortlist) so temporal asks ("today", "this week") have the right notes in view.
+    ASK_RECENT_POOL: int = int(os.getenv("ASK_RECENT_POOL", "30"))
+    # Hard ceiling on notes fed to the answerer for exhaustive/temporal asks ("all my
+    # recipes", "consolidate my trip notes") — bounds token cost on a big match set.
+    ASK_EXHAUSTIVE_CAP: int = int(os.getenv("ASK_EXHAUSTIVE_CAP", "40"))
 
     # Direct-URI video analysis cap. YouTube videos longer than this fall back to the
     # transcript path instead of being sent to Gemini whole.
@@ -65,11 +71,28 @@ class Settings:
     # Max size for downloaded social media files we upload to GCS for analysis.
     MAX_MEDIA_DOWNLOAD_MB: int = int(os.getenv("MAX_MEDIA_DOWNLOAD_MB", "100"))
 
-    # Optional: path to a Netscape cookies file for yt-dlp (Instagram/Facebook).
-    # Locally this can come from --cookies-from-browser; on Cloud Run from Secret Manager.
-    YTDLP_COOKIES_FILE: str = os.getenv("YTDLP_COOKIES_FILE", "")
-    # Local convenience: browser to pull cookies from (e.g. "chrome"). Empty disables.
-    YTDLP_COOKIES_FROM_BROWSER: str = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "")
+    # Optional paid fallback for Instagram/TikTok when yt-dlp is IP-blocked from Cloud Run
+    # (datacenter IPs hit a login/rate-limit wall cookie-less). Apify owns the proxies +
+    # accounts; we pay per scrape. Dormant until APIFY_TOKEN is set — the og-caption
+    # fallback covers the no-token case. Metered cost line, like Imagen.
+    APIFY_TOKEN: str = os.getenv("APIFY_TOKEN", "")
+    # Per-platform actors (built + maintained by Apify/clockworks). Each is env-overridable
+    # so you can swap an actor without a redeploy. API paths use `~`, not `/`, between the
+    # owner and actor name (e.g. apify~instagram-post-scraper) — store URLs use `/`.
+    APIFY_INSTAGRAM_REEL_ACTOR: str = os.getenv("APIFY_INSTAGRAM_REEL_ACTOR", "apify~instagram-reel-scraper")
+    APIFY_INSTAGRAM_POST_ACTOR: str = os.getenv("APIFY_INSTAGRAM_POST_ACTOR", "apify~instagram-post-scraper")
+    APIFY_TIKTOK_ACTOR: str = os.getenv("APIFY_TIKTOK_ACTOR", "clockworks~tiktok-scraper")
+    # Facebook is opt-in (empty = off → FB uses the free og-caption path). The official
+    # apify~facebook-reels-scraper is page-based (can't target one reel); to enable single
+    # reel/video scraping, set this to a single-URL actor that takes `startUrls`, e.g.
+    # "neuro-scraper~facebook-video-details-scraper". Community-maintained, so opt-in.
+    APIFY_FACEBOOK_ACTOR: str = os.getenv("APIFY_FACEBOOK_ACTOR", "")
+    # YouTube is a FALLBACK only — Gemini analyzes most YouTube URLs directly (youtube.py,
+    # free, no download). This actor is the backstop for the rare video Gemini can't fetch
+    # (private/age/region-gated); invoked from the extraction-failure path, not the resolver.
+    APIFY_YOUTUBE_ACTOR: str = os.getenv("APIFY_YOUTUBE_ACTOR", "streamers~youtube-scraper")
+    # Hard ceiling so a runaway/abuse spike can't drain the budget via paid scrapes.
+    APIFY_DAILY_GLOBAL_CAP: int = int(os.getenv("APIFY_DAILY_GLOBAL_CAP", "200"))
 
     # Optional Firecrawl API key for bot-protected product pages (tier 2 fallback).
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY", "")

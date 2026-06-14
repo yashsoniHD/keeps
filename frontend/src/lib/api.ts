@@ -133,16 +133,31 @@ export interface AskTurn {
   text: string;
 }
 
+// A consolidated artifact Ask AI built across several notes (Phase 2). `data` holds the
+// same block schema GenericNote renders (sections/steps/table/checklist/facts).
+export interface AskArtifact {
+  title: string;
+  ai_summary: string;
+  content_type: string;
+  data: Record<string, unknown>;
+  origin?: "consolidated" | "created"; // provenance for the saved note
+}
+
 export interface AskResult {
   answer: string;
   citations: AskCitation[];
+  coverage?: string | null; // "Based on 6 of 12 matching notes." — null for general-chat replies
+  artifact?: AskArtifact | null; // present when the user asked to consolidate notes
 }
 
 export async function ask(question: string, history: AskTurn[]): Promise<AskResult> {
+  // Minutes EAST of UTC, so the backend resolves "today"/"this week" against the user's
+  // local day (getTimezoneOffset is minutes to ADD to local to reach UTC, hence the negation).
+  const tz_offset_minutes = -new Date().getTimezoneOffset();
   const res = await apiFetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify({ question, history, tz_offset_minutes }),
   });
   if (!res.ok) {
     throw new ApiError(
@@ -150,6 +165,28 @@ export async function ask(question: string, history: AskTurn[]): Promise<AskResu
       res.status,
     );
   }
+  return res.json();
+}
+
+// Persist an Ask-AI-built artifact as a real note (Phase 2 "Save as note"). Returns the
+// new note id so the UI can link straight to it.
+export async function saveConsolidatedNote(
+  artifact: AskArtifact,
+  sourceNoteIds: string[],
+): Promise<{ id: string }> {
+  const res = await apiFetch("/api/notes/consolidated", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: artifact.title,
+      ai_summary: artifact.ai_summary,
+      content_type: artifact.content_type,
+      data: artifact.data,
+      source_note_ids: sourceNoteIds,
+      origin: artifact.origin ?? "consolidated",
+    }),
+  });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't save the note."), res.status);
   return res.json();
 }
 

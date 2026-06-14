@@ -1,11 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { AlertCircle, ChevronLeft, Loader2, Send, WandSparkles } from "lucide-react";
+import {
+  AlertCircle,
+  BookmarkPlus,
+  Check,
+  ChevronLeft,
+  Loader2,
+  Send,
+  WandSparkles,
+} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
-import { ask, ApiError, type AskCitation } from "@/lib/api";
+import { ask, ApiError, saveConsolidatedNote, type AskArtifact, type AskCitation } from "@/lib/api";
+import { GenericNote } from "@/components/note/templates/GenericNote";
 import { renderMarkdown } from "@/lib/markdown";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
+import type { Note } from "@/lib/types";
 import { useKeyboardPin } from "@/lib/use-keyboard-inset";
 
 interface AskSearch {
@@ -25,10 +35,12 @@ interface Message {
   role: "user" | "assistant";
   text: string;
   citations?: AskCitation[];
+  coverage?: string | null;
+  artifact?: AskArtifact | null;
 }
 
 const EXAMPLES = [
-  "Which movies should I watch?",
+  "Summarize what I saved today",
   "Where should I order food from?",
   "Compile my trip itinerary from my saved notes",
 ];
@@ -52,6 +64,77 @@ function CitationChip({ citation }: { citation: AskCitation }) {
         <span className="block text-[11px] text-ink-soft">{noteLabel(citation.content_type)}</span>
       </span>
     </Link>
+  );
+}
+
+// A consolidated artifact (itinerary/meal plan/comparison/…) rendered with the same
+// block components as a real note, plus a one-tap "Save as note".
+function ArtifactCard({ artifact, sourceIds }: { artifact: AskArtifact; sourceIds: string[] }) {
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [noteId, setNoteId] = useState<string | null>(null);
+
+  // GenericNote only reads `data` + `content_type`, so a partial note is enough to render.
+  const synthetic = useMemo(
+    () =>
+      ({
+        id: "artifact",
+        content_type: artifact.content_type,
+        template: "composed",
+        title: artifact.title,
+        ai_summary: artifact.ai_summary,
+        data: artifact.data,
+        cover_image_url: null,
+      }) as unknown as Note,
+    [artifact],
+  );
+
+  const save = async () => {
+    setState("saving");
+    try {
+      const { id } = await saveConsolidatedNote(artifact, sourceIds);
+      setNoteId(id);
+      setState("saved");
+    } catch {
+      setState("error");
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <h3 className="font-serif text-2xl text-ink">{artifact.title}</h3>
+      {artifact.ai_summary && <p className="mt-1 text-sm text-ink-soft">{artifact.ai_summary}</p>}
+      <div className="mt-5">
+        <GenericNote note={synthetic} />
+      </div>
+      <div className="mt-5 flex items-center gap-3">
+        {state === "saved" && noteId ? (
+          <Link
+            to="/notes/$noteId"
+            params={{ noteId }}
+            className="inline-flex items-center gap-2 rounded-full bg-summary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <Check className="h-4 w-4" /> Saved — view note
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={save}
+            disabled={state === "saving"}
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            {state === "saving" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <BookmarkPlus className="h-4 w-4" />
+            )}
+            Save as note
+          </button>
+        )}
+        {state === "error" && (
+          <span className="text-sm text-red-600">Couldn't save. Try again.</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -97,7 +180,16 @@ function AskPage() {
     setSending(true);
     try {
       const res = await ask(question, history);
-      setMessages((m) => [...m, { role: "assistant", text: res.answer, citations: res.citations }]);
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          text: res.answer,
+          citations: res.citations,
+          coverage: res.coverage,
+          artifact: res.artifact,
+        },
+      ]);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Couldn't get an answer. Please try again.");
     } finally {
@@ -182,9 +274,20 @@ function AskPage() {
                 </div>
               ) : (
                 <div key={i} className="space-y-2">
-                  <div className="max-w-[95%] rounded-2xl border border-border bg-card px-4 py-3">
-                    {renderMarkdown(m.text)}
-                  </div>
+                  {m.text && (
+                    <div className="max-w-[95%] rounded-2xl border border-border bg-card px-4 py-3">
+                      {renderMarkdown(m.text)}
+                    </div>
+                  )}
+                  {m.artifact && (
+                    <ArtifactCard
+                      artifact={m.artifact}
+                      sourceIds={(m.citations ?? []).map((c) => c.id)}
+                    />
+                  )}
+                  {m.coverage && (
+                    <p className="px-1 text-[11px] text-ink-soft">{m.coverage}</p>
+                  )}
                   {m.citations && m.citations.length > 0 && (
                     <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                       {m.citations.map((c) => (
@@ -198,7 +301,7 @@ function AskPage() {
             {sending && (
               <div className="flex max-w-[95%] items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-ink-soft">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Reading your notes…
+                Thinking…
               </div>
             )}
             {error && (

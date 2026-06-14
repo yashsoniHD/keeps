@@ -1,11 +1,16 @@
+import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from google.cloud.firestore_v1.vector import Vector
+from pydantic import BaseModel, Field
 
 from config import settings
+from routers.ingest import _enforce_cost_caps
 from services.auth_dep import require_user
-from services.firebase import add_user_category, get_db, get_user_categories
+from services.embeddings import embedding_service
+from services.firebase import add_user_category, firestore_safe, get_db, get_user_categories
 from services.gemini import match_existing, normalize_slug
 
 router = APIRouter(tags=["notes"])
@@ -15,6 +20,29 @@ class NoteUpdate(BaseModel):
     """Owner-editable fields. Both optional — send only what changes."""
     user_note: str | None = None
     content_type: str | None = None
+
+
+class ConsolidatedNoteIn(BaseModel):
+    """An AI-built note saved from Ask AI chat: a consolidation across notes (Phase 2)
+    or a freshly authored note (Phase 4)."""
+    title: str = Field(min_length=1, max_length=300)
+    ai_summary: str = Field(default="", max_length=2000)
+    content_type: str = Field(default="summary", max_length=60)
+    data: dict[str, Any] = Field(default_factory=dict)
+    source_note_ids: list[str] = Field(default_factory=list, max_length=50)
+    origin: str = "consolidated"   # "consolidated" | "created" → note provenance
+
+
+async def _note_embedding(title: str, ai_summary: str) -> Vector | None:
+    """Embed a note for semantic search; non-fatal (the note is written either way)."""
+    text = "\n".join(p for p in (title, ai_summary) if p).strip()
+    if not text:
+        return None
+    try:
+        vec = await embedding_service.embed_document(text)
+        return Vector(vec) if vec else None
+    except Exception:
+        return None
 
 
 async def _owned_note_ref(db, note_id: str, user_id: str):
@@ -79,6 +107,42 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
         )
 
     return {"ok": True}
+
+
+@router.post("/notes/consolidated")
+async def create_consolidated_note(body: ConsolidatedNoteIn, user_id: str = Depends(require_user)):
+    """Persist an Ask-AI-built artifact (itinerary/meal plan/comparison/…) as a note.
+    `template="composed"` forces the GenericNote block renderer (the data is COMPOSER
+    blocks, not a fixed template schema), and provenance marks it AI-consolidated."""
+    db = get_db()
+    await _enforce_cost_caps(db, user_id)  # same per-user/global note caps as ingest
+
+    slug = match_existing(normalize_slug(body.content_type), await get_user_categories(user_id))
+    acquisition = "ai_created" if body.origin == "created" else "ai_consolidated"
+    note_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    note_doc = {
+        "user_id": user_id,
+        "content_type": slug,
+        "template": "composed",         # render via GenericNote blocks, never a fixed template
+        "title": body.title,
+        "ai_summary": body.ai_summary,
+        "source_url": "",
+        "source_domain": "",
+        "source": "ai",
+        "cover_image_url": None,
+        "data": firestore_safe(body.data),
+        "acquisition": acquisition,
+        "source_note_ids": body.source_note_ids[:50],
+        "created_at": now,
+        "updated_at": now,
+    }
+    embedding = await _note_embedding(body.title, body.ai_summary)
+    if embedding is not None:
+        note_doc["embedding"] = embedding
+    await db.collection("notes").document(note_id).set(note_doc)
+    await add_user_category(user_id, slug)
+    return {"id": note_id}
 
 
 @router.post("/notes/{note_id}/share")

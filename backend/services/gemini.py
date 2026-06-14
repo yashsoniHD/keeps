@@ -22,7 +22,7 @@ from google import genai
 from google.genai import types
 
 from config import settings
-from models.ask import GroundedAnswer, NoteSelection
+from models.ask import ArtifactNote, AskPlan, GroundedAnswer, SynthAnswer
 from models.note import ContentBundle, NoteExtraction
 from services.usage_meter import record_usage
 
@@ -210,35 +210,124 @@ steps or day sections; a list of recommendations becomes sections with one headi
 Do NOT flatten everything into one bullet list — that is a failure."""
 
 
-ASK_SELECT_SYSTEM = """You select which of a user's saved notes could help answer their question.
-You receive a JSON index of notes (id, type, title, summary), the question,
-and recent conversation turns.
-Return ONLY valid JSON: {"note_ids": ["id", ...]}
+ASK_PLAN_SYSTEM = """You plan how to answer a message in Clipnote, an app where the user saves
+links as structured notes. You receive: the user's message, recent conversation, today's local
+date, and a JSON index of candidate notes (id, type, title, summary, saved date).
 
-Rules:
-- Include every note that could plausibly contribute; most relevant first; max 12.
-- Use ONLY ids that appear in the index — never invent ids.
-- Resolve follow-ups from the conversation ("which of those is cheapest" refers
-  to the notes discussed in the previous turns).
-- If nothing is relevant, return {"note_ids": []}."""
+Return ONLY valid JSON:
+{"intent":"answer|aggregate|create","scope":"notes|general","topic":str|null,
+ "period":"today|yesterday|this_week|last_week|this_month|recent"|null,
+ "content_types":[slug,...],"exhaustive":bool,
+ "output":"prose|itinerary|meal_plan|comparison|checklist","note_ids":[id,...]}
+
+How to fill it:
+- scope: "notes" if the message is about the user's saved notes/content; "general" if it is
+  small talk or a general-knowledge question unrelated to their notes (then note_ids = []).
+  Judge follow-ups from the conversation — "and who directed it?" after a movie note is "notes";
+  "what's the capital of France" is "general".
+- intent: "answer" normally; "aggregate" for counting / how-many / breakdown questions;
+  "create" ONLY if the user asks to make/save a NEW note.
+- period: set when the message is time-scoped ("today", "yesterday", "this week",
+  "lately"/"recently" = recent). Resolve relative to today's date given. Otherwise null.
+- content_types: the note types the message targets — reuse the exact slugs that appear in the
+  index when they fit (e.g. "recipe", "place"). Empty if it spans everything or is unclear.
+- exhaustive: true when the user wants ALL of something ("all my recipes", "consolidate my trip
+  notes", "compare every laptop"). For period or exhaustive requests, leave note_ids EMPTY —
+  retrieval fetches the full filtered set itself.
+- output: "prose" by default. Use itinerary/meal_plan/comparison/checklist only when the user
+  explicitly wants that artifact built.
+- note_ids: for an ordinary topic question (no period, not exhaustive), pick the relevant ids
+  from the index, most relevant first, max 12. Use ONLY ids present in the index — never invent.
+
+If nothing in the index is relevant but the message is clearly about their notes, return
+scope="notes" with note_ids=[]."""
 
 
-ASK_ANSWER_SYSTEM = """You are Clipnote's assistant. The user saves links as structured notes; answer
-their question using ONLY the saved notes provided.
+ASK_ANSWER_NOTES_SYSTEM = """You are Clipnote's assistant. The user saves links as structured notes;
+answer their question using ONLY the saved notes provided.
 Return ONLY valid JSON: {"answer_markdown": str, "cited_note_ids": [str]}
 
 Rules:
-- Ground every claim in the notes. NEVER FABRICATE: if the notes don't contain
-  enough to answer, say so plainly and suggest what they could save — do not
-  fill gaps from general knowledge or the wider internet.
-- Be direct, conversational, and specific: use the real names, prices, timings,
-  and quantities from the notes.
-- Mention note titles naturally when recommending or comparing, so the user
-  knows where each item came from.
+- Ground every claim in the notes. NEVER FABRICATE: if the notes don't contain enough to
+  answer, say so plainly and suggest what they could save — do not fill gaps from general
+  knowledge or the wider internet.
+- Be direct, conversational, and specific: use the real names, prices, timings, and
+  quantities from the notes.
+- Mention note titles naturally when recommending or comparing, so the user knows where
+  each item came from.
 - cited_note_ids: only notes you actually used, most relevant first.
-- Markdown subset only: short paragraphs, "- " bullets, numbered lists, **bold**,
-  ### headings. No tables, images, links, or HTML.
+- Markdown subset: short paragraphs, "- " bullets, numbered lists, **bold**, ### headings,
+  and a simple markdown table ONLY when comparing items. No images, links, or HTML.
 - Use the conversation history to resolve follow-ups; answer the latest question."""
+
+
+ASK_CHAT_SYSTEM = """You are Clipnote's friendly assistant. The user's message is general
+conversation or a general-knowledge question — NOT about their saved notes.
+Return ONLY valid JSON: {"answer_markdown": str, "cited_note_ids": []}
+
+Rules:
+- Answer naturally, helpfully, and concisely from your own knowledge.
+- Do NOT mention the user's notes, searching them, or that none were found — just answer.
+- cited_note_ids is ALWAYS an empty list.
+- Markdown subset only: short paragraphs, "- " bullets, **bold**. No tables, images, links, or HTML.
+- Use the conversation history to resolve follow-ups."""
+
+
+ASK_SYNTH_SYSTEM = """You are Clipnote's assistant. The user wants you to CONSOLIDATE several of
+their saved notes into ONE structured artifact. Build it using ONLY the provided notes.
+
+Return ONLY valid JSON:
+{"answer_markdown": "one short lead-in sentence introducing the artifact",
+ "artifact": {"title": str, "ai_summary": "1-2 sentence overview",
+              "content_type": "<short slug for the artifact>",
+              "data": { ...blocks below... }},
+ "cited_note_ids": [ids of notes you used]}
+
+artifact.data is built from these blocks — use whichever fit:
+  "facts":     [{"label": str, "value": str}]
+  "sections":  [{"heading": str, "items": [str]}]
+  "steps":     [str]
+  "table":     {"columns": [str], "rows": [[str]]}
+  "checklist": [str]
+
+Shape it to the requested OUTPUT kind:
+  - itinerary  → one section per day (heading "Day 1 — ...", items = stops with time/place/why);
+                 add a checklist of bookings/things to carry if useful. content_type "itinerary".
+  - meal_plan  → one section per day listing meals, plus a "Grocery list" checklist that
+                 DEDUPES ingredients across the recipes. content_type "meal-plan".
+  - comparison → a table (one row per item; columns = the attributes compared) and a short
+                 verdict section. content_type "comparison".
+  - checklist  → a single checklist (optionally grouped into sections). content_type "checklist".
+
+Rules:
+- NEVER FABRICATE: use only details present in the notes; omit anything missing. A sparse but
+  truthful artifact beats an invented complete-looking one.
+- Be specific: real names, times, prices, quantities from the notes.
+- cited_note_ids: every note that contributed."""
+
+
+ASK_CREATE_SYSTEM = """You are Clipnote's assistant. The user wants you to CREATE a new note from
+this conversation and your own knowledge. Author a genuinely useful, well-structured note.
+
+Return ONLY valid JSON:
+{"title": "concise note title in sentence case",
+ "ai_summary": "1-2 sentence overview",
+ "content_type": "<short category slug>",
+ "data": { ...blocks below... }}
+
+data is built from these blocks — use whichever fit (structure mirrors the content; never dump
+one flat bullet list):
+  "facts":     [{"label": str, "value": str}]
+  "sections":  [{"heading": str, "items": [str]}]
+  "steps":     [str]
+  "table":     {"columns": [str], "rows": [[str]]}
+  "checklist": [str]
+
+Rules:
+- Use the conversation to understand exactly what to capture, then fill in helpful, accurate
+  detail from your own knowledge. Be concrete, specific, and skimmable.
+- content_type: a short slug describing the note ("travel-tips", "cafes", "packing-list").
+  Never "general", "misc", or "other"."""
 
 
 def _history_lines(history: list[dict]) -> str:
@@ -359,11 +448,12 @@ class GeminiService:
 
     # ---------- Ask AI: chat grounded in the user's saved notes ----------
 
-    def _select_notes(self, question: str, history: list[dict], index: list[dict]) -> list[str]:
-        prompt_parts = [f"Question: {question}"]
+    def _plan_ask(self, question: str, history: list[dict], today: str,
+                  index: list[dict]) -> AskPlan:
+        prompt_parts = [f"Today: {today}", f"Message: {question}"]
         if history:
             prompt_parts.append("Recent conversation:\n" + _history_lines(history))
-        prompt_parts.append("Note index (JSON):\n" + json.dumps(index, ensure_ascii=False))
+        prompt_parts.append("Candidate note index (JSON):\n" + json.dumps(index, ensure_ascii=False))
         for attempt in (1, 2):
             try:
                 response = self.client.models.generate_content(
@@ -371,22 +461,55 @@ class GeminiService:
                     contents=["\n\n".join(prompt_parts)],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        system_instruction=ASK_SELECT_SYSTEM,
+                        system_instruction=ASK_PLAN_SYSTEM,
                     ),
                 )
                 record_usage(settings.GEMINI_LITE_MODEL, response)
-                return NoteSelection.model_validate_json(_strip_code_fences(response.text)).note_ids
+                return AskPlan.model_validate_json(_strip_code_fences(response.text))
             except Exception as e:
                 if attempt == 1:
-                    log.warning("select_notes attempt 1 failed, retrying: %s: %s",
+                    log.warning("plan_ask attempt 1 failed, retrying: %s: %s",
                                 type(e).__name__, e)
                     time.sleep(2)
-        # Selection is best-effort: an empty list degrades to "nothing found",
-        # which beats failing the whole ask.
-        return []
+        # Planning is best-effort: default to a note-scoped answer with no picks, which
+        # degrades to "nothing found" rather than failing the whole ask.
+        return AskPlan(scope="notes")
 
-    async def select_notes(self, question: str, history: list[dict], index: list[dict]) -> list[str]:
-        return await asyncio.to_thread(self._select_notes, question, history, index)
+    async def plan_ask(self, question: str, history: list[dict], today: str,
+                       index: list[dict]) -> AskPlan:
+        return await asyncio.to_thread(self._plan_ask, question, history, today, index)
+
+    def _answer_chat(self, question: str, history: list[dict]) -> GroundedAnswer:
+        prompt_parts = []
+        if history:
+            prompt_parts.append("Conversation so far:\n" + _history_lines(history))
+        prompt_parts.append(f"Message: {question}")
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                response = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=["\n\n".join(prompt_parts)],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        system_instruction=ASK_CHAT_SYSTEM,
+                        temperature=0.4,
+                    ),
+                )
+                record_usage(settings.GEMINI_MODEL, response)
+                answer = GroundedAnswer.model_validate_json(_strip_code_fences(response.text))
+                answer.cited_note_ids = []  # chat mode never cites notes
+                return answer
+            except Exception as e:
+                last_exc = e
+                if attempt == 1:
+                    log.warning("answer_chat attempt 1 failed, retrying: %s: %s",
+                                type(e).__name__, e)
+                    time.sleep(2)
+        raise last_exc
+
+    async def answer_chat(self, question: str, history: list[dict]) -> GroundedAnswer:
+        return await asyncio.to_thread(self._answer_chat, question, history)
 
     def _answer_from_notes(self, question: str, history: list[dict], notes: list[dict]) -> GroundedAnswer:
         prompt_parts = []
@@ -408,7 +531,7 @@ class GeminiService:
                     contents=["\n\n".join(prompt_parts)],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        system_instruction=ASK_ANSWER_SYSTEM,
+                        system_instruction=ASK_ANSWER_NOTES_SYSTEM,
                         temperature=0.3,
                     ),
                 )
@@ -424,6 +547,77 @@ class GeminiService:
 
     async def answer_from_notes(self, question: str, history: list[dict], notes: list[dict]) -> GroundedAnswer:
         return await asyncio.to_thread(self._answer_from_notes, question, history, notes)
+
+    def _synthesize(self, question: str, history: list[dict], notes: list[dict],
+                    output: str) -> SynthAnswer:
+        prompt_parts = [f"OUTPUT kind requested: {output}"]
+        if history:
+            prompt_parts.append("Conversation so far:\n" + _history_lines(history))
+        for n in notes:
+            prompt_parts.append(
+                f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
+                f" | {n.get('source_domain', '')}\n"
+                f"summary: {n.get('ai_summary', '')}\n"
+                f"data: {json.dumps(n.get('data', {}), ensure_ascii=False, default=str)[:6000]}"
+            )
+        prompt_parts.append(f"Request: {question}")
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                response = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=["\n\n".join(prompt_parts)],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        system_instruction=ASK_SYNTH_SYSTEM,
+                        temperature=0.3,
+                    ),
+                )
+                record_usage(settings.GEMINI_MODEL, response)
+                return SynthAnswer.model_validate_json(_strip_code_fences(response.text))
+            except Exception as e:
+                last_exc = e
+                if attempt == 1:
+                    log.warning("synthesize attempt 1 failed, retrying: %s: %s",
+                                type(e).__name__, e)
+                    time.sleep(2)
+        raise last_exc
+
+    async def synthesize(self, question: str, history: list[dict], notes: list[dict],
+                         output: str) -> SynthAnswer:
+        return await asyncio.to_thread(self._synthesize, question, history, notes, output)
+
+    def _create_note(self, question: str, history: list[dict]) -> ArtifactNote:
+        prompt_parts = []
+        if history:
+            prompt_parts.append("Conversation:\n" + _history_lines(history))
+        prompt_parts.append(f"Create-note request: {question}")
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                response = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=["\n\n".join(prompt_parts)],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        system_instruction=ASK_CREATE_SYSTEM,
+                        temperature=0.4,
+                    ),
+                )
+                record_usage(settings.GEMINI_MODEL, response)
+                artifact = ArtifactNote.model_validate_json(_strip_code_fences(response.text))
+                artifact.origin = "created"
+                return artifact
+            except Exception as e:
+                last_exc = e
+                if attempt == 1:
+                    log.warning("create_note attempt 1 failed, retrying: %s: %s",
+                                type(e).__name__, e)
+                    time.sleep(2)
+        raise last_exc
+
+    async def create_note(self, question: str, history: list[dict]) -> ArtifactNote:
+        return await asyncio.to_thread(self._create_note, question, history)
 
     # ---------- Search-grounded page lookup (for bot-blocked pages) ----------
 
