@@ -15,6 +15,9 @@ class AskRequest(BaseModel):
     # Minutes EAST of UTC (frontend sends -new Date().getTimezoneOffset()), so the
     # backend can resolve "today"/"this week" against the user's local day, not UTC's.
     tz_offset_minutes: int = Field(default=0, ge=-840, le=840)
+    # Focal note when the chat is opened from a note's page: that note is forced into the
+    # grounding set and ranked first ("this note first, then all"). None = corpus-wide.
+    note_id: str | None = Field(default=None, max_length=128)
 
 
 class Citation(BaseModel):

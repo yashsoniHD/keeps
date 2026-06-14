@@ -309,6 +309,13 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
         index = _dated_index(pool, body.tz_offset_minutes)
         plan = await gemini_service.plan_ask(body.question, history[-4:], today_str, index)
 
+        # Focal note: chat opened from a note's page. Fetch it (ownership-checked) so it can
+        # be forced into the grounding set and ranked first. A stale/foreign id is ignored.
+        focal: dict | None = None
+        if body.note_id:
+            found = await _fetch_notes_by_ids(db, user_id, [body.note_id])
+            focal = found[0] if found else None
+
         # Create-a-note: author a draft from the whole conversation (a wider window than the
         # answer stages get) and return it as a savable artifact — no retrieval needed.
         if plan.intent == "create":
@@ -317,6 +324,11 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
             return AskResponse(answer="Here's a draft — save it if it looks right:",
                                artifact=artifact)
 
+        # Opening Ask from inside a note means it's note-grounded even for terse prompts
+        # ("summarize this"), so a focal note overrides a "general" plan.
+        if focal:
+            plan.scope = "notes"
+
         # General conversation / general-knowledge → answer plainly, no notes, no citations.
         if plan.scope == "general":
             return AskResponse(answer=await _general_answer(body.question, history))
@@ -324,6 +336,13 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
         notes, matched_total = await _retrieve_notes(
             db, user_id, plan, pool, body.tz_offset_minutes, now_utc
         )
+        # "This note first, then all": prepend the focal note (deduped) ahead of the
+        # planner's matches so the answer leads with what the user is looking at.
+        if focal:
+            already = any(n["id"] == focal["id"] for n in notes)
+            notes = [focal] + [n for n in notes if n["id"] != focal["id"]]
+            if not already:
+                matched_total += 1
         if not notes:
             # Specific, scoped misses get a specific message; an open-ended miss (no
             # time/source/type filter) falls back to a plain answer rather than a dead end —
@@ -346,14 +365,17 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
 
         # Consolidation: build a structured artifact (itinerary/meal plan/comparison/checklist)
         # the UI renders and can save as a note. Otherwise, a normal grounded prose answer.
+        focal_title = focal.get("title") if focal else None
         try:
             if plan.output != "prose":
-                synth = await gemini_service.synthesize(body.question, history, notes, plan.output)
+                synth = await gemini_service.synthesize(body.question, history, notes,
+                                                        plan.output, focal_title)
                 answer_md, cited_ids, artifact = (
                     synth.answer_markdown, synth.cited_note_ids, synth.artifact
                 )
             else:
-                grounded = await gemini_service.answer_from_notes(body.question, history, notes)
+                grounded = await gemini_service.answer_from_notes(body.question, history, notes,
+                                                                  focal_title)
                 answer_md, cited_ids, artifact = (
                     grounded.answer_markdown, grounded.cited_note_ids, None
                 )

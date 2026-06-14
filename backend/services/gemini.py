@@ -339,6 +339,16 @@ def _history_lines(history: list[dict]) -> str:
     return "\n".join(f"{t['role']}: {t['text']}" for t in history)
 
 
+def _focal_hint(title: str) -> str:
+    """Steer the answer toward the note the user is currently viewing (Ask opened from a
+    note's page) — primary subject, but not a hard filter ("this note first, then all")."""
+    return (
+        f'CONTEXT: The user is currently viewing the note titled "{title}". Treat it as the '
+        "primary subject and prioritize it in your answer, unless the question is clearly "
+        "about other notes."
+    )
+
+
 def _strip_code_fences(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
@@ -530,10 +540,13 @@ class GeminiService:
     async def answer_chat(self, question: str, history: list[dict]) -> GroundedAnswer:
         return await asyncio.to_thread(self._answer_chat, question, history)
 
-    def _answer_from_notes(self, question: str, history: list[dict], notes: list[dict]) -> GroundedAnswer:
+    def _answer_from_notes(self, question: str, history: list[dict], notes: list[dict],
+                           focal_title: str | None = None) -> GroundedAnswer:
         prompt_parts = []
         if history:
             prompt_parts.append("Conversation so far:\n" + _history_lines(history))
+        if focal_title:
+            prompt_parts.append(_focal_hint(focal_title))
         for n in notes:
             prompt_parts.append(
                 f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
@@ -564,14 +577,18 @@ class GeminiService:
                     time.sleep(2)
         raise last_exc
 
-    async def answer_from_notes(self, question: str, history: list[dict], notes: list[dict]) -> GroundedAnswer:
-        return await asyncio.to_thread(self._answer_from_notes, question, history, notes)
+    async def answer_from_notes(self, question: str, history: list[dict], notes: list[dict],
+                                focal_title: str | None = None) -> GroundedAnswer:
+        return await asyncio.to_thread(self._answer_from_notes, question, history, notes,
+                                       focal_title)
 
     def _synthesize(self, question: str, history: list[dict], notes: list[dict],
-                    output: str) -> SynthAnswer:
+                    output: str, focal_title: str | None = None) -> SynthAnswer:
         prompt_parts = [f"OUTPUT kind requested: {output}"]
         if history:
             prompt_parts.append("Conversation so far:\n" + _history_lines(history))
+        if focal_title:
+            prompt_parts.append(_focal_hint(focal_title))
         for n in notes:
             prompt_parts.append(
                 f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
@@ -603,8 +620,9 @@ class GeminiService:
         raise last_exc
 
     async def synthesize(self, question: str, history: list[dict], notes: list[dict],
-                         output: str) -> SynthAnswer:
-        return await asyncio.to_thread(self._synthesize, question, history, notes, output)
+                         output: str, focal_title: str | None = None) -> SynthAnswer:
+        return await asyncio.to_thread(self._synthesize, question, history, notes, output,
+                                       focal_title)
 
     def _create_note(self, question: str, history: list[dict]) -> ArtifactNote:
         prompt_parts = []

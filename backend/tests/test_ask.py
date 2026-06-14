@@ -54,16 +54,18 @@ def _gemini(monkeypatch, plan, answer=None, chat=None, synth=None, created=None)
         calls["plan"].append(index)
         return plan
 
-    async def answer_from_notes(question, history, notes):
+    async def answer_from_notes(question, history, notes, focal_title=None):
         calls["answer"].append(notes)
+        calls.setdefault("focal", []).append(focal_title)
         return answer or GroundedAnswer(answer_markdown="Watch Dune.", cited_note_ids=["n1"])
 
     async def answer_chat(question, history):
         calls["chat"].append(question)
         return chat or GroundedAnswer(answer_markdown="Paris is the capital of France.")
 
-    async def synthesize(question, history, notes, output):
+    async def synthesize(question, history, notes, output, focal_title=None):
         calls["synth"].append(output)
+        calls.setdefault("focal", []).append(focal_title)
         return synth or SynthAnswer(answer_markdown="Here it is:",
                                     artifact=ArtifactNote(title="Artifact"), cited_note_ids=["n1"])
 
@@ -262,6 +264,43 @@ async def test_zero_notes_general_scope_still_answers(fake_db, monkeypatch):
     res = await ask_mod.ask(AskRequest(question="hello"), user_id="u")
     assert res.answer == "Paris is the capital of France."  # the stubbed chat reply
     assert res.citations == []
+
+
+async def test_note_context_forces_scope_and_grounds_in_focal(fake_db, monkeypatch):
+    # Opened from a note: even a "general" plan must ground in that note, not chat freely.
+    calls = _gemini(monkeypatch, AskPlan(scope="general"))
+    res = await ask_mod.ask(AskRequest(question="summarize this", note_id="n1"), user_id="u")
+    assert [n["id"] for n in calls["answer"][0]] == ["n1"]  # focal note grounded
+    assert calls["chat"] == []                              # general path overridden
+    assert calls["focal"][-1] == "Dune Part Two"            # title hint passed to the model
+    assert [c.id for c in res.citations] == ["n1"]
+
+
+async def test_note_context_ranks_focal_ahead_of_planner_picks(fake_db, monkeypatch):
+    note2 = {"id": "n2", "user_id": "u", "content_type": "recipe", "title": "Pasta",
+             "ai_summary": "x", "source_domain": "web", "data": {}}
+
+    async def pool(db, user_id, question):
+        return [{k: v for k, v in note2.items() if k != "data"}]  # pool knows only n2
+
+    async def by_ids(db, user_id, ids):
+        return [n for n in (NOTE_N1, note2) if n["id"] in ids]
+
+    monkeypatch.setattr(ask_mod, "_candidate_pool", pool)
+    monkeypatch.setattr(ask_mod, "_fetch_notes_by_ids", by_ids)
+    calls = _gemini(monkeypatch, AskPlan(scope="notes", note_ids=["n2"]),
+                    answer=GroundedAnswer(answer_markdown="ok", cited_note_ids=["n1", "n2"]))
+    res = await ask_mod.ask(AskRequest(question="how does this compare", note_id="n1"), user_id="u")
+    assert [n["id"] for n in calls["answer"][0]] == ["n1", "n2"]  # focal first, then matches
+    assert res.coverage is None
+
+
+async def test_foreign_or_missing_note_id_is_ignored(fake_db, monkeypatch):
+    # A stale/foreign id must not error the chat or inject a focal hint.
+    calls = _gemini(monkeypatch, AskPlan(scope="notes", note_ids=["n1"]))
+    res = await ask_mod.ask(AskRequest(question="what to watch", note_id="not-mine"), user_id="u")
+    assert [c.id for c in res.citations] == ["n1"]
+    assert calls["focal"][-1] is None  # no focal note → no hint
 
 
 @pytest.mark.parametrize(
