@@ -115,7 +115,7 @@ export function GenericNote({ note }: { note: Note }) {
       {(data.quotes ?? []).map((q, i) => (
         <blockquote key={i} className="relative rounded-2xl border border-border bg-card p-5 pl-12">
           <Quote className={`absolute left-4 top-5 h-5 w-5 ${accent.text}`} />
-          <p className="font-serif text-lg leading-snug text-ink">"{q.text}"</p>
+          <p className="text-[15px] italic leading-relaxed text-ink md:text-base">"{q.text}"</p>
           {q.attribution && <div className="mt-2 text-xs text-ink-soft">{q.attribution}</div>}
         </blockquote>
       ))}

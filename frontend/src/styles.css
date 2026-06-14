@@ -177,6 +177,13 @@
   select {
     font-size: 16px !important;
   }
+  /* The editable note title is a textarea but must stay at its display size (text-3xl,
+     30px) instead of collapsing to the 16px form-control floor — it's well above the
+     iOS-zoom threshold, so keeping it large is safe. More specific than the rule above,
+     so it wins despite both using !important. */
+  textarea.title-edit {
+    font-size: 1.875rem !important;
+  }
 }
 
 @utility paper-grain {

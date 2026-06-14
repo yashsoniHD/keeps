@@ -51,7 +51,7 @@ export function SummaryNote({ note }: { note: Note }) {
             {data.quotes.map((q, i) => (
               <blockquote key={i} className="relative rounded-2xl border border-border bg-card p-5 pl-12">
                 <Quote className="absolute left-4 top-5 h-5 w-5 text-summary" />
-                <p className="font-serif text-lg leading-snug text-ink">"{q.text}"</p>
+                <p className="text-[15px] italic leading-relaxed text-ink md:text-base">"{q.text}"</p>
                 {q.timestamp && <div className="mt-2 font-mono text-xs text-ink-soft">{q.timestamp}</div>}
               </blockquote>
             ))}

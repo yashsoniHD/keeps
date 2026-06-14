@@ -39,7 +39,10 @@ function EditableTitle({
     const ta = ref.current;
     if (ta) {
       ta.focus();
-      ta.select();
+      // Place the caret at the end rather than selecting all — select() triggers the
+      // text-selection handles + copy menu on mobile, which the user never wants here.
+      const end = ta.value.length;
+      ta.setSelectionRange(end, end);
       autosize(ta);
     }
   }, [editing]);
@@ -81,7 +84,7 @@ function EditableTitle({
         }}
         onBlur={commit}
         aria-label="Edit title"
-        className="w-full resize-none overflow-hidden bg-transparent font-serif text-3xl leading-[1.05] text-ink outline-none md:text-5xl"
+        className="title-edit w-full resize-none overflow-hidden bg-transparent font-serif text-3xl leading-[1.05] text-ink outline-none md:text-5xl"
       />
     );
   }
