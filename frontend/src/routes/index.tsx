@@ -32,7 +32,7 @@ import {
   replayQueue,
   type QueuedCapture,
 } from "@/lib/capture-queue";
-import { groupNotesByDate, noteLabel, sourceLabel } from "@/lib/note-meta";
+import { groupNotesByDate, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { isIOS } from "@/lib/platform";
 import { FOCUS_RING } from "@/lib/ui";
 import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
@@ -49,6 +49,35 @@ type Layout = "standard" | "condensed";
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+
+// Tracks whether a horizontal scroller sits at its start/end, so the caller can show edge
+// fades only when content actually overflows. Recomputes on scroll, on resize, and when
+// `deps` change (e.g. the category list grows — which changes scrollWidth, not box size).
+function useScrollEdges<T extends HTMLElement>(deps: unknown[]) {
+  const ref = useRef<T>(null);
+  const [edges, setEdges] = useState({ atStart: true, atEnd: true });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      setEdges({
+        atStart: scrollLeft <= 1,
+        atEnd: scrollLeft + clientWidth >= scrollWidth - 1,
+      });
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return { ref, ...edges };
+}
 
 function Feed() {
   const { user, loading } = useAuth();
@@ -215,6 +244,13 @@ function Feed() {
     [notes, userSources],
   );
 
+  // Edge fades on the category scroller — only shown when chips actually overflow.
+  const {
+    ref: catScrollRef,
+    atStart: catAtStart,
+    atEnd: catAtEnd,
+  } = useScrollEdges<HTMLDivElement>([categories.length, sources.length]);
+
   // Browse view: the live feed filtered only by the type/source chips. Text queries no
   // longer filter this slice — they run server-side semantic search (below) over the
   // whole corpus, not just the loaded window.
@@ -354,23 +390,26 @@ function Feed() {
                   placeholder="Search your notes"
                   className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
                 />
-                {query.trim() && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      navigate({
-                        to: "/ask",
-                        search: { q: query.trim(), send: true },
-                      })
-                    }
-                    aria-label="Ask AI"
-                    title="Ask AI"
-                    className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
-                  >
-                    <WandSparkles className="h-4 w-4" />
-                    Ask AI
-                  </button>
-                )}
+                {/* Visible the moment the bar opens, not gated on a typed query — an empty
+                    query lands on the Ask AI page's idle state (nothing auto-sent).
+                    onMouseDown.preventDefault keeps the input from blurring (which would
+                    collapse the bar) before the click navigates. */}
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() =>
+                    navigate({
+                      to: "/ask",
+                      search: query.trim() ? { q: query.trim(), send: true } : {},
+                    })
+                  }
+                  aria-label="Ask AI"
+                  title="Ask AI"
+                  className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
+                >
+                  <WandSparkles className="h-4 w-4" />
+                  Ask AI
+                </button>
               </div>
               <button
                 type="button"
@@ -437,24 +476,47 @@ function Feed() {
               {sources.length > 1 && (
                 <SourceFilter sources={sources} source={source} setSource={setSource} />
               )}
-              <div className="-mx-1 flex flex-1 gap-1.5 overflow-x-auto px-1 py-1">
-                {[
-                  { id: "all", label: "All" },
-                  ...categories.map((c) => ({ id: c, label: noteLabel(c) })),
-                ].map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setActive(f.id)}
-                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
-                      active === f.id
-                        ? "bg-ink text-paper"
-                        : "border border-border bg-card text-ink-soft hover:text-ink"
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
+              <div className="relative min-w-0 flex-1">
+                <div
+                  ref={catScrollRef}
+                  className="-mx-1 flex gap-1.5 overflow-x-auto px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                <button
+                  type="button"
+                  onClick={() => setActive("all")}
+                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
+                    active === "all"
+                      ? "bg-ink text-paper"
+                      : "border border-border bg-card text-ink-soft hover:text-ink"
+                  }`}
+                >
+                  All
+                </button>
+                {categories.map((c) => {
+                  const accent = noteAccent(c);
+                  const Icon = noteIcon(c);
+                  const isActive = active === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setActive(c)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
+                        isActive ? `${accent.dot} text-white` : accent.chip
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      {noteLabel(c)}
+                    </button>
+                  );
+                })}
+                </div>
+                {!catAtStart && (
+                  <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent" />
+                )}
+                {!catAtEnd && (
+                  <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent" />
+                )}
               </div>
             </div>
           )}

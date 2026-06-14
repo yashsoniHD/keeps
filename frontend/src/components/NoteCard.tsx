@@ -119,7 +119,7 @@ export function NoteCard({ note }: { note: Note }) {
     <Link
       to="/notes/$noteId"
       params={{ noteId: note.id }}
-      className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
+      className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-5 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -128,11 +128,11 @@ export function NoteCard({ note }: { note: Note }) {
           {hasCover && (
             <CoverThumb
               note={note}
-              className="h-9 w-9 shrink-0 rounded-lg"
+              className="h-12 w-12 shrink-0 rounded-xl"
               onImageError={onImageError}
             />
           )}
-          <span className={`inline-flex min-w-0 items-center gap-1 text-xs font-medium ${accent.text}`}>
+          <span className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${accent.chip}`}>
             <Icon className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{noteLabel(note.content_type)}</span>
           </span>
@@ -142,13 +142,13 @@ export function NoteCard({ note }: { note: Note }) {
 
       <h3
         ref={titleRef}
-        className="mt-2.5 font-serif text-2xl leading-[1.15] text-ink line-clamp-2"
+        className="mt-4 font-serif text-2xl leading-[1.15] text-ink line-clamp-2"
       >
         {note.title}
       </h3>
-      <p className={`mt-1.5 text-sm text-ink-soft ${summaryClamp}`}>{note.ai_summary}</p>
+      <p className={`mt-2 text-sm leading-relaxed text-ink-soft ${summaryClamp}`}>{note.ai_summary}</p>
 
-      <div className="mt-auto flex items-center gap-2 pt-3 text-[11px] text-ink-soft">
+      <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
           src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
           onError={(e) => {
@@ -172,6 +172,7 @@ export function NoteRow({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
   const { hasCover, onImageError } = useCoverPresent(note);
+  const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
 
   return (
     <Link
@@ -182,22 +183,39 @@ export function NoteRow({ note }: { note: Note }) {
       {hasCover && (
         <CoverThumb
           note={note}
-          className="h-12 w-12 shrink-0 self-start rounded-lg border border-border/60"
+          className="h-14 w-14 shrink-0 self-start rounded-lg border border-border/60"
           onImageError={onImageError}
         />
       )}
 
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
-          <span className={`inline-flex shrink-0 items-center gap-1 font-medium ${accent.text}`}>
-            <Icon className="h-3.5 w-3.5 shrink-0" />
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${accent.chip}`}>
+            <Icon className="h-3 w-3 shrink-0" />
             {noteLabel(note.content_type)}
           </span>
-          <span className="shrink-0">·</span>
-          <span className="shrink-0">{formatDateShort(note.created_at)}</span>
+          {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
+        </div>
+        <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-1">{note.title}</h3>
+        {note.ai_summary && (
+          <p className="mt-0.5 text-[13px] leading-snug text-ink-soft line-clamp-1">{note.ai_summary}</p>
+        )}
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
+          <img
+            src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+            onError={(e) => {
+              e.currentTarget.style.visibility = "hidden";
+            }}
+            alt=""
+            className="h-3.5 w-3.5 shrink-0 rounded-sm"
+          />
+          <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
         </div>
       </div>
+
+      <span className="shrink-0 self-start text-[11px] tabular-nums text-ink-soft">
+        {formatDateShort(note.created_at)}
+      </span>
     </Link>
   );
 }

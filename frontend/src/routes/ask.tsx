@@ -3,12 +3,17 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   AlertCircle,
   BookmarkPlus,
+  CalendarDays,
   Check,
   ChevronLeft,
+  GitCompare,
   Loader2,
+  Map,
   Send,
+  Sparkles,
   WandSparkles,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
 import { ask, ApiError, saveConsolidatedNote, type AskArtifact, type AskCitation } from "@/lib/api";
@@ -41,8 +46,18 @@ interface Message {
 
 const EXAMPLES = [
   "Summarize what I saved today",
-  "Where should I order food from?",
-  "Compile my trip itinerary from my saved notes",
+  "What recipes have I saved?",
+  "Build an itinerary from my saved trips",
+  "Compare the products I'm considering",
+];
+
+// What Ask AI can do, mirroring the planner's real outputs (backend AskPlan). Static —
+// they teach at a glance; the starter prompts below are the clickable actions.
+const CAPABILITIES: { icon: LucideIcon; label: string }[] = [
+  { icon: Sparkles, label: "Summarize" },
+  { icon: CalendarDays, label: "Find by date" },
+  { icon: Map, label: "Build itineraries" },
+  { icon: GitCompare, label: "Compare" },
 ];
 
 function CitationChip({ citation }: { citation: AskCitation }) {
@@ -250,7 +265,20 @@ function AskPage() {
               Answers come only from what you've saved, and every reply links back to the notes it
               used.
             </p>
-            <div className="mt-6 flex w-full max-w-md flex-col gap-2">
+
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {CAPABILITIES.map(({ icon: Icon, label }) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink-soft"
+                >
+                  <Icon className="h-3.5 w-3.5 text-summary" />
+                  {label}
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-6 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
               {EXAMPLES.map((ex) => (
                 <button
                   key={ex}

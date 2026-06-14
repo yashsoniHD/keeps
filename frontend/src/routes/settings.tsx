@@ -226,6 +226,22 @@ function ConnectPhone() {
   }, []);
   useEffect(refresh, [refresh]);
 
+  // A failed revoke must not become an unhandled rejection (it ships to the client-error
+  // sink and trips the backend ERROR alert). Surface it, then refresh — a 404 usually means
+  // the list was stale, so refetching self-heals the row away.
+  const handleRevoke = useCallback(
+    (id: string) => {
+      setError(null);
+      revokeToken(id)
+        .then(refresh)
+        .catch(() => {
+          setError("Couldn't revoke that device. Refresh and try again.");
+          refresh();
+        });
+    },
+    [refresh],
+  );
+
   // Tap 1: create the token and auto-copy it. The shortcut link is then a real anchor
   // ("Add the Shortcut") — JS-triggered window.open after an await is outside the user
   // gesture and iOS blocks it, so opening Shortcuts gets its own explicit tap instead.
@@ -444,7 +460,7 @@ function ConnectPhone() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => revokeToken(t.id).then(refresh)}
+                  onClick={() => handleRevoke(t.id)}
                   className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:border-destructive/40 hover:text-destructive"
                 >
                   <X className="h-3 w-3" />
