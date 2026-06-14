@@ -17,9 +17,10 @@ router = APIRouter(tags=["notes"])
 
 
 class NoteUpdate(BaseModel):
-    """Owner-editable fields. Both optional — send only what changes."""
+    """Owner-editable fields. All optional — send only what changes."""
     user_note: str | None = None
     content_type: str | None = None
+    title: str | None = Field(default=None, max_length=300)
 
 
 class ConsolidatedNoteIn(BaseModel):
@@ -90,6 +91,18 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
     and Firestore has no field-level security, so private thoughts must not live on it."""
     db = get_db()
     ref = await _owned_note_ref(db, note_id, user_id)  # 404s if not owner
+
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(422, "Title cannot be empty.")
+        await ref.update({"title": title, "updated_at": datetime.now(timezone.utc)})
+        # The search vector is built from title + ai_summary, so a rename must refresh
+        # it or semantic search drifts out of sync. Best-effort — the note is already saved.
+        ai_summary = (((await ref.get()).to_dict()) or {}).get("ai_summary", "")
+        vec = await _note_embedding(title, ai_summary)
+        if vec is not None:
+            await ref.update({"embedding": vec})
 
     if body.content_type is not None:
         # Normalise + collapse to an existing category so the list doesn't fragment

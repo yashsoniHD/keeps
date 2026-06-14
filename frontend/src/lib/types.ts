@@ -3,7 +3,8 @@ import type { Timestamp } from "firebase/firestore";
 export interface Note {
   id: string;
   user_id: string;
-  content_type: string;
+  content_type: string; // editable category — drives icon/colour/filter, NOT the render template
+  template?: string; // immutable structural schema the `data` map was built for (render selector)
   title: string;
   ai_summary: string;
   user_note?: string; // owner's private annotation — never shown on public /p/{id}

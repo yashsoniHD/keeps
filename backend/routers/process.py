@@ -133,6 +133,7 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str,
     note_doc = {
         "user_id": user_id,
         "content_type": "bookmark",
+        "template": "bookmark",  # generic-block data; renders via GenericNote
         "title": title or domain,
         "ai_summary": "Saved as a bookmark — this link couldn't be fully processed. "
                       "Open the source to read it, or retry from the note.",
@@ -239,6 +240,11 @@ async def process_job(job_id: str, request: Request):
         note_doc = {
             "user_id": user_id,
             "content_type": extracted.content_type,
+            # `template` is the immutable structural schema the `data` map was built for.
+            # `content_type` is the *editable* category (icon/colour/filter) and may be
+            # recategorised by the owner; the render template must NOT follow it, or the
+            # data fields (which match this schema) would stop rendering. Set once, here.
+            "template": extracted.content_type,
             "title": extracted.title,
             "ai_summary": extracted.ai_summary,
             "source_url": url,

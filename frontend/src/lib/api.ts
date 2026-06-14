@@ -51,7 +51,7 @@ export async function ingest(url: string): Promise<{ job_id: string; status: str
 // the feed's onSnapshot listener reflects the change live.
 export async function updateNote(
   id: string,
-  updates: { user_note?: string; content_type?: string },
+  updates: { user_note?: string; content_type?: string; title?: string },
 ): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}`, {
     method: "PATCH",

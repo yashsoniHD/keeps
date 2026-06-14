@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { RotateCcw, Sparkles, ArrowRight } from "lucide-react";
 import type { Note } from "@/lib/types";
@@ -17,8 +17,25 @@ import { SummaryNote } from "./note/templates/SummaryNote";
 import { WorkoutNote } from "./note/templates/WorkoutNote";
 import { GenericNote } from "./note/templates/GenericNote";
 
+// Which bespoke template a note's `data` map was built for. This is a STRUCTURAL fact
+// about the data shape — it must never follow the user-editable category (`content_type`),
+// or recategorising a note (e.g. "summary" → "business") would swap in a template that
+// can't read the existing fields, hiding the note's contents. New notes carry an immutable
+// `template` from the backend; for legacy notes that predate it, infer from the data shape.
+function resolveTemplate(note: Note): string {
+  if (note.template) return note.template;
+  const data = (note.data ?? {}) as Record<string, unknown>;
+  if (Array.isArray(data.ingredients)) return "recipe";
+  if (Array.isArray(data.days)) return "itinerary";
+  if (Array.isArray(data.exercises) || (data.structure && data.goal)) return "workout";
+  if (data.specs || data.pros || data.cons || data.buyUrl || (data.price && data.brand))
+    return "product";
+  if (data.tldr || Array.isArray(data.keyPoints)) return "summary";
+  return ""; // generic blocks (facts/sections/steps/table/checklist/quotes)
+}
+
 function NoteBody({ note }: { note: Note }) {
-  switch (note.content_type) {
+  switch (resolveTemplate(note)) {
     case "recipe":
       return <RecipeNote note={note} />;
     case "itinerary":
@@ -112,7 +129,7 @@ function PublicNoteHeader({ note }: { note: Note }) {
         <SourcePill domain={note.source_domain} url={note.source_url} />
         <span className="text-xs text-ink-soft">{formatDate(note.created_at)}</span>
       </div>
-      <h1 className="font-serif text-4xl leading-[1.05] text-ink md:text-6xl">{note.title}</h1>
+      <h1 className="font-serif text-3xl leading-[1.05] text-ink md:text-5xl">{note.title}</h1>
     </header>
   );
 }
@@ -143,31 +160,69 @@ function PublicSignupCTA() {
 // gradient + faded type icon so the detail view never reads as empty — the same accent
 // system the feed cards use (note-meta), scaled up. Also the safety net when an AI cover
 // is disabled, fails to generate, or hits a daily cap.
+//
+// Cover sizing is aspect-ratio aware: a wide, sizeable image (article/recipe/travel hero)
+// gets a full-width banner, while a square/portrait/small image (typically a creator face,
+// avatar, or logo from a social video) gets a compact left-aligned card instead of being
+// stretched across a banner. We measure off-screen first so there's no resize flash —
+// product notes already render their own image and skip this hero entirely.
 function CoverHero({ note }: { note: Note }) {
   const [broken, setBroken] = useState(false);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
-  const showImage = Boolean(note.cover_image_url) && !broken;
 
-  if (showImage) {
+  const url = note.cover_image_url;
+  useEffect(() => {
+    setBroken(false);
+    setDims(null);
+    if (!url) return;
+    const img = new Image();
+    img.onload = () => setDims({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => setBroken(true);
+    img.src = url;
+  }, [url]);
+
+  // Gradient + faded-icon fallback: no cover, a broken one, or while we measure the image
+  // (the placeholder reads as intentional, so the measuring step isn't a blank flash).
+  if (!url || broken || !dims) {
+    return (
+      <div
+        className={`relative mb-8 flex h-56 w-full items-center justify-center overflow-hidden rounded-3xl border border-border md:h-72 ${accent.soft}`}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-transparent to-ink/[0.06]" />
+        <Icon className={`relative h-20 w-20 opacity-40 md:h-28 md:w-28 ${accent.text}`} />
+      </div>
+    );
+  }
+
+  const isBanner = dims.w >= 480 && dims.w / dims.h >= 1.3;
+
+  if (isBanner) {
     return (
       <div className="mb-8 overflow-hidden rounded-3xl border border-border">
         <img
-          src={note.cover_image_url!}
+          src={url}
           alt=""
-          className="h-72 w-full object-cover md:h-96"
-          onError={() => setBroken(true)} // reveal the gradient fallback below
+          className="h-56 w-full object-cover md:h-72"
+          onError={() => setBroken(true)}
         />
       </div>
     );
   }
 
+  // Compact thumbnail: small/portrait image (e.g. a creator face) in a left-aligned panel
+  // that hugs the image, so it reads as a deliberate object rather than a stretched banner.
   return (
-    <div
-      className={`relative mb-8 flex h-56 w-full items-center justify-center overflow-hidden rounded-3xl border border-border md:h-72 ${accent.soft}`}
-    >
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-ink/[0.06]" />
-      <Icon className={`relative h-20 w-20 opacity-40 md:h-28 md:w-28 ${accent.text}`} />
+    <div className="mb-8 flex">
+      <div className={`overflow-hidden rounded-3xl border border-border ${accent.soft}`}>
+        <img
+          src={url}
+          alt=""
+          className="h-44 w-44 object-cover md:h-52 md:w-52"
+          onError={() => setBroken(true)}
+        />
+      </div>
     </div>
   );
 }
@@ -185,7 +240,9 @@ export function NoteContent({
 }) {
   const isPublic = variant === "public";
   // ProductNote lays out its own image beside the buy panel — it skips the shared hero.
-  const showHero = note.content_type !== "product";
+  // Key off the structural template (not the editable category) so a recategorised
+  // product doesn't render both its own image and the shared hero.
+  const showHero = resolveTemplate(note) !== "product";
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
       {isPublic ? (
