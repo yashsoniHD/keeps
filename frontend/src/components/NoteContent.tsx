@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { RotateCcw, Sparkles, ArrowRight } from "lucide-react";
+import { RotateCcw, Sparkles, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { ingest } from "@/lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -134,24 +134,68 @@ function PublicNoteHeader({ note }: { note: Note }) {
   );
 }
 
+// Public-view save controls. Receiver of a shared link can save the note to their own
+// Clipnote; the parent route decides what `onSave` does (save it if signed in, else send
+// them to sign-up and auto-save on return). Falls back to a plain sign-up nudge when no
+// save handler is wired.
+interface PublicSaveProps {
+  onSave?: () => void;
+  saving?: boolean;
+  isAuthed?: boolean;
+}
+
+// Sticky bar at the top of the public note so "save this" is visible before any scroll.
+function PublicSaveBar({ onSave, saving, isAuthed }: PublicSaveProps) {
+  if (!onSave) return null;
+  return (
+    <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+      <p className="text-sm text-ink-soft">Save this note to your Clipnote.</p>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
+      >
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}
+        {saving ? "Saving…" : isAuthed ? "Save" : "Save to Clipnote"}
+      </button>
+    </div>
+  );
+}
+
 // Bottom-of-note conversion prompt shown only on the public view.
-function PublicSignupCTA() {
+function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
   return (
     <div className="mt-12 flex flex-col items-start gap-3 rounded-3xl border border-border bg-card p-6 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p className="font-serif text-xl text-ink">Saved with Clipnote</p>
+        <p className="font-serif text-xl text-ink">
+          {isAuthed ? "Keep this note" : "Saved with Clipnote"}
+        </p>
         <p className="mt-1 text-sm text-ink-soft">
-          Turn any link (recipe, video, product, article) into a structured note you'll
-          actually re-read.
+          {isAuthed
+            ? "Add this note to your own Clipnote so you can come back to it any time."
+            : "Turn any link (recipe, video, product, article) into a structured note you'll actually re-read."}
         </p>
       </div>
-      <Link
-        to="/"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95"
-      >
-        Sign up free
-        <ArrowRight className="h-4 w-4" />
-      </Link>
+      {onSave ? (
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}
+          {saving ? "Saving…" : isAuthed ? "Save to my notes" : "Sign up to save"}
+        </button>
+      ) : (
+        <Link
+          to="/"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95"
+        >
+          Sign up free
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      )}
     </div>
   );
 }
@@ -206,11 +250,17 @@ export function NoteContent({
   onDelete,
   onPatch,
   variant = "owner",
+  onSave,
+  saving,
+  isAuthed,
 }: {
   note: Note;
   onDelete?: () => void;
   onPatch?: (patch: Partial<Note>) => void;
   variant?: "owner" | "public";
+  onSave?: () => void; // public view: save this shared note to the viewer's account
+  saving?: boolean;
+  isAuthed?: boolean;
 }) {
   const isPublic = variant === "public";
   // ProductNote lays out its own image beside the buy panel — it skips the shared hero.
@@ -226,6 +276,7 @@ export function NoteContent({
       ) : (
         <NoteHeader note={note} onDelete={onDelete} onPatch={onPatch} />
       )}
+      {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
       {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
       {showHero && coverKind === "compact" && url ? (
@@ -259,7 +310,7 @@ export function NoteContent({
       {!isPublic && (
         <ThoughtsBlock noteId={note.id} value={note.user_note ?? ""} onPatch={onPatch} />
       )}
-      {isPublic && <PublicSignupCTA />}
+      {isPublic && <PublicSignupCTA onSave={onSave} saving={saving} isAuthed={isAuthed} />}
     </article>
   );
 }

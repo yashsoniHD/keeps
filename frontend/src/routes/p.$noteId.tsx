@@ -1,20 +1,35 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { getNote } from "@/lib/firestore";
+import { saveSharedNote } from "@/lib/api";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
+import { useAuth } from "@/contexts/auth-context";
 import type { Note } from "@/lib/types";
 
 // Public, login-free view of a shared note. Firestore rules allow an anonymous read
 // only when is_public === true; anything else (private, missing, permission denied)
 // collapses to the same "not available" screen — we never reveal whether an id exists.
-export const Route = createFileRoute("/p/$noteId")({ component: PublicNote });
+export const Route = createFileRoute("/p/$noteId")({
+  component: PublicNote,
+  validateSearch: (search: Record<string, unknown>) => ({
+    // Set when the viewer signed in to save and got redirected back — triggers auto-save.
+    save: search.save === "1" || search.save === 1 ? true : undefined,
+  }),
+});
 
 function PublicNote() {
   const { noteId } = Route.useParams();
+  const { save } = Route.useSearch();
+  const { user, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
   const [note, setNote] = useState<Note | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Guard the post-login auto-save so a failure doesn't retry in a loop.
+  const autoSaveTried = useRef(false);
 
   useEffect(() => {
     getNote(noteId)
@@ -28,6 +43,37 @@ function PublicNote() {
       })
       .catch(() => setStatus("unavailable"));
   }, [noteId]);
+
+  const doSave = useCallback(async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const { id } = await saveSharedNote(noteId);
+      // Land them on their own (private) copy in the authed app.
+      navigate({ to: "/notes/$noteId", params: { noteId: id } });
+    } catch {
+      setSaving(false);
+      setSaveError("Couldn't save the note. Please try again.");
+    }
+  }, [noteId, navigate]);
+
+  // Save handler for the buttons: signed in → save directly; otherwise send to sign-in
+  // with a redirect that comes back here with ?save=1 so we finish the save automatically.
+  const onSave = useCallback(() => {
+    if (user) {
+      void doSave();
+    } else {
+      navigate({ to: "/login", search: { redirect: `/p/${noteId}?save=1` } });
+    }
+  }, [user, doSave, navigate, noteId]);
+
+  // Returned from sign-in with the save intent — finish what they started, once.
+  useEffect(() => {
+    if (save && user && !authLoading && status === "ready" && !autoSaveTried.current) {
+      autoSaveTried.current = true;
+      void doSave();
+    }
+  }, [save, user, authLoading, status, doSave]);
 
   if (status === "loading") {
     return (
@@ -56,7 +102,16 @@ function PublicNote() {
 
   return (
     <AppShell>
-      <NoteContent note={note} variant="public" />
+      <NoteContent
+        note={note}
+        variant="public"
+        onSave={onSave}
+        saving={saving}
+        isAuthed={!!user}
+      />
+      {saveError && (
+        <p className="mx-auto max-w-4xl px-5 pb-8 text-sm text-destructive md:px-8">{saveError}</p>
+      )}
     </AppShell>
   );
 }

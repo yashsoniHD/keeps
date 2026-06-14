@@ -199,6 +199,14 @@ export async function shareNote(id: string): Promise<{ is_public: boolean; url: 
   return res.json();
 }
 
+// Save a publicly-shared note into the signed-in user's own account. Returns the new
+// note's id (or the original id if it's already theirs) so the UI can open it.
+export async function saveSharedNote(id: string): Promise<{ id: string }> {
+  const res = await apiFetch(`/api/notes/${id}/save`, { method: "POST" });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't save the note."), res.status);
+  return res.json();
+}
+
 // Revoke public access — the shared link stops resolving.
 export async function unshareNote(id: string): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}/share`, { method: "DELETE" });

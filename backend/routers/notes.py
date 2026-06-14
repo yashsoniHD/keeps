@@ -168,6 +168,55 @@ async def share_note(note_id: str, user_id: str = Depends(require_user)):
     return {"is_public": True, "url": f"{settings.PUBLIC_APP_URL}/p/{note_id}"}
 
 
+@router.post("/notes/{note_id}/save")
+async def save_shared_note(note_id: str, user_id: str = Depends(require_user)):
+    """Copy a publicly-shared note into the caller's own account — the receiver of a
+    /p/{id} link saving it to their Clipnote. We duplicate the already-structured `data`
+    under a new id the caller owns (no AI re-run, so it's cheap), but still count it
+    against the per-user/global note caps. Saving your own note (or re-opening one already
+    saved) is a no-op that returns the existing id."""
+    db = get_db()
+    snap = await db.collection("notes").document(note_id).get()
+    src = snap.to_dict() if snap.exists else None
+    # Only public notes are copyable; anything else looks "not found" (never reveal a
+    # private id exists), mirroring the /p/{id} read rule.
+    if not src or src.get("is_public") is not True:
+        raise HTTPException(404, "Note not found")
+    if src.get("user_id") == user_id:
+        return {"id": note_id}  # already yours — just open it
+
+    await _enforce_cost_caps(db, user_id)
+
+    template = src.get("template") or src.get("content_type") or "summary"
+    slug = match_existing(normalize_slug(src.get("content_type", "summary")),
+                          await get_user_categories(user_id))
+    new_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    note_doc = {
+        "user_id": user_id,
+        "content_type": slug,
+        "template": template,          # preserve the structural schema the data was built for
+        "title": src.get("title", "Saved note"),
+        "ai_summary": src.get("ai_summary", ""),
+        "source_url": src.get("source_url", ""),
+        "source_domain": src.get("source_domain", ""),
+        "source": "shared",            # provenance: arrived via a shared link
+        "cover_image_url": src.get("cover_image_url"),
+        "data": firestore_safe(src.get("data", {})),
+        "acquisition": "saved_shared",
+        "source_note_ids": [note_id],
+        "is_public": False,            # the copy is private until its new owner shares it
+        "created_at": now,
+        "updated_at": now,
+    }
+    embedding = await _note_embedding(note_doc["title"], note_doc["ai_summary"])
+    if embedding is not None:
+        note_doc["embedding"] = embedding
+    await db.collection("notes").document(new_id).set(note_doc)
+    await add_user_category(user_id, slug)
+    return {"id": new_id}
+
+
 @router.delete("/notes/{note_id}/share")
 async def unshare_note(note_id: str, user_id: str = Depends(require_user)):
     """Revoke public access — the /p/{id} link stops resolving."""
