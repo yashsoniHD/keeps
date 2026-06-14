@@ -43,6 +43,36 @@ _PERIOD_LABELS = {
     "last_week": "last week", "this_month": "this month", "recent": "recently",
 }
 
+# Maps a domain fragment → the canonical brand the user names ("find my Pinterest notes").
+# A naive substring match misses short-link domains (pin.it ⊄ "pinterest", youtu.be ⊄
+# "youtube"), which is exactly how Pinterest/YouTube/Twitter links are stored — so resolve
+# both the user's keyword and each note's source_domain to a canonical brand before matching.
+_SOURCE_ALIASES = {
+    "pin.it": "pinterest", "pinterest": "pinterest",
+    "youtu.be": "youtube", "youtube": "youtube",
+    "amzn": "amazon", "amazon": "amazon",
+    "x.com": "twitter", "twitter": "twitter",
+    "fb.com": "facebook", "fb.watch": "facebook", "facebook": "facebook",
+    "instagr.am": "instagram", "instagram": "instagram",
+    "redd.it": "reddit", "reddit": "reddit",
+    "tiktok": "tiktok", "vm.tiktok": "tiktok",
+    "substack": "substack",
+}
+
+
+def _canonical_source(value: str) -> str:
+    """Resolve a source_domain or a user keyword to a canonical brand. Exact short-domain
+    hits win first (pin.it, youtu.be, x.com), then any alias substring, then the registrable
+    label as a fallback ("open.substack.com" → "substack")."""
+    v = value.lower().strip().replace("www.", "")
+    if v in _SOURCE_ALIASES:
+        return _SOURCE_ALIASES[v]
+    for key, canon in _SOURCE_ALIASES.items():
+        if key in v:
+            return canon
+    parts = [p for p in v.split(".") if p]
+    return parts[-2] if len(parts) >= 2 else (parts[0] if parts else v)
+
 
 def _period_label(period: str) -> str:
     return _PERIOD_LABELS.get(period, "then")
@@ -183,13 +213,15 @@ async def _fetch_notes_by_window(db, user_id: str, after: datetime, before: date
 
 
 async def _fetch_notes_by_source(db, user_id: str, source: str, cap: int) -> list[dict]:
-    """Notes whose source_domain contains the keyword (e.g. "pinterest" → "in.pinterest.com").
-    Firestore can't substring-match, so scan the newest notes (using the existing
-    user_id+created_at index) and filter in Python — cheap reads, no extra index, and it
-    tolerates subdomains and the user's `sources` list being stale."""
+    """Notes from a named source ("my Pinterest notes"). Firestore can't substring-match,
+    so scan the newest notes (using the existing user_id+created_at index) and filter in
+    Python — cheap reads, no extra index, tolerant of subdomains and a stale `sources` list.
+    Matches on the canonical brand (so pin.it counts as pinterest, youtu.be as youtube) and
+    keeps a raw substring check for anything the alias map doesn't know about."""
     keyword = source.lower().strip()
     if not keyword:
         return []
+    canon_kw = _canonical_source(keyword)
     query = (
         db.collection("notes").where("user_id", "==", user_id)
         .order_by("created_at", direction="DESCENDING").limit(300)
@@ -197,7 +229,7 @@ async def _fetch_notes_by_source(db, user_id: str, source: str, cap: int) -> lis
     matched = []
     async for doc in query.stream():
         domain = ((doc.to_dict() or {}).get("source_domain") or "").lower()
-        if keyword in domain:
+        if keyword in domain or _canonical_source(domain) == canon_kw:
             matched.append({"id": doc.id, **doc.to_dict()})
             if len(matched) >= cap:
                 break

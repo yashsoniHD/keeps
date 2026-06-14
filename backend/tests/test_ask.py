@@ -262,3 +262,63 @@ async def test_zero_notes_general_scope_still_answers(fake_db, monkeypatch):
     res = await ask_mod.ask(AskRequest(question="hello"), user_id="u")
     assert res.answer == "Paris is the capital of France."  # the stubbed chat reply
     assert res.citations == []
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("pin.it", "pinterest"),          # Pinterest short link — the reported bug
+        ("in.pinterest.com", "pinterest"),
+        ("pinterest", "pinterest"),       # the user's keyword
+        ("youtu.be", "youtube"),
+        ("x.com", "twitter"),
+        ("amzn.in", "amazon"),
+        ("open.substack.com", "substack"),
+        ("somerandomblog.dev", "somerandomblog"),  # registrable-label fallback
+    ],
+)
+def test_canonical_source_resolves_short_links(value, expected):
+    assert ask_mod._canonical_source(value) == expected
+
+
+async def test_source_fetch_matches_short_link_domain(fake_db, monkeypatch):
+    """'find my Pinterest notes' must match a note saved from a pin.it short link."""
+    docs = [
+        {"id": "pin1", "source_domain": "pin.it", "title": "Mango sago"},
+        {"id": "yt1", "source_domain": "youtu.be", "title": "Dune"},
+    ]
+
+    class FakeDoc:
+        def __init__(self, d):
+            self.id = d["id"]
+            self._d = d
+
+        def to_dict(self):
+            return self._d
+
+    class FakeStream:
+        def __aiter__(self):
+            async def gen():
+                for d in docs:
+                    yield FakeDoc(d)
+            return gen()
+
+    class FakeQuery:
+        def where(self, *a, **k):
+            return self
+
+        def order_by(self, *a, **k):
+            return self
+
+        def limit(self, *a, **k):
+            return self
+
+        def stream(self):
+            return FakeStream()
+
+    class FakeDB:
+        def collection(self, *a, **k):
+            return FakeQuery()
+
+    matched = await ask_mod._fetch_notes_by_source(FakeDB(), "u", "pinterest", cap=10)
+    assert [n["id"] for n in matched] == ["pin1"]
