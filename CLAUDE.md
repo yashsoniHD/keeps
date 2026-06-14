@@ -137,6 +137,21 @@ passed the gate.
   templates: Recipe/Itinerary/Product/Summary/**Workout** + GenericNote
   (facts/sections/steps/table/checklist/quotes blocks); open-slug design system in
   `frontend/src/lib/note-meta.ts`.
+- **Ask AI is query-aware RAG, not single-shot semantic** (`routers/ask.py` + `services/gemini.py`):
+  a lite **planner** (`plan_ask` → `AskPlan`) turns each message into a structured filter set, then
+  retrieval is *built from the plan*, not always vector: **temporal** (`period`) → tz-aware
+  date-window query (client sends `tz_offset_minutes`; the model emits a *period keyword* and the
+  backend does the date math — "today" is the user's local day, not UTC); **exhaustive/aggregate**
+  (`content_types`, `exhaustive`) → the full filtered set, not a top-K shortlist; **semantic** →
+  planner picks ids from a *recent ∪ vector* candidate pool; **`scope=general`** → a plain
+  conversational answer with **no note refs and no citations** (off-notes follow-ups don't get forced
+  through notes). Coverage ("Based on N of M") surfaces any cap truncation. Two intents *write* notes:
+  `output != prose` → `synthesize` builds a COMPOSER-block **artifact** (itinerary / meal-plan +
+  deduped grocery list / comparison / checklist); `intent=create` → `create_note` authors one from the
+  whole conversation. Both return an `ArtifactNote` the UI renders via **GenericNote blocks** and saves
+  with `POST /api/notes/consolidated` (`template:"composed"` forces the generic renderer; `source:"ai"`,
+  `acquisition: ai_consolidated|ai_created`, `source_note_ids`). Caps: planner+answer are 2 Gemini
+  calls metered as one ask; `ASK_RECENT_POOL`/`ASK_EXHAUSTIVE_CAP` in config.
 
 ### Next (per the phase table)
 - [x] Phase 2 (2026-06-10): PWA share target (`/share` route, manifest, SW, icons) + iOS
@@ -168,6 +183,16 @@ passed the gate.
       rev 00014-z6n + clipnote.web.app). No IAM grant needed: the runtime SA already has
       `firebaseauth.users.get` via `roles/firebase.sdkAdminServiceAgent`, which is what
       `auth.list_users()` requires.
+- [x] Ask AI query-aware RAG (2026-06-14): replaced the single `vector → select → answer` path
+      with a **planner-routed** pipeline (temporal / exhaustive / semantic / general) + structured
+      **artifacts** (consolidate notes → itinerary/meal-plan/comparison, "Save as note") +
+      **create-note-from-chat**. Fixes "summary of today's notes returned random notes" (tz-aware
+      date window) and general/off-notes follow-ups still citing notes (general-chat mode). New:
+      `AskPlan`/`ArtifactNote` models, `plan_ask`/`answer_chat`/`synthesize`/`create_note` in
+      gemini.py, `POST /api/notes/consolidated`, `tz_offset_minutes`, `ASK_RECENT_POOL`/
+      `ASK_EXHAUSTIVE_CAP`; 28 new tests (133 total). Deployed (Cloud Run rev 00032-zlr +
+      clipnote.web.app). Plan: `~/.claude/plans/think-from-an-average-vivid-knuth.md`. Deferred:
+      location-aware retrieval ("restaurants in Bandra") + cross-session chat persistence.
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
@@ -232,9 +257,11 @@ users/{uid}           display_name, email, photo_url, categories[], created_at
                       plan ("free"|"pro"), stripe_customer_id     # added in Phase 3
                       lifetime_tokens_{in,out}_{main,lite}, lifetime_ai_calls  # admin dashboard
 notes/{note_id}       user_id, content_type, title, ai_summary,
-                      source_url, source_domain, source ("web"|"shortcut"|"pwa"),
+                      source_url, source_domain, source ("web"|"shortcut"|"pwa"|"ai"),
                       cover_image_url, data (flexible map), created_at, updated_at
+                      template, acquisition, embedding (Vector 768)
                       is_public (default false)                   # added in Phase 4
+                      source_note_ids[]  # Ask-AI notes (source="ai", template="composed")
 jobs/{job_id}         user_id, url, content, source, status, note_id, error,
                       attempt_count, created_at, updated_at
 usage/{uid}-{date}    user_id, date, ingest_count, ask_count   # per-user daily rate limit
@@ -253,6 +280,9 @@ shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used
 - `product` → `{price, brand, rating, buyUrl, specs: [{label, value}], pros, cons}`
 - `summary` → `{medium, readTime?, videoLength?, tldr, keyPoints, quotes: [{text, timestamp?}]}`
 - `*` → any AI-invented type rendered by `GenericNote`
+- `template:"composed"` → Ask-AI artifact/created note: COMPOSER blocks
+  (`facts/sections/steps/table/checklist`), always rendered by `GenericNote` (its
+  `content_type` is a friendly slug for the pill only, never a fixed template)
 
 ---
 
