@@ -395,6 +395,12 @@ class GeminiService:
             # an explicit mimeType even for YouTube URLs (400 without it).
             parts.append(types.Part(file_data=types.FileData(file_uri=bundle.video_uri,
                                                              mime_type="video/mp4")))
+        # Inline image bytes (e.g. every slide of an Instagram carousel) so the model reads
+        # the actual post imagery, not just the caption. Small per-image, well under the
+        # ~20 MB inline ceiling at this slide count.
+        for img in bundle.image_parts:
+            parts.append(types.Part.from_bytes(data=img["data"],
+                                               mime_type=img.get("mime_type", "image/jpeg")))
         text_prompt = [f"URL: {url}", f"content_type: {content_type}"]
         meta = bundle.metadata
         if meta.get("title"):
@@ -410,6 +416,14 @@ class GeminiService:
             text_prompt.append(f"Content:\n{bundle.text[:28000]}")
         if bundle.video_uri:
             text_prompt.append("Analyze the attached video fully (visuals, on-screen text, and speech).")
+        if bundle.image_parts:
+            n = len(bundle.image_parts)
+            text_prompt.append(
+                f"{n} images from the post are attached, in order — read the text and visuals "
+                "in EVERY slide of the carousel and synthesize them together; do not stop at "
+                "the first slide." if n > 1
+                else "An image from the post is attached — read its text and visuals."
+            )
         parts.append(types.Part(text="\n\n".join(text_prompt)))
         return [types.Content(role="user", parts=parts)]
 

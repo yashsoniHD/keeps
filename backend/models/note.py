@@ -37,6 +37,11 @@ class ContentBundle(BaseModel):
     video_uri: str | None = None
     structured: dict[str, Any] | None = None
     images: list[str] = Field(default_factory=list)
+    # Image bytes to hand Gemini as vision input — e.g. every slide of an Instagram
+    # carousel, so the note reflects the whole post, not just slide 1's caption. Each item
+    # is {"mime_type": str, "data": bytes}. Distinct from `images` (URLs used only for the
+    # cover). Empty for text/video sources.
+    image_parts: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     strategy: str = ""           # e.g. "youtube_direct", "ytdlp_gcs", "reddit_json"
 

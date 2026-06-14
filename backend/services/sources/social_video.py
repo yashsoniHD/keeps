@@ -33,6 +33,9 @@ _CRAWLER_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uat
 
 _DOMAINS = ("instagram.com", "facebook.com", "fb.watch", "tiktok.com")
 
+_IMAGE_MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+               "webp": "image/webp", "gif": "image/gif"}
+
 os.makedirs(settings.TEMP_DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -105,6 +108,33 @@ def _metadata(info: dict, url: str) -> dict:
     }
 
 
+async def _fetch_image_parts(urls: list[str], *, cap_mb: int = 8) -> list[dict]:
+    """Download image bytes (carousel slides / og:image) to hand Gemini as vision input.
+    Net-guarded and size-capped like every outbound fetch; best-effort per image — a slide
+    that fails is skipped rather than failing the whole capture. Returns
+    [{"mime_type", "data"}] in input order."""
+    parts: list[dict] = []
+    cap = cap_mb * 1024 * 1024
+    for u in urls:
+        if not u:
+            continue
+        try:
+            async with guarded_async_client(timeout=20.0, follow_redirects=True) as client:
+                resp = await client.get(u, headers={"User-Agent": _CRAWLER_UA})
+            resp.raise_for_status()
+            data = resp.content
+            if not data or len(data) > cap:
+                continue
+            ct = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+            if not ct.startswith("image/"):
+                ext = u.split("?")[0].rsplit(".", 1)[-1].lower()
+                ct = _IMAGE_MIME.get(ext, "image/jpeg")
+            parts.append({"mime_type": ct, "data": data})
+        except Exception as e:
+            log.info("carousel image fetch failed (%s): %s", u[:80], str(e)[:120])
+    return parts
+
+
 async def _caption_fallback(url: str) -> ContentBundle:
     """Build a note from the post's public og: tags when the media download is blocked.
 
@@ -131,10 +161,14 @@ async def _caption_fallback(url: str) -> ContentBundle:
         log.info("caption fallback fetch failed for %s: %s", url, str(e)[:160])
 
     text = "\n\n".join(p for p in (title, caption) if p).strip()
+    # Hand the one og:image to Gemini as vision input too — for an image post that's the
+    # actual content, not just a cover. (og: only exposes the first slide of a carousel.)
+    image_parts = await _fetch_image_parts([image]) if image else []
     return ContentBundle(
         kind="text",
         text=text or url,
         images=[image] if image else [],
+        image_parts=image_parts,
         metadata={"title": title or platform, "platform": platform, "caption": caption or ""},
         strategy="social_og",
     )
@@ -239,14 +273,21 @@ async def _acquire_via_apify(url: str) -> ContentBundle | None:
                     except OSError:
                         pass
 
-    # Image post, no bucket, or the video fetch failed — caption + thumbnail from Apify.
+    # Image / carousel post (or the video fetch failed): caption + EVERY slide as vision
+    # input, so the note reflects the whole carousel — not just slide 1 + the caption.
+    image_urls = result.get("images") or (
+        [result["thumbnail"]] if result.get("thumbnail") else [])
+    image_parts = await _fetch_image_parts(image_urls)
     text = "\n\n".join(p for p in (result.get("title"), meta["caption"]) if p).strip()
-    if not text:
+    if not text and not image_parts:
         return None  # nothing usable; let og-caption try
+    meta["slides"] = len(image_parts)
     return ContentBundle(
-        kind="text", text=text,
-        images=[result["thumbnail"]] if result.get("thumbnail") else [],
-        metadata=meta, strategy="apify_caption",
+        kind="text", text=text or None,
+        images=image_urls[:1] if image_urls else [],   # cover = first slide
+        image_parts=image_parts,
+        metadata=meta,
+        strategy="apify_carousel" if len(image_parts) > 1 else "apify_caption",
     )
 
 

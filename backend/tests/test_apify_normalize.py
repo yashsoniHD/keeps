@@ -59,6 +59,39 @@ def test_normalize_instagram_reel_item():
     assert out["duration"] == 90  # float seconds floored to int
 
 
+def test_normalize_instagram_carousel_images():
+    """A sidecar/carousel post exposes every slide via the `images` array — all of them
+    must survive normalization (in order, deduped, capped), not just slide 1."""
+    item = {
+        "caption": "5 hikes near Bombay\nsave for later",
+        "displayUrl": "https://cdn/slide1.jpg",
+        "images": ["https://cdn/slide1.jpg", "https://cdn/slide2.jpg",
+                   "https://cdn/slide1.jpg", "https://cdn/slide3.jpg"],  # dupe slide1
+        "ownerUsername": "trailmix",
+    }
+    out = apify._normalize(item)
+    assert out["images"] == ["https://cdn/slide1.jpg", "https://cdn/slide2.jpg",
+                             "https://cdn/slide3.jpg"]
+    assert out["thumbnail"] == "https://cdn/slide1.jpg"
+    assert not out["video_url"]
+
+
+def test_normalize_carousel_from_child_posts():
+    """Some actor builds return slides as childPosts objects instead of a flat array."""
+    item = {
+        "caption": "thread",
+        "childPosts": [{"displayUrl": "https://cdn/a.jpg"},
+                       {"displayUrl": "https://cdn/b.jpg"}],
+    }
+    out = apify._normalize(item)
+    assert out["images"] == ["https://cdn/a.jpg", "https://cdn/b.jpg"]
+
+
+def test_carousel_images_capped():
+    item = {"images": [f"https://cdn/{i}.jpg" for i in range(25)]}
+    assert len(apify._carousel_images(item)) == apify.MAX_CAROUSEL_IMAGES
+
+
 def test_normalize_tiktok_item():
     """clockworks/tiktok-scraper: mediaUrls array for the video, nested authorMeta for author."""
     item = {

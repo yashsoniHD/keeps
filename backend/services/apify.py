@@ -34,6 +34,37 @@ _CAPTION_FIELDS = ("caption", "text", "title", "description")
 _THUMB_FIELDS = ("displayUrl", "coverUrl", "thumbnailUrl", "imageUrl")
 _AUTHOR_FIELDS = ("ownerFullName", "ownerUsername", "authorMeta", "author", "channelName")
 _DURATION_FIELDS = ("videoDuration", "duration")
+# Carousel/sidecar posts: the instagram-post-scraper returns every slide either as a flat
+# `images` URL array or as `childPosts` objects each carrying their own `displayUrl`.
+_IMAGES_FIELDS = ("images", "imageUrls")
+# Cap how many slides we pull — keeps the Gemini request small and the (free) image
+# fetches bounded for a pathological 20-slide carousel.
+MAX_CAROUSEL_IMAGES = 10
+
+
+def _carousel_images(item: dict) -> list[str]:
+    """All slide image URLs for a carousel/sidecar post, in order, deduped. Falls back to
+    the single displayUrl for a normal image post."""
+    urls: list[str] = []
+    for k in _IMAGES_FIELDS:
+        v = item.get(k)
+        if isinstance(v, list):
+            urls += [u for u in v if isinstance(u, str) and u]
+    children = item.get("childPosts")
+    if isinstance(children, list):
+        for c in children:
+            if isinstance(c, dict):
+                u = c.get("displayUrl") or c.get("imageUrl")
+                if isinstance(u, str) and u:
+                    urls.append(u)
+    if not urls:
+        single = _first(item, _THUMB_FIELDS)
+        if single:
+            urls.append(single)
+    # Order-preserving dedup, then cap.
+    seen: set[str] = set()
+    out = [u for u in urls if not (u in seen or seen.add(u))]
+    return out[:MAX_CAROUSEL_IMAGES]
 
 
 @dataclass(frozen=True)
@@ -141,13 +172,15 @@ def _normalize(item: dict) -> dict:
         video = video or vm.get("downloadAddr") or vm.get("playAddr")
         thumb = thumb or vm.get("coverUrl") or vm.get("originalCoverUrl")
         dur = dur or vm.get("duration")
+    images = _carousel_images(item)
     return {
         "video_url": video,
         "caption": caption,
         # No dedicated title field — lead with the caption's first line, else the author.
         "title": (caption.splitlines()[0][:120] if caption else None)
                  or _first(item, _AUTHOR_FIELDS),
-        "thumbnail": thumb,
+        "thumbnail": thumb or (images[0] if images else None),
+        "images": images,        # every carousel slide (≥1 for image posts), [] for video
         "author": _first(item, _AUTHOR_FIELDS),
         "duration": int(float(dur)) if dur and str(dur).replace(".", "").isdigit() else 0,
     }
