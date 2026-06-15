@@ -197,18 +197,7 @@ export function NoteRow({ note }: { note: Note }) {
           {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
         </div>
         <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-1">{note.title}</h3>
-        {note.ai_summary && (
-          <p className="mt-0.5 text-[13px] leading-snug text-ink-soft line-clamp-1">{note.ai_summary}</p>
-        )}
         <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
-          <img
-            src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
-            onError={(e) => {
-              e.currentTarget.style.visibility = "hidden";
-            }}
-            alt=""
-            className="h-3.5 w-3.5 shrink-0 rounded-sm"
-          />
           <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
         </div>
       </div>
