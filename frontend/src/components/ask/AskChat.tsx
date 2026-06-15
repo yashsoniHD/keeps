@@ -381,7 +381,7 @@ export function AskChat({
                   send(input);
                 }
               }}
-              placeholder="Ask, search, or create from your notes…"
+              placeholder="Ask, search, and create notes"
               className="max-h-[120px] w-full resize-none self-center bg-transparent py-1.5 text-base leading-relaxed outline-none placeholder:text-ink-soft md:text-sm"
             />
           </label>

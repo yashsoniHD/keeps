@@ -27,6 +27,13 @@ export function AskFab() {
   const panelRef = useRef<HTMLDivElement>(null);
   const [dragY, setDragY] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // Software-keyboard geometry (mobile). `top` re-pins the sheet to the visible viewport after
+  // iOS scrolls the layout viewport; `height` shrinks it to sit above the keyboard. See the effect.
+  const [kb, setKb] = useState<{ open: boolean; top: number; height: number }>({
+    open: false,
+    top: 0,
+    height: 0,
+  });
 
   // Native listeners — touchmove must be non-passive so preventDefault() can claim the gesture
   // (React's onTouchMove is passive, where preventDefault is a no-op and the page scroll fights
@@ -103,21 +110,28 @@ export function AskFab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, closeChat]);
 
-  // iOS soft keyboard: lift the sheet's bottom edge to sit just above the keyboard so the
-  // input bar floats above it (stays visible) and the message list shrinks to fit — instead
-  // of the keyboard covering the input or the page auto-scrolling it out of view. Opening the
-  // keyboard shrinks only the *visual* viewport, so we read that gap and pin `bottom` to it.
-  // Imperative writes (rAF) avoid re-render churn during momentum scroll; React never manages
-  // `bottom`, so these survive drag-driven re-renders. No-op on desktop / without visualViewport.
+  // iOS soft keyboard: keep the sheet glued to the *visible* viewport with the input bar floating
+  // just above the keyboard. Two iOS quirks to beat: (1) opening the keyboard shrinks only the
+  // visual viewport, not the layout viewport, so a `bottom: 0` sheet ends up behind the keyboard;
+  // (2) iOS scrolls the layout viewport (visualViewport.offsetTop > 0) to chase the focused input,
+  // dragging our `position: fixed` sheet up off-screen ("scrolls up"). Fix: translate the sheet
+  // back down by offsetTop to re-pin it to the visible top, and shrink its height to the visual
+  // viewport so the input bar sits above the keyboard and the message list overlays beneath it.
+  // No-op on desktop / where visualViewport is absent. Keyboard open/close is infrequent, so React
+  // state (composed with the drag transform in render) is fine — no imperative/React style clash.
   useEffect(() => {
     const vv = window.visualViewport;
-    const node = panelRef.current;
-    if (!isOpen || !vv || !node) return;
+    if (!isOpen || !vv) return;
     const isMobile = () => window.matchMedia("(max-width: 639px)").matches;
+    const reset = () => setKb((k) => (k.open ? { open: false, top: 0, height: 0 } : k));
     let raf = 0;
     const apply = () => {
-      const gap = isMobile() ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
-      node.style.bottom = gap > 1 ? `${gap}px` : "";
+      const node = panelRef.current;
+      if (!node || !isMobile()) return reset();
+      const gap = window.innerHeight - vv.height - vv.offsetTop;
+      if (gap <= 1) return reset();
+      const topInset = parseFloat(getComputedStyle(node).top) || 0;
+      setKb({ open: true, top: vv.offsetTop, height: vv.height - topInset });
     };
     const schedule = () => {
       cancelAnimationFrame(raf);
@@ -130,7 +144,7 @@ export function AskFab() {
       vv.removeEventListener("resize", schedule);
       vv.removeEventListener("scroll", schedule);
       cancelAnimationFrame(raf);
-      node.style.bottom = "";
+      reset();
     };
   }, [isOpen]);
 
@@ -157,7 +171,11 @@ export function AskFab() {
             role="dialog"
             aria-label="Ask AI"
             style={{
-              transform: dragY ? `translateY(${dragY}px)` : undefined,
+              // Drag offset + keyboard re-pin (offsetTop) compose into one translateY; when the
+              // keyboard is open we also clamp the sheet's height to the visual viewport.
+              transform:
+                dragY || kb.open ? `translateY(${dragY + kb.top}px)` : undefined,
+              height: kb.open ? `${kb.height}px` : undefined,
               transition: dragging ? "none" : "transform 0.24s cubic-bezier(0.32,0.72,0,1)",
             }}
             className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)+0.5rem)] z-50 flex flex-col overflow-hidden rounded-t-3xl border-t border-border bg-background shadow-2xl duration-300 animate-in fade-in-0 slide-in-from-bottom-8 sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[440px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:slide-in-from-right-4 sm:slide-in-from-bottom-0"
