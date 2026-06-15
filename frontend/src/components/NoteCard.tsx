@@ -196,7 +196,7 @@ export function NoteRow({ note }: { note: Note }) {
           </span>
           {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
         </div>
-        <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-1">{note.title}</h3>
+        <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-2">{note.title}</h3>
       </div>
 
       <span className="shrink-0 self-start text-[11px] tabular-nums text-ink-soft">

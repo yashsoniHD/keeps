@@ -9,21 +9,44 @@ Two-stage pattern: a lite-model PLANNER turns the message into a structured filt
 Stateless: the client sends the conversation history with each request.
 """
 import asyncio
+import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from google.cloud import firestore as fs
-from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
-from google.cloud.firestore_v1.vector import Vector
 
 from config import settings
-from models.ask import AskPlan, AskRequest, AskResponse, Citation
+from models.ask import AskRequest, AskResponse, Citation
+from models.note import JobStatus
+from services.agent_tools import AgentContext, run_agent
 from services.auth_dep import require_user
-from services.embeddings import embedding_service
+from services.cloud_tasks import enqueue_process_job
+from services.conversations import persist_exchange
 from services.firebase import flush_usage, get_db
-from services.gemini import gemini_service, normalize_slug
-from services.source_alias import source_matches
+from services.gemini import gemini_service
+from services import note_retrieval as nr
+# Retrieval lives in services.note_retrieval (shared with the agent). The endpoint calls it
+# through the `nr` module so a test patching `nr.<fn>` affects both the endpoint and the
+# internal calls inside `retrieve_notes`. These aliases stay for tests that reference the
+# helpers directly (test_ask_planner) and for `_period_label` used below.
+from services.note_retrieval import (  # noqa: F401
+    fetch_notes_by_source as _fetch_notes_by_source,
+    fetch_notes_by_types as _fetch_notes_by_types,
+    fetch_notes_by_window as _fetch_notes_by_window,
+    filter_types as _filter_types,
+    period_bounds as _period_bounds,
+    period_label as _period_label,
+    recent_notes as _recent_notes,
+    type_variants as _type_variants,
+    vector_shortlist as _vector_shortlist,
+    dated_index as _dated_index,
+    candidate_pool as _candidate_pool,
+    fetch_notes_by_ids as _fetch_notes_by_ids,
+    retrieve_notes as _retrieve_notes,
+)
 from services.usage_meter import start_metering
 
 log = logging.getLogger("clipnote.ask")
@@ -34,230 +57,6 @@ NO_NOTES_ANSWER = (
     "You haven't saved any notes yet — clip a few links first, then ask me about them."
 )
 NOTHING_FOUND_ANSWER = "I couldn't find anything in your notes about that."
-
-# Index fields the planner and citations need, WITHOUT the heavy `data` map (projection
-# keeps the candidate-pool read cheap). created_at lets the planner reason about dates.
-INDEX_FIELDS = ["content_type", "title", "ai_summary", "source_domain", "cover_image_url", "created_at"]
-
-_PERIOD_LABELS = {
-    "today": "today", "yesterday": "yesterday", "this_week": "this week",
-    "last_week": "last week", "this_month": "this month", "recent": "recently",
-}
-
-# Brand-aware source matching ("find my Pinterest notes" → pin.it short links) lives in a
-# shared module so the search bar resolves the same aliases. See services/source_alias.py.
-
-
-def _period_label(period: str) -> str:
-    return _PERIOD_LABELS.get(period, "then")
-
-
-def _period_bounds(period: str, tz_offset_minutes: int,
-                   now_utc: datetime) -> tuple[datetime, datetime] | None:
-    """Resolve a period keyword to a [after, before) UTC window using the user's local day.
-    The model only picks the keyword; the date math is done here (deterministic)."""
-    offset = timedelta(minutes=tz_offset_minutes)
-    local_now = now_utc + offset
-    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    def to_utc(local_dt: datetime) -> datetime:
-        return local_dt - offset  # local = utc + offset  ⇒  utc = local - offset
-
-    if period == "today":
-        return to_utc(local_midnight), now_utc
-    if period == "yesterday":
-        return to_utc(local_midnight - timedelta(days=1)), to_utc(local_midnight)
-    if period == "this_week":
-        week_start = local_midnight - timedelta(days=local_now.weekday())
-        return to_utc(week_start), now_utc
-    if period == "last_week":
-        week_start = local_midnight - timedelta(days=local_now.weekday())
-        return to_utc(week_start - timedelta(days=7)), to_utc(week_start)
-    if period == "this_month":
-        return to_utc(local_midnight.replace(day=1)), now_utc
-    if period == "recent":
-        return now_utc - timedelta(days=7), now_utc
-    return None
-
-
-def _type_variants(content_types: list[str]) -> list[str]:
-    """Normalize requested type slugs + singular/plural variants (planner may say
-    'recipes' while notes store 'recipe'). Capped at 10 for Firestore `in` queries."""
-    variants: list[str] = []
-    for t in content_types:
-        n = normalize_slug(t)
-        for v in (n, n.rstrip("s"), n + "s"):
-            if v and v not in variants:
-                variants.append(v)
-    return variants[:10]
-
-
-def _filter_types(notes: list[dict], content_types: list[str]) -> list[dict]:
-    if not content_types:
-        return notes
-    targets = set(_type_variants(content_types))
-    return [n for n in notes if normalize_slug(n.get("content_type", "")) in targets]
-
-
-async def _recent_notes(db, user_id: str, limit: int) -> list[dict]:
-    query = (
-        db.collection("notes").where("user_id", "==", user_id)
-        .order_by("created_at", direction="DESCENDING")
-        .limit(limit).select(INDEX_FIELDS)
-    )
-    return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
-
-
-async def _vector_shortlist(db, user_id: str, question: str) -> list[dict] | None:
-    """Top-K candidate notes by semantic similarity (Firestore Vector Search). Returns
-    None when the query embedding is unavailable so the caller falls back to recency alone."""
-    try:
-        query_vec = await embedding_service.embed_query(question)
-    except Exception as e:
-        log.warning("ask shortlist embedding failed: %s: %s", type(e).__name__, e,
-                    extra={"user_id": user_id})
-        return None
-    if not query_vec:
-        return None
-    vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
-        vector_field="embedding",
-        query_vector=Vector(query_vec),
-        distance_measure=DistanceMeasure.COSINE,
-        limit=settings.ASK_SHORTLIST_K,
-    )
-    return [
-        {"id": doc.id, **{f: (doc.to_dict() or {}).get(f) for f in INDEX_FIELDS}}
-        async for doc in vector_query.stream()
-    ]
-
-
-async def _candidate_pool(db, user_id: str, question: str) -> list[dict]:
-    """Notes the planner chooses from: most-recent (temporal coverage) ∪ vector top-K
-    (deep-semantic coverage), deduped by id."""
-    recent = await _recent_notes(db, user_id, settings.ASK_RECENT_POOL)
-    pool = {n["id"]: n for n in recent}
-    shortlist = await _vector_shortlist(db, user_id, question)
-    if shortlist:
-        for n in shortlist:
-            pool.setdefault(n["id"], n)
-    return list(pool.values())
-
-
-def _dated_index(pool: list[dict], tz_offset_minutes: int) -> list[dict]:
-    offset = timedelta(minutes=tz_offset_minutes)
-    index = []
-    for n in pool:
-        created = n.get("created_at")
-        saved = ""
-        if created is not None:
-            try:
-                saved = (created + offset).strftime("%Y-%m-%d")
-            except Exception:
-                saved = ""
-        index.append({
-            "id": n["id"],
-            "type": n.get("content_type", ""),
-            "title": n.get("title", ""),
-            "summary": (n.get("ai_summary") or "")[:200],
-            "saved": saved,
-        })
-    return index
-
-
-async def _fetch_notes_by_ids(db, user_id: str, ids: list[str]) -> list[dict]:
-    snaps = await asyncio.gather(
-        *(db.collection("notes").document(note_id).get() for note_id in ids)
-    )
-    notes = []
-    for note_id, snap in zip(ids, snaps):
-        data = snap.to_dict() if snap.exists else None
-        if data and data.get("user_id") == user_id:
-            notes.append({"id": note_id, **data})
-    return notes
-
-
-async def _fetch_notes_by_window(db, user_id: str, after: datetime, before: datetime,
-                                 cap: int) -> list[dict]:
-    query = (
-        db.collection("notes").where("user_id", "==", user_id)
-        .where("created_at", ">=", after).where("created_at", "<", before)
-        .order_by("created_at", direction="DESCENDING").limit(cap)
-    )
-    return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
-
-
-async def _fetch_notes_by_source(db, user_id: str, source: str, cap: int) -> list[dict]:
-    """Notes from a named source ("my Pinterest notes"). Firestore can't substring-match,
-    so scan the newest notes (using the existing user_id+created_at index) and filter in
-    Python — cheap reads, no extra index, tolerant of subdomains and a stale `sources` list.
-    Matches on the canonical brand (so pin.it counts as pinterest, youtu.be as youtube) and
-    keeps a raw substring check for anything the alias map doesn't know about."""
-    keyword = source.lower().strip()
-    if not keyword:
-        return []
-    query = (
-        db.collection("notes").where("user_id", "==", user_id)
-        .order_by("created_at", direction="DESCENDING").limit(300)
-    )
-    matched = []
-    async for doc in query.stream():
-        domain = ((doc.to_dict() or {}).get("source_domain") or "").lower()
-        if source_matches(domain, keyword):
-            matched.append({"id": doc.id, **doc.to_dict()})
-            if len(matched) >= cap:
-                break
-    return matched
-
-
-async def _fetch_notes_by_types(db, user_id: str, content_types: list[str],
-                                cap: int) -> list[dict]:
-    variants = _type_variants(content_types)
-    if not variants:
-        return []
-    query = (
-        db.collection("notes").where("user_id", "==", user_id)
-        .where("content_type", "in", variants)
-        .order_by("created_at", direction="DESCENDING").limit(cap)
-    )
-    return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
-
-
-async def _retrieve_notes(db, user_id: str, plan: AskPlan, pool: list[dict],
-                          tz_offset_minutes: int, now_utc: datetime) -> tuple[list[dict], int]:
-    """Build the grounding note set from the plan. Returns (notes_to_answer_from,
-    total_matched) so the caller can report coverage when the set was capped."""
-    # Source-scoped ("my Pinterest notes"), optionally narrowed by type.
-    if plan.source:
-        matched = await _fetch_notes_by_source(db, user_id, plan.source,
-                                               settings.ASK_EXHAUSTIVE_CAP)
-        matched = _filter_types(matched, plan.content_types)
-        cap = settings.ASK_EXHAUSTIVE_CAP if plan.exhaustive else settings.ASK_MAX_GROUNDED_NOTES
-        return matched[:cap], len(matched)
-
-    # Temporal: date-bounded query (optionally narrowed by type).
-    if plan.period:
-        bounds = _period_bounds(plan.period, tz_offset_minutes, now_utc)
-        if bounds:
-            after, before = bounds
-            matched = await _fetch_notes_by_window(db, user_id, after, before,
-                                                   settings.ASK_EXHAUSTIVE_CAP)
-            matched = _filter_types(matched, plan.content_types)
-            cap = settings.ASK_EXHAUSTIVE_CAP if plan.exhaustive else settings.ASK_MAX_GROUNDED_NOTES
-            return matched[:cap], len(matched)
-
-    # Exhaustive / aggregate by type: the full filtered set, not a top-K shortlist.
-    if plan.content_types and (plan.exhaustive or plan.intent == "aggregate"):
-        matched = await _fetch_notes_by_types(db, user_id, plan.content_types,
-                                              settings.ASK_EXHAUSTIVE_CAP)
-        return matched[: settings.ASK_EXHAUSTIVE_CAP], len(matched)
-
-    # Semantic: the planner's picks from the candidate pool.
-    known = {n["id"] for n in pool}
-    ids = [i for i in dict.fromkeys(plan.note_ids) if i in known][: settings.ASK_MAX_GROUNDED_NOTES]
-    if not ids:
-        return [], 0
-    notes = await _fetch_notes_by_ids(db, user_id, ids)
-    return notes, len(notes)
 
 
 async def _enforce_ask_caps(db, user_id: str) -> None:
@@ -301,19 +100,19 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
     local_now = now_utc + timedelta(minutes=body.tz_offset_minutes)
     today_str = local_now.strftime("%Y-%m-%d (%A)")
 
-    pool = await _candidate_pool(db, user_id, body.question)
+    pool = await nr.candidate_pool(db, user_id, body.question)
 
     await _enforce_ask_caps(db, user_id)
     meter = start_metering()  # both Gemini stages; flushed once when the request ends
     try:
-        index = _dated_index(pool, body.tz_offset_minutes)
+        index = nr.dated_index(pool, body.tz_offset_minutes)
         plan = await gemini_service.plan_ask(body.question, history[-4:], today_str, index)
 
         # Focal note: chat opened from a note's page. Fetch it (ownership-checked) so it can
         # be forced into the grounding set and ranked first. A stale/foreign id is ignored.
         focal: dict | None = None
         if body.note_id:
-            found = await _fetch_notes_by_ids(db, user_id, [body.note_id])
+            found = await nr.fetch_notes_by_ids(db, user_id, [body.note_id])
             focal = found[0] if found else None
 
         # Create-a-note: author a draft from the whole conversation (a wider window than the
@@ -333,7 +132,7 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
         if plan.scope == "general":
             return AskResponse(answer=await _general_answer(body.question, history))
 
-        notes, matched_total = await _retrieve_notes(
+        notes, matched_total = await nr.retrieve_notes(
             db, user_id, plan, pool, body.tz_offset_minutes, now_utc
         )
         # "This note first, then all": prepend the focal note (deduped) ahead of the
@@ -401,3 +200,143 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
                            coverage=coverage, artifact=artifact)
     finally:
         await flush_usage(user_id, meter)
+
+
+# ──────────────────────────── streaming agent endpoint ────────────────────────────
+
+def _sse(obj: dict) -> str:
+    return f"data: {json.dumps(obj, default=str)}\n\n"
+
+
+def _citations_from_ctx(ctx: AgentContext) -> list[Citation]:
+    return [
+        Citation(
+            id=cid,
+            title=ctx.notes_by_id[cid].get("title", ""),
+            content_type=ctx.notes_by_id[cid].get("content_type", ""),
+            cover_image_url=ctx.notes_by_id[cid].get("cover_image_url"),
+            source_domain=ctx.notes_by_id[cid].get("source_domain", ""),
+        )
+        for cid in ctx.cited_ids if cid in ctx.notes_by_id
+    ]
+
+
+@router.post("/ask/stream")
+async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
+    """Dynamic agent over SSE: streams answer tokens + tool/agent status, then citations and
+    any savable artifact. Caps are enforced before the stream opens (so 429s are clean JSON);
+    the agent's many internal model calls are metered together and flushed once at the end."""
+    db = get_db()
+    history = [t.model_dump() for t in body.history[-10:]]
+    now_utc = datetime.now(timezone.utc)
+
+    # Build the grounding pool. Explicit selection bypasses retrieval — the pool IS the chosen set.
+    selected = [i for i in dict.fromkeys(body.selected_note_ids) if i][:20]
+    if selected:
+        pool = await nr.fetch_notes_by_ids(db, user_id, selected)
+    else:
+        pool = await nr.candidate_pool(db, user_id, body.question)
+
+    focal: dict | None = None
+    if body.note_id:
+        found = await nr.fetch_notes_by_ids(db, user_id, [body.note_id])
+        focal = found[0] if found else None
+
+    # Enforce caps before opening the stream so a limit returns a normal 429, not mid-SSE.
+    await _enforce_ask_caps(db, user_id)
+
+    ctx = AgentContext(
+        db=db, user_id=user_id, question=body.question, history=history, pool=pool,
+        tz_offset_minutes=body.tz_offset_minutes, now_utc=now_utc, focal=focal,
+        selected_note_ids=selected,
+    )
+
+    cid = body.conversation_id or str(uuid.uuid4())
+
+    async def gen():
+        meter = start_metering()  # set inside the streaming context that records + flushes
+        answer_parts: list[str] = []
+        try:
+            # Tell the client the conversation id up front so a new chat can track it.
+            yield _sse({"type": "conversation", "id": cid})
+            async for ev in run_agent(ctx):
+                if ev.get("type") == "delta":
+                    answer_parts.append(str(ev.get("text", "")))
+                yield _sse(ev)
+            citations = _citations_from_ctx(ctx)
+            if citations:
+                yield _sse({"type": "citations",
+                            "citations": [c.model_dump() for c in citations]})
+            if ctx.artifact is not None:
+                yield _sse({"type": "artifact", "artifact": ctx.artifact.model_dump()})
+            # Persist the exchange so the chat can be resumed later (best-effort).
+            try:
+                await persist_exchange(db, user_id, cid, body.question, {
+                    "text": "".join(answer_parts),
+                    "citations": [c.model_dump() for c in citations],
+                    "artifact": ctx.artifact.model_dump() if ctx.artifact else None,
+                })
+            except Exception as e:
+                log.warning("conversation persist failed: %s: %s", type(e).__name__, e,
+                            extra={"user_id": user_id})
+            yield _sse({"type": "done"})
+        except Exception as e:  # never let an exception abort the stream silently
+            log.error("ask_stream failed: %s: %s", type(e).__name__, e,
+                      extra={"user_id": user_id})
+            yield _sse({"type": "error", "message": "The assistant had trouble answering."})
+            yield _sse({"type": "done"})
+        finally:
+            await flush_usage(user_id, meter)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ──────────────────────────── deep async agent tasks ────────────────────────────
+
+async def _enforce_deep_caps(db, user_id: str) -> None:
+    """Per-user daily cap on deep tasks (each can fan out to many model calls)."""
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    transaction = db.transaction()
+
+    @fs.async_transactional
+    async def _bump(tx):
+        user_ref = db.collection("usage").document(f"{user_id}-{today}")
+        snap = await user_ref.get(transaction=tx)
+        n = (snap.to_dict() or {}).get("deep_count", 0)
+        if n >= settings.MAX_DEEP_TASKS_PER_USER_PER_DAY:
+            raise HTTPException(429, "Daily deep-task limit reached. Try again tomorrow.")
+        tx.set(user_ref, {"user_id": user_id, "date": today, "deep_count": n + 1}, merge=True)
+
+    await _bump(transaction)
+
+
+@router.post("/ask/deep", response_model=JobStatus)
+async def ask_deep(body: AskRequest, user_id: str = Depends(require_user)):
+    """Enqueue a heavy, long-running agent task (e.g. "compile a PRD from all my startup
+    notes"). Returns a job_id immediately; the Cloud Tasks worker runs the agent headlessly
+    and writes the result note, which the frontend surfaces via the existing job-watch."""
+    db = get_db()
+    await _enforce_deep_caps(db, user_id)
+
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    await db.collection("jobs").document(job_id).set({
+        "user_id": user_id,
+        "kind": "agent_task",
+        "agent_request": {
+            "question": body.question,
+            "history": [t.model_dump() for t in body.history[-20:]],
+            "note_id": body.note_id,
+            "selected_note_ids": [i for i in dict.fromkeys(body.selected_note_ids) if i][:20],
+            "tz_offset_minutes": body.tz_offset_minutes,
+        },
+        "status": "pending",
+        "note_id": None,
+        "error": None,
+        "attempt_count": 0,
+        "created_at": now,
+        "updated_at": now,
+    })
+    enqueue_process_job(job_id, path="/api/process-agent")
+    return JobStatus(job_id=job_id, status="pending")

@@ -74,7 +74,8 @@ export interface CategoryInfo {
 
 export async function listCategories(): Promise<CategoryInfo[]> {
   const res = await apiFetch("/api/categories");
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't load your categories."), res.status);
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't load your categories."), res.status);
   return res.json();
 }
 
@@ -87,7 +88,8 @@ export async function createCategory(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, ...meta }),
   });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't create the category."), res.status);
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't create the category."), res.status);
   return res.json();
 }
 
@@ -102,7 +104,8 @@ export async function updateCategory(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the category."), res.status);
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't update the category."), res.status);
   return res.json();
 }
 
@@ -114,7 +117,8 @@ export async function deleteCategory(
   const res = await apiFetch(`/api/categories/${encodeURIComponent(slug)}${qs}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete the category."), res.status);
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't delete the category."), res.status);
   return res.json();
 }
 
@@ -174,6 +178,111 @@ export async function ask(
   return res.json();
 }
 
+// Streaming agent (SSE). Events arrive as `data: {json}\n\n` frames. Callbacks fire as the
+// agent works: text deltas, tool/subagent status, then final citations/artifact/coverage.
+export interface AskStreamHandlers {
+  onConversation?: (id: string) => void;
+  onDelta?: (text: string) => void;
+  onStatus?: (status: string, kind: "tool" | "agent") => void;
+  onCitations?: (citations: AskCitation[]) => void;
+  onArtifact?: (artifact: AskArtifact) => void;
+  onCoverage?: (coverage: string) => void;
+  onError?: (message: string) => void;
+  onDone?: () => void;
+}
+
+export async function askStream(
+  question: string,
+  history: AskTurn[],
+  noteId: string | undefined,
+  selectedNoteIds: string[],
+  conversationId: string | null,
+  handlers: AskStreamHandlers,
+): Promise<void> {
+  const tz_offset_minutes = -new Date().getTimezoneOffset();
+  const res = await apiFetch("/api/ask/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question,
+      history,
+      tz_offset_minutes,
+      note_id: noteId ?? null,
+      selected_note_ids: selectedNoteIds,
+      conversation_id: conversationId,
+    }),
+  });
+  if (!res.ok || !res.body) {
+    throw new ApiError(
+      await errorDetail(res, "Couldn't get an answer. Please try again."),
+      res.status || 500,
+    );
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line.
+    const frames = buf.split("\n\n");
+    buf = frames.pop() ?? "";
+    for (const frame of frames) {
+      const line = frame.trim();
+      if (!line.startsWith("data:")) continue;
+      let ev: Record<string, unknown>;
+      try {
+        ev = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue; // ignore a malformed frame rather than abort the stream
+      }
+      switch (ev.type) {
+        case "conversation":
+          handlers.onConversation?.(String(ev.id ?? ""));
+          break;
+        case "delta":
+          handlers.onDelta?.(String(ev.text ?? ""));
+          break;
+        case "tool":
+        case "agent":
+          handlers.onStatus?.(String(ev.status ?? ""), ev.type as "tool" | "agent");
+          break;
+        case "citations":
+          handlers.onCitations?.((ev.citations as AskCitation[]) ?? []);
+          break;
+        case "artifact":
+          handlers.onArtifact?.(ev.artifact as AskArtifact);
+          break;
+        case "coverage":
+          handlers.onCoverage?.(String(ev.text ?? ""));
+          break;
+        case "error":
+          handlers.onError?.(String(ev.message ?? "Something went wrong."));
+          break;
+        case "done":
+          handlers.onDone?.();
+          break;
+      }
+    }
+  }
+}
+
+// "Add to this note": additively merge an AI-built artifact's blocks into an existing note.
+export async function augmentNote(
+  noteId: string,
+  artifact: AskArtifact,
+  sourceNoteIds: string[] = [],
+): Promise<{ id: string }> {
+  const res = await apiFetch(`/api/notes/${noteId}/augment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: artifact.data, source_note_ids: sourceNoteIds }),
+  });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the note."), res.status);
+  return res.json();
+}
+
 // Persist an Ask-AI-built artifact as a real note (Phase 2 "Save as note"). Returns the
 // new note id so the UI can link straight to it.
 export async function saveConsolidatedNote(
@@ -196,12 +305,75 @@ export async function saveConsolidatedNote(
   return res.json();
 }
 
+// --- Chat history (persistent conversations) ---
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  updated_at?: { seconds: number } | string | null;
+}
+
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  text: string;
+  citations?: AskCitation[];
+  artifact?: AskArtifact | null;
+}
+
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const res = await apiFetch("/api/conversations");
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't load your chats."), res.status);
+  return res.json();
+}
+
+export async function getConversation(
+  cid: string,
+): Promise<{ id: string; title: string; messages: ConversationMessage[] }> {
+  const res = await apiFetch(`/api/conversations/${cid}`);
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't open that chat."), res.status);
+  return res.json();
+}
+
+export async function deleteConversation(cid: string): Promise<void> {
+  const res = await apiFetch(`/api/conversations/${cid}`, { method: "DELETE" });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete that chat."), res.status);
+}
+
+// Kick off a heavy, long-running agent task (e.g. "compile a PRD from all my startup notes").
+// Returns a job_id immediately; watch the job (firestore watchJob) and open the note when it
+// completes — the worker runs the agent headlessly and writes the result note.
+export async function askDeep(
+  question: string,
+  noteId?: string,
+  selectedNoteIds: string[] = [],
+): Promise<{ job_id: string; status: string }> {
+  const tz_offset_minutes = -new Date().getTimezoneOffset();
+  const res = await apiFetch("/api/ask/deep", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question,
+      history: [],
+      tz_offset_minutes,
+      note_id: noteId ?? null,
+      selected_note_ids: selectedNoteIds,
+    }),
+  });
+  if (!res.ok)
+    throw new ApiError(
+      await errorDetail(res, "Couldn't start the task. Please try again."),
+      res.status,
+    );
+  return res.json();
+}
+
 // --- Shareable public notes ---
 
 // Make a note publicly readable; returns the /p/{id} link to share.
 export async function shareNote(id: string): Promise<{ is_public: boolean; url: string }> {
   const res = await apiFetch(`/api/notes/${id}/share`, { method: "POST" });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't create a share link."), res.status);
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't create a share link."), res.status);
   return res.json();
 }
 

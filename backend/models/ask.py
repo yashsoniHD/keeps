@@ -18,6 +18,12 @@ class AskRequest(BaseModel):
     # Focal note when the chat is opened from a note's page: that note is forced into the
     # grounding set and ranked first ("this note first, then all"). None = corpus-wide.
     note_id: str | None = Field(default=None, max_length=128)
+    # Explicit reference scope: when non-empty, the agent grounds ONLY on these notes
+    # (ownership-checked), bypassing vector/temporal retrieval. Empty = default scope.
+    selected_note_ids: list[str] = Field(default_factory=list, max_length=20)
+    # Resume/persist a saved conversation. None on the first message of a new chat — the
+    # server mints an id and returns it (a `conversation` SSE event) so the client can track it.
+    conversation_id: str | None = Field(default=None, max_length=128)
 
 
 class Citation(BaseModel):

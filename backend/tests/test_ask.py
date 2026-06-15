@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 import routers.ask as ask_mod
+import services.note_retrieval as nr
 from config import settings
 from models.ask import ArtifactNote, AskPlan, AskRequest, GroundedAnswer, SynthAnswer
 
@@ -42,8 +43,8 @@ def patch_ask(fake_db, monkeypatch):
     async def by_ids(db, user_id, ids):
         return [NOTE_N1] if "n1" in ids else []
 
-    monkeypatch.setattr(ask_mod, "_candidate_pool", pool)
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_ids", by_ids)
+    monkeypatch.setattr(nr, "candidate_pool", pool)
+    monkeypatch.setattr(nr, "fetch_notes_by_ids", by_ids)
 
 
 def _gemini(monkeypatch, plan, answer=None, chat=None, synth=None, created=None):
@@ -129,7 +130,7 @@ async def test_temporal_routes_to_window_query(fake_db, monkeypatch):
         seen["after"], seen["before"] = after, before
         return [NOTE_N1]
 
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_window", window)
+    monkeypatch.setattr(nr, "fetch_notes_by_window", window)
     calls = _gemini(monkeypatch, AskPlan(scope="notes", period="today"))
     res = await ask_mod.ask(AskRequest(question="summarize today's notes"), user_id="u")
     assert res.answer == "Watch Dune."
@@ -141,7 +142,7 @@ async def test_temporal_empty_returns_period_message(fake_db, monkeypatch):
     async def window(db, user_id, after, before, cap):
         return []
 
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_window", window)
+    monkeypatch.setattr(nr, "fetch_notes_by_window", window)
     _gemini(monkeypatch, AskPlan(scope="notes", period="yesterday"))
     res = await ask_mod.ask(AskRequest(question="what did I save yesterday"), user_id="u")
     assert res.answer == "You didn't save anything yesterday."
@@ -152,7 +153,7 @@ async def test_exhaustive_by_type_fetches_full_set(fake_db, monkeypatch):
         assert types == ["recipe"]
         return [NOTE_N1, {**NOTE_N1, "id": "n2"}]
 
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_types", by_types)
+    monkeypatch.setattr(nr, "fetch_notes_by_types", by_types)
     calls = _gemini(
         monkeypatch,
         AskPlan(scope="notes", content_types=["recipe"], exhaustive=True),
@@ -169,7 +170,7 @@ async def test_coverage_reported_when_capped(fake_db, monkeypatch):
     async def window(db, user_id, after, before, cap):
         return [{**NOTE_N1, "id": f"n{i}"} for i in range(3)]  # 3 matched, cap 2
 
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_window", window)
+    monkeypatch.setattr(nr, "fetch_notes_by_window", window)
     _gemini(monkeypatch, AskPlan(scope="notes", period="this_week"),
             answer=GroundedAnswer(answer_markdown="ok", cited_note_ids=[]))
     res = await ask_mod.ask(AskRequest(question="this week"), user_id="u")
@@ -180,7 +181,7 @@ async def test_zero_notes_notes_scope_short_circuits(fake_db, monkeypatch):
     async def empty_pool(db, user_id, question):
         return []
 
-    monkeypatch.setattr(ask_mod, "_candidate_pool", empty_pool)
+    monkeypatch.setattr(nr, "candidate_pool", empty_pool)
     _gemini(monkeypatch, AskPlan(scope="notes", note_ids=[]))
     res = await ask_mod.ask(AskRequest(question="what to watch"), user_id="u")
     assert res.answer == ask_mod.NO_NOTES_ANSWER
@@ -191,7 +192,7 @@ async def test_source_filter_routes_to_source_fetch(fake_db, monkeypatch):
         assert source == "pinterest"
         return [NOTE_N1]
 
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_source", by_source)
+    monkeypatch.setattr(nr, "fetch_notes_by_source", by_source)
     calls = _gemini(monkeypatch, AskPlan(scope="notes", source="pinterest"))
     res = await ask_mod.ask(AskRequest(question="find my pinterest note"), user_id="u")
     assert [n["id"] for n in calls["answer"][0]] == ["n1"]  # came from the source fetch
@@ -202,7 +203,7 @@ async def test_source_empty_returns_specific_message(fake_db, monkeypatch):
     async def by_source(db, user_id, source, cap):
         return []
 
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_source", by_source)
+    monkeypatch.setattr(nr, "fetch_notes_by_source", by_source)
     _gemini(monkeypatch, AskPlan(scope="notes", source="pinterest"))
     res = await ask_mod.ask(AskRequest(question="find my pinterest note"), user_id="u")
     assert res.answer == "I couldn't find any notes from pinterest."
@@ -259,7 +260,7 @@ async def test_zero_notes_general_scope_still_answers(fake_db, monkeypatch):
     async def empty_pool(db, user_id, question):
         return []
 
-    monkeypatch.setattr(ask_mod, "_candidate_pool", empty_pool)
+    monkeypatch.setattr(nr, "candidate_pool", empty_pool)
     _gemini(monkeypatch, AskPlan(scope="general"))
     res = await ask_mod.ask(AskRequest(question="hello"), user_id="u")
     assert res.answer == "Paris is the capital of France."  # the stubbed chat reply
@@ -286,8 +287,8 @@ async def test_note_context_ranks_focal_ahead_of_planner_picks(fake_db, monkeypa
     async def by_ids(db, user_id, ids):
         return [n for n in (NOTE_N1, note2) if n["id"] in ids]
 
-    monkeypatch.setattr(ask_mod, "_candidate_pool", pool)
-    monkeypatch.setattr(ask_mod, "_fetch_notes_by_ids", by_ids)
+    monkeypatch.setattr(nr, "candidate_pool", pool)
+    monkeypatch.setattr(nr, "fetch_notes_by_ids", by_ids)
     calls = _gemini(monkeypatch, AskPlan(scope="notes", note_ids=["n2"]),
                     answer=GroundedAnswer(answer_markdown="ok", cited_note_ids=["n1", "n2"]))
     res = await ask_mod.ask(AskRequest(question="how does this compare", note_id="n1"), user_id="u")

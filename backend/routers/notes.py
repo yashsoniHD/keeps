@@ -23,6 +23,34 @@ class NoteUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=300)
 
 
+class AugmentNoteIn(BaseModel):
+    """"Add to this note" from Ask AI: COMPOSER `data` blocks to additively merge into an
+    existing note (e.g. a "Where to stay" section appended to an itinerary)."""
+    data: dict[str, Any] = Field(default_factory=dict)
+    source_note_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+def _merge_blocks(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Additive merge of COMPOSER blocks — append, never overwrite. List blocks
+    (sections/steps/checklist/facts/quotes) are extended; a `table` with identical columns
+    gains rows, otherwise the incoming table is kept under a free key; unknown keys are added
+    only if absent. Existing content is preserved so an AI edit can't clobber the user's note."""
+    merged = dict(existing or {})
+    for key, val in (incoming or {}).items():
+        cur = merged.get(key)
+        if cur is None:
+            merged[key] = val
+        elif isinstance(cur, list) and isinstance(val, list):
+            merged[key] = cur + val
+        elif isinstance(cur, dict) and isinstance(val, dict) and key == "table":
+            if cur.get("columns") == val.get("columns"):
+                merged[key] = {**cur, "rows": (cur.get("rows") or []) + (val.get("rows") or [])}
+            else:
+                merged[f"{key}_added"] = val
+        # else: scalar/incompatible — keep the user's existing value untouched.
+    return merged
+
+
 class ConsolidatedNoteIn(BaseModel):
     """An AI-built note saved from Ask AI chat: a consolidation across notes (Phase 2)
     or a freshly authored note (Phase 4)."""
@@ -156,6 +184,25 @@ async def create_consolidated_note(body: ConsolidatedNoteIn, user_id: str = Depe
     await db.collection("notes").document(note_id).set(note_doc)
     await add_user_category(user_id, slug)
     return {"id": note_id}
+
+
+@router.post("/notes/{note_id}/augment")
+async def augment_note(note_id: str, body: AugmentNoteIn, user_id: str = Depends(require_user)):
+    """Additively merge AI-built blocks into an existing note's `data` (the "Add to {note}"
+    action). Ownership-checked; never overwrites existing content. Records provenance."""
+    db = get_db()
+    ref = await _owned_note_ref(db, note_id, user_id)  # 404s if not owner
+    snap = await ref.get()
+    current = snap.to_dict() or {}
+    merged = _merge_blocks(current.get("data") or {}, body.data)
+    prior_sources = current.get("source_note_ids") or []
+    sources = list(dict.fromkeys([*prior_sources, *body.source_note_ids]))[:50]
+    await ref.update({
+        "data": firestore_safe(merged),
+        "source_note_ids": sources,
+        "updated_at": datetime.now(timezone.utc),
+    })
+    return {"ok": True, "id": note_id}
 
 
 @router.post("/notes/{note_id}/share")

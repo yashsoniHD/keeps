@@ -694,5 +694,39 @@ class GeminiService:
     async def search_grounded_page(self, url: str, hint: str = "") -> str | None:
         return await asyncio.to_thread(self._search_grounded_page, url, hint)
 
+    # ---------- General web research (Ask AI agent: research_web tool) ----------
+
+    def _web_research(self, query: str) -> str | None:
+        """General-purpose web research via Google Search grounding — current/external facts
+        the user's notes don't contain (prices, hours, recent papers, live FX). Distinct from
+        `_search_grounded_page`, which hunts for ONE known URL. Returns concise sourced prose."""
+        if not query.strip():
+            return None
+        prompt = (
+            "Use Google Search to answer this research request with CURRENT, factual information. "
+            "Be concise and specific: report concrete facts (names, numbers, prices, dates, "
+            "sources) — not filler. If you can't find reliable information, say so plainly.\n\n"
+            f"Request: {query}"
+        )
+        for attempt in (1, 2):  # transient 5xx happen on the global endpoint
+            try:
+                resp = self.client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                        temperature=0.2,
+                    ),
+                )
+                record_usage(settings.GEMINI_MODEL, resp)
+                return (resp.text or "").strip() or None
+            except Exception as e:
+                if attempt == 2:
+                    log.warning("web research failed: %s: %s", e, extra={"query": query[:120]})
+        return None
+
+    async def web_research(self, query: str) -> str | None:
+        return await asyncio.to_thread(self._web_research, query)
+
 
 gemini_service = GeminiService()

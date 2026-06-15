@@ -64,6 +64,30 @@ class Settings:
     # recipes", "consolidate my trip notes") — bounds token cost on a big match set.
     ASK_EXHAUSTIVE_CAP: int = int(os.getenv("ASK_EXHAUSTIVE_CAP", "40"))
 
+    # --- Agent (orchestrator + subagents + tools) ---
+    # Master kill switch: when false, /api/ask/stream answers with no tools (falls back to
+    # plain grounded RAG) so the agent path can be disabled without a redeploy.
+    ASK_ENABLE_TOOLS: bool = os.getenv("ASK_ENABLE_TOOLS", "true").lower() == "true"
+    # Gates the outbound-network tools (research_web / fetch_url) independently of the
+    # zero-cost local tools (notes/maps/compute) — flip on after watching cost.
+    ENABLE_WEB_TOOLS: bool = os.getenv("ENABLE_WEB_TOOLS", "false").lower() == "true"
+    # Dynamic-loop bounds (cost/latency control). On exhaustion the orchestrator is forced
+    # to answer with no tools, so the user always gets a reply — never an error.
+    MAX_ORCH_ROUNDS: int = int(os.getenv("MAX_ORCH_ROUNDS", "4"))
+    MAX_TOOL_CALLS_PER_ASK: int = int(os.getenv("MAX_TOOL_CALLS_PER_ASK", "8"))
+    MAX_SUBAGENT_CALLS_PER_ASK: int = int(os.getenv("MAX_SUBAGENT_CALLS_PER_ASK", "4"))
+    # Truncate each tool/subagent result before feeding it back to the model (stops a
+    # fetched page or huge note set from exploding context cost).
+    TOOL_RESULT_MAX_CHARS: int = int(os.getenv("TOOL_RESULT_MAX_CHARS", "8000"))
+    # Deep async tasks (heavy multi-note jobs run on the Cloud Tasks worker, not inline):
+    # bigger budgets than an interactive ask, plus their own daily per-user cap.
+    DEEP_MAX_ROUNDS: int = int(os.getenv("DEEP_MAX_ROUNDS", "8"))
+    DEEP_MAX_NOTES: int = int(os.getenv("DEEP_MAX_NOTES", "40"))
+    MAX_DEEP_TASKS_PER_USER_PER_DAY: int = int(os.getenv("MAX_DEEP_TASKS_PER_USER_PER_DAY", "5"))
+    # Persistent chat history (cross-session conversations).
+    MAX_CONVERSATIONS_PER_USER: int = int(os.getenv("MAX_CONVERSATIONS_PER_USER", "100"))
+    MAX_CONVERSATION_MESSAGES: int = int(os.getenv("MAX_CONVERSATION_MESSAGES", "100"))
+
     # Direct-URI video analysis cap. YouTube videos longer than this fall back to the
     # transcript path instead of being sent to Gemini whole.
     MAX_VIDEO_SECONDS: int = int(os.getenv("MAX_VIDEO_SECONDS", "1800"))  # 30 min

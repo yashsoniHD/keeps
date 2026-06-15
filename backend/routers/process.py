@@ -27,7 +27,9 @@ from google.oauth2 import id_token
 
 from config import settings
 from models.note import ContentBundle
+from services import note_retrieval as nr
 from services import sources
+from services.agent_tools import AgentContext, run_agent_collect
 from services.covers import persist_cover
 from services.embeddings import embedding_service
 from services.firebase import (
@@ -40,7 +42,7 @@ from services.firebase import (
     record_image_generated,
     reserve_image_slot,
 )
-from services.gemini import gemini_service
+from services.gemini import gemini_service, match_existing, normalize_slug
 from services.imagen import generate_cover
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.usage_meter import start_metering
@@ -313,4 +315,98 @@ async def process_job(job_id: str, request: Request):
 
     finally:
         # Attribute token spend even when the job re-raised for a Cloud Tasks retry.
+        await flush_usage(user_id, meter)
+
+
+@router.post("/process-agent/{job_id}")
+async def process_agent_job(job_id: str, request: Request):
+    """Deep async agent worker: runs the orchestrator headlessly for a heavy multi-note task
+    (e.g. a PRD over 15 notes) and writes the result as a note. Same OIDC + idempotency as the
+    URL pipeline. Deep tasks don't retry-storm: any failure marks the job failed (HTTP 200)."""
+    _verify_oidc(request)
+
+    db = get_db()
+    job_ref = db.collection("jobs").document(job_id)
+    job_snap = await job_ref.get()
+    if not job_snap.exists:
+        return {"status": "missing"}
+    job = job_snap.to_dict()
+    if job.get("status") == "completed":
+        return {"status": "completed", "note_id": job.get("note_id")}
+
+    user_id: str = job["user_id"]
+    req: dict = job.get("agent_request") or {}
+    question: str = req.get("question", "")
+    history: list = req.get("history", [])
+    selected: list = req.get("selected_note_ids", []) or []
+    tz: int = req.get("tz_offset_minutes", 0)
+    now = datetime.now(timezone.utc)
+    await job_ref.update({"status": "processing", "attempt_count": fs.Increment(1), "updated_at": now})
+
+    meter = start_metering()
+    try:
+        pool = (await nr.fetch_notes_by_ids(db, user_id, selected) if selected
+                else await nr.candidate_pool(db, user_id, question))
+        focal = None
+        if req.get("note_id"):
+            found = await nr.fetch_notes_by_ids(db, user_id, [req["note_id"]])
+            focal = found[0] if found else None
+
+        ctx = AgentContext(
+            db=db, user_id=user_id, question=question, history=history, pool=pool,
+            tz_offset_minutes=tz, now_utc=now, focal=focal, selected_note_ids=selected,
+            max_grounded=settings.DEEP_MAX_NOTES, max_rounds=settings.DEEP_MAX_ROUNDS,
+        )
+        result = await run_agent_collect(ctx)
+        if result.get("error") and ctx.artifact is None and not result.get("text"):
+            raise RuntimeError(result["error"])
+
+        # Prefer the structured artifact the agent built; else wrap its prose answer.
+        if ctx.artifact is not None:
+            title = ctx.artifact.title or (question[:80] or "Agent result")
+            ai_summary = ctx.artifact.ai_summary or ""
+            content_type = ctx.artifact.content_type or "summary"
+            data = ctx.artifact.data or {}
+        else:
+            title = (question[:80] or "Agent result")
+            ai_summary = ""
+            content_type = "summary"
+            data = {"sections": [{"heading": "Result",
+                                  "items": [result.get("text") or "No content generated."]}]}
+
+        slug = match_existing(normalize_slug(content_type), await get_user_categories(user_id))
+        new_id = str(uuid.uuid4())
+        embedding = await _note_embedding(title, ai_summary)
+        note_doc = {
+            "user_id": user_id,
+            "content_type": slug,
+            "template": "composed",
+            "title": title,
+            "ai_summary": ai_summary,
+            "source_url": "",
+            "source_domain": "",
+            "source": "ai",
+            "cover_image_url": None,
+            "data": firestore_safe(data),
+            "acquisition": "ai_deep_task",
+            "source_note_ids": list(dict.fromkeys(ctx.cited_ids))[:50],
+            "created_at": now,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if embedding is not None:
+            note_doc["embedding"] = embedding
+        await db.collection("notes").document(new_id).set(note_doc)
+        await add_user_category(user_id, slug)
+        await job_ref.update({"status": "completed", "note_id": new_id,
+                              "updated_at": datetime.now(timezone.utc)})
+        log.info("deep agent task completed", extra={"job_id": job_id, "user_id": user_id})
+        return {"status": "completed", "note_id": new_id}
+
+    except Exception as e:
+        log.error("deep agent task failed: %s: %s", type(e).__name__, e,
+                  extra={"job_id": job_id, "user_id": user_id}, exc_info=True)
+        await job_ref.update({"status": "failed", "error": f"{type(e).__name__}: {e}"[:500],
+                              "updated_at": datetime.now(timezone.utc)})
+        return {"status": "failed", "error": str(e)[:200]}
+    finally:
         await flush_usage(user_id, meter)
