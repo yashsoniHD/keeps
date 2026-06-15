@@ -110,15 +110,43 @@ export function AskFab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, closeChat]);
 
-  // iOS soft keyboard: keep the sheet glued to the *visible* viewport with the input bar floating
-  // just above the keyboard. Two iOS quirks to beat: (1) opening the keyboard shrinks only the
-  // visual viewport, not the layout viewport, so a `bottom: 0` sheet ends up behind the keyboard;
-  // (2) iOS scrolls the layout viewport (visualViewport.offsetTop > 0) to chase the focused input,
-  // dragging our `position: fixed` sheet up off-screen ("scrolls up"). Fix: translate the sheet
-  // back down by offsetTop to re-pin it to the visible top, and shrink its height to the visual
-  // viewport so the input bar sits above the keyboard and the message list overlays beneath it.
-  // No-op on desktop / where visualViewport is absent. Keyboard open/close is infrequent, so React
-  // state (composed with the drag transform in render) is fine — no imperative/React style clash.
+  // Lock the page behind the sheet while it's open (mobile only). This is the keystone of the
+  // mobile chat UX: with `<body>` pinned, (1) the feed underneath can no longer be scrolled by a
+  // stray touch / overscroll, and (2) — crucially — iOS can't scroll the *layout* viewport to chase
+  // the focused input, which was the source of the "chat jumps up" + glitching. With no page scroll,
+  // visualViewport.offsetTop stays ~0 and the keyboard effect below collapses to a simple height
+  // clamp. We use the iOS-proof `position: fixed` technique (overflow:hidden alone doesn't hold on
+  // iOS) and restore the exact scroll position on close. Desktop keeps the app usable beside the rail.
+  useEffect(() => {
+    if (!isOpen || !window.matchMedia("(max-width: 639px)").matches) return;
+    const body = document.body;
+    const scrollY = window.scrollY;
+    const prev = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    return () => {
+      Object.assign(body.style, prev);
+      window.scrollTo(0, scrollY);
+    };
+  }, [isOpen]);
+
+  // iOS soft keyboard: shrink the sheet to the *visible* viewport so the input bar floats just above
+  // the keyboard (a `bottom: 0` sheet otherwise sits behind it). With the body locked above, the page
+  // no longer scrolls to chase the input, so offsetTop stays ~0 — but we still translate by it as a
+  // belt-and-suspenders guard for browsers that ignore the lock. No-op on desktop / where
+  // visualViewport is absent. Keyboard open/close is infrequent, so React state (composed with the
+  // drag transform in render) is fine — no imperative/React style clash.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!isOpen || !vv) return;
@@ -176,7 +204,10 @@ export function AskFab() {
               transform:
                 dragY || kb.open ? `translateY(${dragY + kb.top}px)` : undefined,
               height: kb.open ? `${kb.height}px` : undefined,
-              transition: dragging ? "none" : "transform 0.24s cubic-bezier(0.32,0.72,0,1)",
+              // Snap (no transition) while dragging or while the keyboard is driving the geometry —
+              // animating the transform against rapid visualViewport events is what glitches. Keep
+              // the easing only for the spring-back after a released drag.
+              transition: dragging || kb.open ? "none" : "transform 0.24s cubic-bezier(0.32,0.72,0,1)",
             }}
             className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)+0.5rem)] z-50 flex flex-col overflow-hidden rounded-t-3xl border-t border-border bg-background shadow-2xl duration-300 animate-in fade-in-0 slide-in-from-bottom-8 sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[440px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:slide-in-from-right-4 sm:slide-in-from-bottom-0"
           >
