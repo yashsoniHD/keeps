@@ -103,6 +103,37 @@ export function AskFab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, closeChat]);
 
+  // iOS soft keyboard: lift the sheet's bottom edge to sit just above the keyboard so the
+  // input bar floats above it (stays visible) and the message list shrinks to fit — instead
+  // of the keyboard covering the input or the page auto-scrolling it out of view. Opening the
+  // keyboard shrinks only the *visual* viewport, so we read that gap and pin `bottom` to it.
+  // Imperative writes (rAF) avoid re-render churn during momentum scroll; React never manages
+  // `bottom`, so these survive drag-driven re-renders. No-op on desktop / without visualViewport.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const node = panelRef.current;
+    if (!isOpen || !vv || !node) return;
+    const isMobile = () => window.matchMedia("(max-width: 639px)").matches;
+    let raf = 0;
+    const apply = () => {
+      const gap = isMobile() ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+      node.style.bottom = gap > 1 ? `${gap}px` : "";
+    };
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(apply);
+    };
+    apply();
+    vv.addEventListener("resize", schedule);
+    vv.addEventListener("scroll", schedule);
+    return () => {
+      vv.removeEventListener("resize", schedule);
+      vv.removeEventListener("scroll", schedule);
+      cancelAnimationFrame(raf);
+      node.style.bottom = "";
+    };
+  }, [isOpen]);
+
   const hidden = !user || HIDDEN_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
   if (hidden) return null;
 

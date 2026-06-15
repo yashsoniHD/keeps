@@ -197,9 +197,6 @@ export function NoteRow({ note }: { note: Note }) {
           {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
         </div>
         <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-1">{note.title}</h3>
-        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
-          <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
-        </div>
       </div>
 
       <span className="shrink-0 self-start text-[11px] tabular-nums text-ink-soft">

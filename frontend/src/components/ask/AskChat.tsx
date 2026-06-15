@@ -152,7 +152,11 @@ export function AskChat({
   const seedSent = useRef<string | null>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    // Desktop only — don't pop the software keyboard open the moment the chat
+    // opens on mobile (the user taps the input when they're ready to type).
+    if (window.matchMedia("(min-width: 640px)").matches) {
+      inputRef.current?.focus();
+    }
   }, []);
 
   // Grow the textarea with its content up to ~5 lines, then scroll internally.
@@ -377,7 +381,7 @@ export function AskChat({
                   send(input);
                 }
               }}
-              placeholder="Ask, search, or make anything…"
+              placeholder="Ask, search, or create from your notes…"
               className="max-h-[120px] w-full resize-none self-center bg-transparent py-1.5 text-base leading-relaxed outline-none placeholder:text-ink-soft md:text-sm"
             />
           </label>
