@@ -353,15 +353,15 @@ def _initial_contents(ctx: AgentContext) -> list[types.Content]:
     return [types.Content(role="user", parts=[types.Part(text="\n\n".join(parts))])]
 
 
-def _function_calls(chunk) -> list:
-    calls = []
+def _chunk_parts(chunk):
+    """Yield (part, is_visible_text) for each part across a streamed chunk's candidates.
+    Reading parts directly (vs `chunk.text`) lets us skip thinking parts and, crucially,
+    keep the ORIGINAL functionCall Part objects — which carry the `thought_signature`
+    Gemini 3.x requires when the tool-call turn is sent back."""
     for cand in (getattr(chunk, "candidates", None) or []):
         content = getattr(cand, "content", None)
         for part in (getattr(content, "parts", None) or []):
-            fc = getattr(part, "function_call", None)
-            if fc is not None:
-                calls.append(fc)
-    return calls
+            yield part
 
 
 async def run_agent(ctx: AgentContext):
@@ -381,17 +381,18 @@ async def run_agent(ctx: AgentContext):
         config = tool_config if (use_tools and not last_round) else types.GenerateContentConfig(
             system_instruction=ASK_ORCHESTRATOR_SYSTEM, temperature=0.3)
 
-        calls: list = []
+        call_parts: list = []  # ORIGINAL functionCall parts (preserve thought_signature)
         last_chunk = None
         try:
             stream = await gemini_service.client.aio.models.generate_content_stream(
                 model=settings.GEMINI_MODEL, contents=contents, config=config)
             async for chunk in stream:
                 last_chunk = chunk
-                text = getattr(chunk, "text", None)
-                if text:
-                    yield {"type": "delta", "text": text}
-                calls.extend(_function_calls(chunk))
+                for part in _chunk_parts(chunk):
+                    if getattr(part, "function_call", None) is not None:
+                        call_parts.append(part)
+                    elif getattr(part, "text", None) and not getattr(part, "thought", False):
+                        yield {"type": "delta", "text": part.text}
         except Exception as e:
             log.error("agent stream failed: %s: %s", type(e).__name__, e,
                       extra={"user_id": ctx.user_id})
@@ -400,14 +401,16 @@ async def run_agent(ctx: AgentContext):
         if last_chunk is not None:
             record_usage(settings.GEMINI_MODEL, last_chunk)
 
-        if not calls:
+        if not call_parts:
             return  # the model answered
 
-        # Re-attach the model's function-call turn, then run the tools and append responses.
-        contents.append(types.Content(role="model",
-                                      parts=[types.Part(function_call=fc) for fc in calls]))
+        # Re-attach the model's ACTUAL function-call parts (with thought_signature intact —
+        # rebuilding from just the function_call would drop it and Gemini 3.x rejects the turn),
+        # then run the tools and append their responses.
+        contents.append(types.Content(role="model", parts=call_parts))
         response_parts = []
-        for fc in calls:
+        for part in call_parts:
+            fc = part.function_call
             args = dict(fc.args) if fc.args else {}
             label = "Searching your notes…" if fc.name == "search_notes" else (
                 "Building it…" if fc.name in ("build_artifact", "author_note") else (
