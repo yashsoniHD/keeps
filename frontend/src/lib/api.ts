@@ -147,6 +147,21 @@ export interface AskArtifact {
   origin?: "consolidated" | "created"; // provenance for the saved note
 }
 
+// A rendered chat message held in the UI's in-memory session (see ask-context.tsx).
+// Richer than AskTurn (which is just the wire history) — carries citations, an artifact,
+// and deep-task tracking fields so the conversation survives the chat panel closing.
+export interface ChatMessage {
+  role: "user" | "assistant";
+  text: string;
+  citations?: AskCitation[];
+  coverage?: string | null;
+  artifact?: AskArtifact | null;
+  pending?: boolean;
+  jobId?: string;
+  resultNoteId?: string | null;
+  failed?: boolean;
+}
+
 export interface AskResult {
   answer: string;
   citations: AskCitation[];
@@ -460,6 +475,14 @@ export interface AdminUserRow {
   active_30d: boolean;
 }
 
+export interface DailyTrend {
+  date: string; // "YYYYMMDD"
+  notes: number;
+  asks: number;
+  images: number;
+  cost_usd: number;
+}
+
 export interface AdminStats {
   generated_at: string;
   totals: {
@@ -471,6 +494,7 @@ export interface AdminStats {
     images: number;
     cost_usd: number;
     cost_inr: number;
+    cost_per_note_usd: number;
     jobs: number;
     jobs_failed: number;
     notes_today: number;
@@ -478,6 +502,7 @@ export interface AdminStats {
     images_today: number;
   };
   pricing_note: string;
+  daily_trend: DailyTrend[];
   users: AdminUserRow[];
 }
 

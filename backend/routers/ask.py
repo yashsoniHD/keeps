@@ -295,18 +295,25 @@ async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
 # ──────────────────────────── deep async agent tasks ────────────────────────────
 
 async def _enforce_deep_caps(db, user_id: str) -> None:
-    """Per-user daily cap on deep tasks (each can fan out to many model calls)."""
+    """Per-user + global daily cap on deep tasks (each can fan out to many model calls).
+    The global counter is the budget kill-switch; the per-user counter is fair-share."""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     transaction = db.transaction()
 
     @fs.async_transactional
     async def _bump(tx):
         user_ref = db.collection("usage").document(f"{user_id}-{today}")
-        snap = await user_ref.get(transaction=tx)
-        n = (snap.to_dict() or {}).get("deep_count", 0)
-        if n >= settings.MAX_DEEP_TASKS_PER_USER_PER_DAY:
+        global_ref = db.collection("system").document(f"usage-{today}")
+        user_snap = await user_ref.get(transaction=tx)
+        global_snap = await global_ref.get(transaction=tx)
+        user_n = (user_snap.to_dict() or {}).get("deep_count", 0)
+        global_n = (global_snap.to_dict() or {}).get("deep_count", 0)
+        if user_n >= settings.MAX_DEEP_TASKS_PER_USER_PER_DAY:
             raise HTTPException(429, "Daily deep-task limit reached. Try again tomorrow.")
-        tx.set(user_ref, {"user_id": user_id, "date": today, "deep_count": n + 1}, merge=True)
+        if global_n >= settings.DAILY_GLOBAL_DEEP_CAP:
+            raise HTTPException(429, "Deep tasks are at capacity today. Try again tomorrow.")
+        tx.set(user_ref, {"user_id": user_id, "date": today, "deep_count": user_n + 1}, merge=True)
+        tx.set(global_ref, {"date": today, "deep_count": global_n + 1}, merge=True)
 
     await _bump(transaction)
 

@@ -197,7 +197,7 @@ export function AskFab() {
             ref={panelRef}
             data-no-refresh
             role="dialog"
-            aria-label="Ask AI"
+            aria-label="Clip AI"
             style={{
               // Drag offset + keyboard re-pin (offsetTop) compose into one translateY; when the
               // keyboard is open we also clamp the sheet's height to the visual viewport.
@@ -227,8 +227,8 @@ export function AskFab() {
       <button
         type="button"
         onClick={toggleChat}
-        aria-label={isOpen ? "Close Ask AI" : "Ask AI"}
-        title={isOpen ? "Close Ask AI" : "Ask AI"}
+        aria-label={isOpen ? "Close Clip AI" : "Clip AI"}
+        title={isOpen ? "Close Clip AI" : "Clip AI"}
         className={`fixed bottom-8 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 ${
           isOpen ? "hidden" : ""
         }`}

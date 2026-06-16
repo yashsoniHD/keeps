@@ -21,7 +21,7 @@ import json
 import logging
 import operator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote_plus
 
 from google.genai import types
@@ -47,7 +47,14 @@ you help them act on those notes. You have tools — use them, then answer in cl
 Tools:
 - search_notes: the user's saved notes. Your ONLY source of their saved facts. Call it first
   whenever the question is about what they saved. You may call it more than once with different
-  queries/filters.
+  queries/filters. Its filters:
+    · period — for time-bound questions ("today", "yesterday", "this week/month"): pass the
+      matching keyword (today|yesterday|this_week|last_week|this_month|recent). The date math is
+      done server-side in the user's timezone — you do NOT filter by date yourself.
+    · content_types — when the user names a type ("my recipes", "saved products").
+    · source — when they name where it came from ("my Pinterest notes", "from YouTube").
+    · exhaustive=true — for "all / every / how many / list everything" questions, so you get the
+      complete set instead of a top-K sample.
 - research_web: current/external facts NOT in their notes (prices, hours, papers, live rates).
   Never invent these — fetch them.
 - fetch_url: read a specific web page's content.
@@ -58,6 +65,10 @@ Tools:
 - author_note: draft a brand-new note from the conversation.
 
 Rules:
+- The "sample of recent notes" you may be given up front is only a NON-EXHAUSTIVE preview to help
+  you choose search_notes filters — it is NOT the answer set and is NOT filtered by date or type.
+  Never answer a "what did I save…" question straight from it; call search_notes (with the right
+  period/content_types/source/exhaustive) so the answer reflects the actual matching notes.
 - Ground saved-fact claims in search_notes results; use research_web for anything external.
   Never fabricate links, prices, or citations.
 - For "recommend X for this note" (e.g. hotels for a trip), FIRST search_notes to get the note's
@@ -335,12 +346,19 @@ async def dispatch(name: str, args: dict, ctx: AgentContext) -> dict:
 
 def _initial_contents(ctx: AgentContext) -> list[types.Content]:
     parts = []
+    # Tell the agent the user's local date so it can map "today"/"this week" to a period keyword.
+    local_now = ctx.now_utc + timedelta(minutes=ctx.tz_offset_minutes)
+    parts.append(f"The user's current local date is {local_now.strftime('%Y-%m-%d (%A)')}.")
     if ctx.memory_block:
         parts.append(f"Known about this user:\n{ctx.memory_block}")
     index = nr.dated_index(ctx.pool, ctx.tz_offset_minutes)
     if index:
-        parts.append("A sample of the user's recent notes (id · type · title):\n" + "\n".join(
-            f"- {n['id']} · {n['type']} · {n['title']}" for n in index[:30]))
+        parts.append(
+            "NON-EXHAUSTIVE preview of recent notes (id · saved-date · type · title) — for picking "
+            "search_notes filters only, NOT the answer set; call search_notes to actually answer:\n"
+            + "\n".join(
+                f"- {n['id']} · {n['saved'] or '?'} · {n['type']} · {n['title']}"
+                for n in index[:30]))
     if ctx.focal:
         parts.append(f'The user is currently viewing the note "{ctx.focal.get("title","")}" '
                      f'(id {ctx.focal.get("id")}). Treat it as the primary subject.')
@@ -373,13 +391,15 @@ async def run_agent(ctx: AgentContext):
         system_instruction=ASK_ORCHESTRATOR_SYSTEM,
         tools=[types.Tool(function_declarations=_tool_declarations())] if use_tools else None,
         temperature=0.3,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
 
     for round_i in range(ctx.max_rounds):
         # Force a final, tool-free answer on the last allowed round.
         last_round = round_i == ctx.max_rounds - 1
         config = tool_config if (use_tools and not last_round) else types.GenerateContentConfig(
-            system_instruction=ASK_ORCHESTRATOR_SYSTEM, temperature=0.3)
+            system_instruction=ASK_ORCHESTRATOR_SYSTEM, temperature=0.3,
+            thinking_config=types.ThinkingConfig(thinking_budget=0))
 
         call_parts: list = []  # ORIGINAL functionCall parts (preserve thought_signature)
         last_chunk = None
@@ -409,16 +429,24 @@ async def run_agent(ctx: AgentContext):
         # then run the tools and append their responses.
         contents.append(types.Content(role="model", parts=call_parts))
         response_parts = []
+        # Emit status events first so the UI shows all tools starting immediately.
         for part in call_parts:
             fc = part.function_call
-            args = dict(fc.args) if fc.args else {}
             label = "Searching your notes…" if fc.name == "search_notes" else (
                 "Building it…" if fc.name in ("build_artifact", "author_note") else (
                     "Checking the web…" if fc.name in _WEB_TOOLS else f"{fc.name}…"))
             yield {"type": ("agent" if fc.name in _SUBAGENTS else "tool"),
                    "name": fc.name, "status": label}
-            result = await dispatch(fc.name, args, ctx)
-            response_parts.append(types.Part.from_function_response(name=fc.name, response=result))
+        # Execute all tool calls concurrently — Gemini batches them in one turn precisely
+        # because they're safe to parallelize (no data dependency between them).
+        results = await asyncio.gather(*(
+            dispatch(part.function_call.name,
+                     dict(part.function_call.args) if part.function_call.args else {}, ctx)
+            for part in call_parts
+        ))
+        for part, result in zip(call_parts, results):
+            response_parts.append(
+                types.Part.from_function_response(name=part.function_call.name, response=result))
         contents.append(types.Content(role="user", parts=response_parts))
 
 

@@ -15,6 +15,17 @@ def _ctx(**kw):
     return at.AgentContext(**base)
 
 
+# ── initial contents (date + dated, labelled preview) ────────────────────────
+def test_initial_contents_injects_local_date_and_dated_preview():
+    pool = [{"id": "n1", "content_type": "recipe", "title": "Soup",
+             "ai_summary": "", "created_at": datetime(2026, 6, 16, tzinfo=timezone.utc)}]
+    ctx = _ctx(pool=pool, now_utc=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc))
+    text = at._initial_contents(ctx)[0].parts[0].text
+    assert "current local date is 2026-06-16" in text
+    assert "NON-EXHAUSTIVE preview" in text  # preview labelled, not the answer set
+    assert "2026-06-16 · recipe · Soup" in text  # saved-date is shown so dates are reasonable
+
+
 # ── leaf tools ──────────────────────────────────────────────────────────────
 
 def test_maps_link_encodes_place_and_locality():

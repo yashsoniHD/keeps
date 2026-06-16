@@ -4,10 +4,27 @@ import type { ReactNode } from "react";
 // "- " bullets, numbered lists, ### headings, **bold**/*italic*) straight to React
 // elements — no dangerouslySetInnerHTML (project hard rule), no parser dependency.
 
+// [label](url) — rendered as a real anchor only when the scheme is safe (http/https),
+// so a model-emitted javascript:/data: URI can never become a live link.
+const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/;
+
 function inline(text: string): ReactNode[] {
-  // Split on **bold** and *italic* spans; everything else passes through as text.
-  const tokens = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+  // Split on [link](url), **bold**, and *italic* spans; everything else is plain text.
+  const tokens = text.split(/(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|\*\*[^*]+\*\*|\*[^*]+\*)/g);
   return tokens.map((t, i) => {
+    const link = t.match(LINK_RE);
+    if (link)
+      return (
+        <a
+          key={i}
+          href={link[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-summary underline underline-offset-2 break-words"
+        >
+          {link[1]}
+        </a>
+      );
     if (t.startsWith("**") && t.endsWith("**") && t.length > 4)
       return <strong key={i}>{t.slice(2, -2)}</strong>;
     if (t.startsWith("*") && t.endsWith("*") && t.length > 2)

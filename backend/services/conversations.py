@@ -62,7 +62,12 @@ async def _enforce_conversation_cap(db, user_id: str) -> None:
     """Keep only the newest MAX_CONVERSATIONS_PER_USER and delete conversations older than
     CONVERSATION_TTL_DAYS. Runs when a new conversation is created (lazy cleanup, O(cap))."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.CONVERSATION_TTL_DAYS)
-    query = _conversations(db, user_id).order_by("updated_at", direction="DESCENDING")
+    # Cap the scan at 2× the conversation limit. With updated_at DESC ordering, items at
+    # position ≥ MAX are always overflow; stale items appear in the tail of that window too.
+    scan_limit = settings.MAX_CONVERSATIONS_PER_USER * 2
+    query = (_conversations(db, user_id)
+             .order_by("updated_at", direction="DESCENDING")
+             .limit(scan_limit))
     to_delete: list[str] = []
     i = 0
     async for doc in query.stream():

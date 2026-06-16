@@ -8,6 +8,7 @@ import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
 import type { Note } from "@/lib/types";
+import { analytics } from "@/lib/analytics";
 
 export const Route = createFileRoute("/notes/$noteId")({ component: NoteDetail });
 
@@ -41,6 +42,7 @@ function NoteDetail() {
           // Merge the private annotation (separate owner-only doc) onto the note.
           const userNote = await getAnnotation(noteId).catch(() => "");
           setNote({ ...n, user_note: userNote });
+          analytics.noteViewed(n.content_type);
         })
         .catch(() => setLoadError(true));
     }

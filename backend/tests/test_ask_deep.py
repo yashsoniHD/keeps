@@ -51,3 +51,12 @@ async def test_deep_daily_cap_blocks(fake_db, patch_deep):
         await ask_mod.ask_deep(AskRequest(question="x"), user_id="u")
     assert exc.value.status_code == 429
     assert patch_deep == []  # nothing enqueued when capped
+
+
+async def test_deep_global_cap_blocks(fake_db, patch_deep):
+    # A fresh user (no per-user count) is still blocked once the global kill-switch is hit.
+    fake_db.seed("system", f"usage-{TODAY}", {"deep_count": settings.DAILY_GLOBAL_DEEP_CAP})
+    with pytest.raises(HTTPException) as exc:
+        await ask_mod.ask_deep(AskRequest(question="x"), user_id="fresh-user")
+    assert exc.value.status_code == 429
+    assert patch_deep == []  # nothing enqueued when globally capped

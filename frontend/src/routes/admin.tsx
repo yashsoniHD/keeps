@@ -1,26 +1,174 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, RefreshCw, Users, FileText, Coins, AlertTriangle, Image } from "lucide-react";
+import {
+  ArrowLeft,
+  RefreshCw,
+  Users,
+  FileText,
+  Coins,
+  AlertTriangle,
+  Image,
+  TrendingUp,
+  MessageSquare,
+} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { adminStats, type AdminStats } from "@/lib/api";
+import { adminStats, type AdminStats, type DailyTrend } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/admin")({ component: AdminPage });
 
-// Mirror of backend ADMIN_EMAILS — purely to hide the page client-side. The real gate
-// is the server (verified Firebase email); this just avoids rendering a doomed fetch.
 export const ADMIN_EMAILS = new Set(["yashsoni102@gmail.com"]);
 
 const nf = new Intl.NumberFormat("en-US");
 const fmt = (n: number) => nf.format(n);
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const inr = (n: number) => `₹${nf.format(Math.round(n))}`;
+const usdSmall = (n: number) =>
+  n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`;
 
 function fmtDate(ms: number | null): string {
   if (!ms) return "—";
-  const d = new Date(ms);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
+
+function fmtDay(yyyymmdd: string): string {
+  const y = yyyymmdd.slice(0, 4);
+  const m = yyyymmdd.slice(4, 6);
+  const d = yyyymmdd.slice(6, 8);
+  return new Date(`${y}-${m}-${d}`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+// ─── Mini bar chart (pure SVG, no dependencies) ─────────────────────────────
+
+function MiniBarChart({
+  values,
+  colorClass = "fill-ink/30",
+  accentClass = "fill-ink",
+}: {
+  values: number[];
+  colorClass?: string;
+  accentClass?: string;
+}) {
+  const max = Math.max(...values, 1);
+  const n = values.length;
+  const barW = 100 / n;
+  const gap = 0.6;
+  return (
+    <svg
+      viewBox="0 0 100 28"
+      preserveAspectRatio="none"
+      className="h-7 w-full"
+      aria-hidden
+    >
+      {values.map((v, i) => {
+        const h = Math.max((v / max) * 26, v > 0 ? 1.5 : 0);
+        const isToday = i === n - 1;
+        return (
+          <rect
+            key={i}
+            x={i * barW + gap}
+            y={28 - h}
+            width={barW - gap * 2}
+            height={h}
+            rx={1.5}
+            className={isToday ? accentClass : colorClass}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── Trend card: metric + sparkbar + date range ──────────────────────────────
+
+function TrendCard({
+  label,
+  trend,
+  getValue,
+  formatTotal,
+  colorClass,
+  accentClass,
+  icon: Icon,
+}: {
+  label: string;
+  trend: DailyTrend[];
+  getValue: (d: DailyTrend) => number;
+  formatTotal: (total: number) => string;
+  colorClass?: string;
+  accentClass?: string;
+  icon?: typeof TrendingUp;
+}) {
+  const values = trend.map(getValue);
+  const total = values.reduce((s, v) => s + v, 0);
+  const todayVal = values[values.length - 1] ?? 0;
+  const peak = Math.max(...values);
+  return (
+    <div className="rounded-3xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+          {Icon && <Icon className="h-3.5 w-3.5" />}
+          {label}
+        </div>
+        <span className="text-xs text-ink-soft">30d</span>
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2">
+        <div>
+          <div className="font-serif text-2xl tabular-nums text-ink">
+            {formatTotal(total)}
+          </div>
+          <div className="mt-0.5 text-xs text-ink-soft">
+            {formatTotal(todayVal)} today · peak {formatTotal(peak)}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3">
+        <MiniBarChart
+          values={values}
+          colorClass={colorClass}
+          accentClass={accentClass}
+        />
+        <div className="mt-1 flex justify-between text-[10px] text-ink-soft/60">
+          <span>{trend.length ? fmtDay(trend[0].date) : ""}</span>
+          <span>today</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Stat card ───────────────────────────────────────────────────────────────
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+}: {
+  icon?: typeof Users;
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-border bg-card p-4">
+      <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+        {Icon && <Icon className="h-3.5 w-3.5" />}
+        {label}
+      </div>
+      <div className="mt-2 font-serif text-2xl tabular-nums text-ink">{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-ink-soft">{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 function AdminPage() {
   const { user, loading } = useAuth();
@@ -37,9 +185,7 @@ function AdminPage() {
       navigate({ to: "/login" });
       return;
     }
-    if (!isAdmin) {
-      navigate({ to: "/" });
-    }
+    if (!isAdmin) navigate({ to: "/" });
   }, [user, loading, isAdmin, navigate]);
 
   const load = () => {
@@ -57,9 +203,12 @@ function AdminPage() {
 
   if (loading || !user || !isAdmin) return null;
 
+  const t = stats?.totals;
+
   return (
     <AppShell>
       <div className="mx-auto max-w-5xl px-4 py-8 md:px-6">
+        {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <Link
             to="/"
@@ -79,7 +228,7 @@ function AdminPage() {
           </button>
         </div>
 
-        <h1 className="mt-4 font-serif text-3xl text-ink">Admin</h1>
+        <h1 className="mt-4 font-serif text-3xl text-ink">Observability</h1>
         {stats && (
           <p className="mt-1 text-sm text-ink-soft">
             As of {new Date(stats.generated_at).toLocaleString()}
@@ -95,49 +244,100 @@ function AdminPage() {
 
         {!stats && !error && <p className="mt-8 text-sm text-ink-soft">Loading…</p>}
 
-        {stats && (
+        {stats && t && (
           <>
-            {/* Summary cards */}
+            {/* ── Key metrics ── */}
             <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
               <StatCard
                 icon={Users}
                 label="Users"
-                value={fmt(stats.totals.users)}
-                sub={`${fmt(stats.totals.active_7d)} active · 7d`}
+                value={fmt(t.users)}
+                sub={`${fmt(t.active_7d)} active · 7d`}
               />
               <StatCard
                 icon={FileText}
                 label="Notes"
-                value={fmt(stats.totals.notes)}
-                sub={`${fmt(stats.totals.notes_today)} today`}
+                value={fmt(t.notes)}
+                sub={`${fmt(t.notes_today)} today`}
               />
               <StatCard
                 icon={Coins}
                 label="Total cost"
-                value={inr(stats.totals.cost_inr)}
-                sub={usd(stats.totals.cost_usd)}
+                value={inr(t.cost_inr)}
+                sub={usd(t.cost_usd)}
               />
               <StatCard
                 icon={AlertTriangle}
                 label="Failed jobs"
-                value={fmt(stats.totals.jobs_failed)}
-                sub={`of ${fmt(stats.totals.jobs)} jobs`}
+                value={fmt(t.jobs_failed)}
+                sub={`of ${fmt(t.jobs)} jobs`}
               />
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <StatCard label="Active · 30d" value={fmt(stats.totals.active_30d)} />
-              <StatCard label="Tokens" value={fmt(stats.totals.tokens)} />
-              <StatCard label="Asks today" value={fmt(stats.totals.asks_today)} />
+              <StatCard label="Active · 30d" value={fmt(t.active_30d)} />
+              <StatCard
+                icon={Coins}
+                label="Cost / note"
+                value={usdSmall(t.cost_per_note_usd)}
+                sub={`₹${(t.cost_per_note_usd * 84).toFixed(2)} / note`}
+              />
+              <StatCard
+                icon={MessageSquare}
+                label="Asks today"
+                value={fmt(t.asks_today)}
+              />
               <StatCard
                 icon={Image}
                 label="AI covers"
-                value={fmt(stats.totals.images)}
-                sub={`${fmt(stats.totals.images_today)} today`}
+                value={fmt(t.images)}
+                sub={`${fmt(t.images_today)} today`}
               />
             </div>
 
-            {/* Per-user table */}
+            {/* ── 30-day trend charts ── */}
+            {stats.daily_trend.length > 0 && (
+              <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <TrendCard
+                  icon={FileText}
+                  label="Notes saved"
+                  trend={stats.daily_trend}
+                  getValue={(d) => d.notes}
+                  formatTotal={(v) => fmt(v)}
+                  colorClass="fill-ink/20"
+                  accentClass="fill-ink/70"
+                />
+                <TrendCard
+                  icon={MessageSquare}
+                  label="Clip AI asks"
+                  trend={stats.daily_trend}
+                  getValue={(d) => d.asks}
+                  formatTotal={(v) => fmt(v)}
+                  colorClass="fill-itinerary/30"
+                  accentClass="fill-itinerary"
+                />
+                <TrendCard
+                  icon={Coins}
+                  label="Daily spend"
+                  trend={stats.daily_trend}
+                  getValue={(d) => d.cost_usd}
+                  formatTotal={(v) => (v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(3)}`)}
+                  colorClass="fill-product/30"
+                  accentClass="fill-product"
+                />
+                <TrendCard
+                  icon={TrendingUp}
+                  label="Notes + asks"
+                  trend={stats.daily_trend}
+                  getValue={(d) => d.notes + d.asks}
+                  formatTotal={(v) => fmt(v)}
+                  colorClass="fill-recipe/30"
+                  accentClass="fill-recipe"
+                />
+              </div>
+            )}
+
+            {/* ── Per-user table ── */}
             <div className="mt-8 overflow-hidden rounded-3xl border border-border bg-card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -179,7 +379,9 @@ function AdminPage() {
                           {inr(u.cost_inr)}
                           <div className="text-[10px] text-ink-soft">{usd(u.cost_usd)}</div>
                         </td>
-                        <td className="px-4 py-3 text-xs text-ink-soft">{fmtDate(u.created_at)}</td>
+                        <td className="px-4 py-3 text-xs text-ink-soft">
+                          {fmtDate(u.created_at)}
+                        </td>
                         <td className="px-4 py-3 text-center">
                           {u.active_7d ? (
                             <span
@@ -217,28 +419,5 @@ function AdminPage() {
         )}
       </div>
     </AppShell>
-  );
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-}: {
-  icon?: typeof Users;
-  label: string;
-  value: string;
-  sub?: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-border bg-card p-4">
-      <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
-        {Icon && <Icon className="h-3.5 w-3.5" />}
-        {label}
-      </div>
-      <div className="mt-2 font-serif text-2xl text-ink tabular-nums">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-ink-soft">{sub}</div>}
-    </div>
   );
 }

@@ -117,7 +117,39 @@ async def admin_stats(_: str = Depends(require_admin)):
     jobs_failed = (
         await db.collection("jobs").where("status", "==", "failed").count().get()
     )[0][0].value
-    sys_today = (await db.collection("system").document(f"usage-{today}").get()).to_dict() or {}
+
+    # 30-day daily trend from system/usage-{YYYYMMDD} rollup docs.
+    trend_docs: dict[str, dict] = {}
+    async for doc in db.collection("system").where("date", ">=", d30).stream():
+        d_data = doc.to_dict() or {}
+        date_key = d_data.get("date", "")
+        if date_key:
+            trend_docs[date_key] = d_data
+
+    daily_trend = []
+    for i in range(29, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y%m%d")
+        d_data = trend_docs.get(day, {})
+        notes_d = d_data.get("note_count", 0)
+        asks_d = d_data.get("ask_count", 0)
+        images_d = d_data.get("image_count", 0)
+        daily_cost = _cost_usd(
+            d_data.get("tok_tokens_in_main", 0),
+            d_data.get("tok_tokens_out_main", 0),
+            d_data.get("tok_tokens_in_lite", 0),
+            d_data.get("tok_tokens_out_lite", 0),
+            images_d,
+        )
+        daily_trend.append({
+            "date": day,
+            "notes": notes_d,
+            "asks": asks_d,
+            "images": images_d,
+            "cost_usd": round(daily_cost, 4),
+        })
+
+    sys_today = trend_docs.get(today, {})
+    cost_per_note = total_cost / total_notes if total_notes > 0 else 0
 
     return {
         "generated_at": now.isoformat(),
@@ -130,6 +162,7 @@ async def admin_stats(_: str = Depends(require_admin)):
             "images": total_images,
             "cost_usd": round(total_cost, 2),
             "cost_inr": round(total_cost * settings.USD_TO_INR, 2),
+            "cost_per_note_usd": round(cost_per_note, 4),
             "jobs": jobs_total,
             "jobs_failed": jobs_failed,
             "notes_today": sys_today.get("note_count", 0),
@@ -137,5 +170,6 @@ async def admin_stats(_: str = Depends(require_admin)):
             "images_today": sys_today.get("image_count", 0),
         },
         "pricing_note": "Cost uses configured Gemini + Imagen prices — verify GEMINI_PRICE_* and IMAGEN_PRICE_PER_IMAGE against live Vertex pricing.",
+        "daily_trend": daily_trend,
         "users": per_user,
     }
