@@ -417,6 +417,8 @@ class GeminiService:
             text_prompt.append(f"Source title: {meta['title']}")
         if meta.get("author"):
             text_prompt.append(f"Author/creator: {meta['author']}")
+        if meta.get("description"):
+            text_prompt.append(f"Video description (may contain links and key details):\n{meta['description']}")
         if bundle.structured:
             text_prompt.append(
                 "JSON-LD ground truth from the page (authoritative for exact values):\n"
@@ -425,7 +427,13 @@ class GeminiService:
         if bundle.text:
             text_prompt.append(f"Content:\n{bundle.text[:28000]}")
         if bundle.video_uri:
-            text_prompt.append("Analyze the attached video fully (visuals, on-screen text, and speech).")
+            text_prompt.append(
+                "Analyze the attached video fully (visuals, on-screen text, and speech). "
+                + ("Also use the video description above — it may contain buy links, "
+                   "key specs, or details not mentioned in the video itself. "
+                   if meta.get("description") else "")
+                + "Extract all relevant information."
+            )
         if bundle.image_parts:
             n = len(bundle.image_parts)
             text_prompt.append(
@@ -491,6 +499,7 @@ class GeminiService:
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         system_instruction=ASK_PLAN_SYSTEM,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
                     ),
                 )
                 record_usage(settings.GEMINI_LITE_MODEL, response)

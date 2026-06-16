@@ -115,7 +115,7 @@ async def acquire(url: str) -> ContentBundle:
         "author": info.get("uploader") or info.get("creator"),
         "platform": "youtube",
         "duration": duration,
-        "description": (info.get("description") or "")[:1000],
+        "description": (info.get("description") or "")[:4000],
     }
     images = [t for t in [info.get("thumbnail")] if t]
 
