@@ -7,7 +7,7 @@ user leave and resume. Reads/writes go through the backend (Firestore rules forb
 writes to user docs), so the frontend uses the conversations router, not onSnapshot.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from config import settings
 from services.firebase import firestore_safe
@@ -59,12 +59,22 @@ async def persist_exchange(db, user_id: str, conversation_id: str | None,
 
 
 async def _enforce_conversation_cap(db, user_id: str) -> None:
-    """Keep only the newest MAX_CONVERSATIONS_PER_USER; delete the overflow (oldest first).
-    Runs only when a brand-new conversation is created, so it's an O(cap) sweep, rarely."""
+    """Keep only the newest MAX_CONVERSATIONS_PER_USER and delete conversations older than
+    CONVERSATION_TTL_DAYS. Runs when a new conversation is created (lazy cleanup, O(cap))."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.CONVERSATION_TTL_DAYS)
     query = _conversations(db, user_id).order_by("updated_at", direction="DESCENDING")
-    ids = [doc.id async for doc in query.stream()]
-    for stale_id in ids[settings.MAX_CONVERSATIONS_PER_USER:]:
-        await _conversations(db, user_id).document(stale_id).delete()
+    to_delete: list[str] = []
+    i = 0
+    async for doc in query.stream():
+        d = doc.to_dict() or {}
+        updated_at = d.get("updated_at")
+        is_overflow = i >= settings.MAX_CONVERSATIONS_PER_USER
+        is_stale = updated_at is not None and updated_at < cutoff
+        if is_overflow or is_stale:
+            to_delete.append(doc.id)
+        i += 1
+    for cid in to_delete:
+        await _conversations(db, user_id).document(cid).delete()
 
 
 async def list_conversations(db, user_id: str, limit: int = 50) -> list[dict]:

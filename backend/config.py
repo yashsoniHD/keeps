@@ -84,9 +84,16 @@ class Settings:
     DEEP_MAX_ROUNDS: int = int(os.getenv("DEEP_MAX_ROUNDS", "8"))
     DEEP_MAX_NOTES: int = int(os.getenv("DEEP_MAX_NOTES", "40"))
     MAX_DEEP_TASKS_PER_USER_PER_DAY: int = int(os.getenv("MAX_DEEP_TASKS_PER_USER_PER_DAY", "5"))
+    # Global daily kill-switch on deep tasks — the most expensive path (multi-round, 40 notes).
+    # Without it a per-user cap alone leaves total spend unbounded as users scale; this protects
+    # the budget the same way DAILY_GLOBAL_ASK_CAP does for interactive asks.
+    DAILY_GLOBAL_DEEP_CAP: int = int(os.getenv("DAILY_GLOBAL_DEEP_CAP", "50"))
     # Persistent chat history (cross-session conversations).
-    MAX_CONVERSATIONS_PER_USER: int = int(os.getenv("MAX_CONVERSATIONS_PER_USER", "100"))
+    # Cap: oldest conversations are pruned when the user exceeds this limit.
+    # TTL: conversations not updated within this many days are auto-deleted.
+    MAX_CONVERSATIONS_PER_USER: int = int(os.getenv("MAX_CONVERSATIONS_PER_USER", "20"))
     MAX_CONVERSATION_MESSAGES: int = int(os.getenv("MAX_CONVERSATION_MESSAGES", "100"))
+    CONVERSATION_TTL_DAYS: int = int(os.getenv("CONVERSATION_TTL_DAYS", "30"))
 
     # Direct-URI video analysis cap. YouTube videos longer than this fall back to the
     # transcript path instead of being sent to Gemini whole.

@@ -33,6 +33,7 @@ import {
   setOnboardingDone,
 } from "@/lib/firestore";
 import { ingest, searchNotes } from "@/lib/api";
+import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
   isQueueableError,
@@ -220,6 +221,7 @@ function Feed() {
     setTimeout(() => setOptimistic((prev) => prev.filter((o) => o.id !== tempId)), 120_000);
     try {
       await ingest(url);
+      analytics.noteSaved();
     } catch (e) {
       setOptimistic((prev) => prev.filter((o) => o.id !== tempId));
       if (isQueueableError(e)) {
@@ -399,26 +401,28 @@ function Feed() {
                   placeholder="Search your notes"
                   className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
                 />
-                {/* Visible the moment the bar opens, not gated on a typed query — an empty
-                    query lands on the Ask AI page's idle state (nothing auto-sent).
+                {/* Only reveal the Clip AI button after the user has typed at least one
+                    character — an empty search bar shouldn't suggest AI immediately.
                     onMouseDown.preventDefault keeps the input from blurring (which would
                     collapse the bar) before the click navigates. */}
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    // Hand the typed query to the global Ask-AI overlay (seeds + auto-sends).
-                    openChat(query.trim() || undefined);
-                    setQuery("");
-                    setSearchOpen(false);
-                  }}
-                  aria-label="Ask AI"
-                  title="Ask AI"
-                  className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
-                >
-                  <WandSparkles className="h-4 w-4" />
-                  Ask AI
-                </button>
+                {query.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      // Hand the typed query to the global Ask-AI overlay (seeds + auto-sends).
+                      openChat(query.trim());
+                      setQuery("");
+                      setSearchOpen(false);
+                    }}
+                    aria-label="Clip AI"
+                    title="Clip AI"
+                    className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
+                  >
+                    <WandSparkles className="h-4 w-4" />
+                    Clip AI
+                  </button>
+                )}
               </div>
               <button
                 type="button"

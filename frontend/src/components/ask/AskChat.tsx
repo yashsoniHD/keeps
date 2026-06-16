@@ -7,6 +7,7 @@ import {
   Check,
   Clock,
   Loader2,
+  MessageSquare,
   NotebookText,
   Search,
   Trash2,
@@ -14,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useChatSession } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
 import { watchJob, watchNotes } from "@/lib/firestore";
 import {
@@ -27,25 +29,14 @@ import {
   saveConsolidatedNote,
   type AskArtifact,
   type AskCitation,
+  type ChatMessage,
   type ConversationSummary,
 } from "@/lib/api";
 import { GenericNote } from "@/components/note/templates/GenericNote";
 import { renderMarkdown } from "@/lib/markdown";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
 import type { Note } from "@/lib/types";
-
-interface Message {
-  role: "user" | "assistant";
-  text: string;
-  citations?: AskCitation[];
-  coverage?: string | null;
-  artifact?: AskArtifact | null;
-  // Deep async task: a background job whose result note is surfaced when it completes.
-  pending?: boolean;
-  jobId?: string;
-  resultNoteId?: string | null;
-  failed?: boolean;
-}
+import { analytics } from "@/lib/analytics";
 
 // Heuristic: route obviously-heavy, whole-corpus synthesis requests to the background
 // (deep) worker instead of the bounded interactive stream. Conservative on purpose —
@@ -99,6 +90,59 @@ function CitationChip({
     </Link>
   );
 }
+
+// ──────────────────────────── chat history helpers ────────────────────────────
+
+function toDate(ts: ConversationSummary["updated_at"]): Date | null {
+  if (!ts) return null;
+  if (typeof ts === "string") return new Date(ts);
+  if (typeof ts === "object" && "seconds" in ts) return new Date(ts.seconds * 1000);
+  return null;
+}
+
+function formatConvoTime(ts: ConversationSummary["updated_at"]): string {
+  const d = toDate(ts);
+  if (!d || isNaN(d.getTime())) return "";
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(diff / 3_600_000);
+  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 48) return "Yesterday";
+  const days = Math.floor(diff / 86_400_000);
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+type ConvoGroup = { label: string; items: ConversationSummary[] };
+
+function groupConversations(convos: ConversationSummary[]): ConvoGroup[] {
+  const now = Date.now();
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const startOfYesterday = startOfToday - 86_400_000;
+  const startOfWeek = startOfToday - 6 * 86_400_000;
+
+  const groups: ConvoGroup[] = [
+    { label: "Today", items: [] },
+    { label: "Yesterday", items: [] },
+    { label: "Last 7 days", items: [] },
+    { label: "Older", items: [] },
+  ];
+
+  for (const c of convos) {
+    const d = toDate(c.updated_at);
+    const t = d ? d.getTime() : now - 1; // missing date → treat as recent but not "today"
+    if (t >= startOfToday) groups[0].items.push(c);
+    else if (t >= startOfYesterday) groups[1].items.push(c);
+    else if (t >= startOfWeek) groups[2].items.push(c);
+    else groups[3].items.push(c);
+  }
+
+  return groups.filter((g) => g.items.length > 0);
+}
+
+// ──────────────────────────── artifact card ────────────────────────────
 
 // A consolidated artifact (itinerary/meal plan/comparison/…) rendered with the same
 // block components as a real note. Offers "Save as note" and — when the chat is open on a
@@ -230,20 +274,27 @@ export function AskChat({
 }) {
   useCategoryMeta(); // reflect category icon/colour overrides on citation chips
   const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
+  // The conversation (messages + server id + reference scope) is owned by AskProvider so it
+  // survives this component unmounting when the panel closes — see ask-context.tsx. It clears
+  // only on an explicit "New chat" (resetChat) or a page refresh.
+  const {
+    messages,
+    setMessages,
+    conversationId,
+    setConversationId,
+    selectedScope: selected,
+    setSelectedScope: setSelected,
+    resetChat,
+  } = useChatSession();
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null); // live agent activity ("Searching your notes…")
   const [slowLabel, setSlowLabel] = useState<string | null>(null); // rotating "Thinking…" while a reply is slow
   const [error, setError] = useState<string | null>(null);
   const watchedJobs = useRef<Set<string>>(new Set()); // deep-task job ids already subscribed
-  // Persistent chat history: the active conversation id (server-minted on first message),
-  // plus the history-drawer state.
-  const [conversationId, setConversationId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  // Reference scope: explicit notes the user picked to ground the chat on (overrides default).
-  const [selected, setSelected] = useState<{ id: string; title: string }[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerNotes, setPickerNotes] = useState<Note[]>([]);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -349,6 +400,7 @@ export function AskChat({
   const send = async (raw: string, replaceLast = false) => {
     const question = raw.trim();
     if (!question || sending) return;
+    analytics.askSubmitted();
     const base = replaceLast ? messages.slice(0, -1) : messages;
     const history = base.map(({ role, text }) => ({ role, text })).slice(-10);
 
@@ -388,7 +440,7 @@ export function AskChat({
     setSending(true);
 
     // Mutate only the trailing assistant message as events arrive.
-    const patchLast = (patch: Partial<Message>) =>
+    const patchLast = (patch: Partial<ChatMessage>) =>
       setMessages((m) => {
         if (!m.length) return m;
         const last = m[m.length - 1];
@@ -440,19 +492,21 @@ export function AskChat({
   };
 
   const startNewChat = () => {
-    setMessages([]);
+    resetChat(); // clears messages + conversation id + reference scope (owned by the context)
     setError(null);
-    setConversationId(null);
     setHistoryOpen(false);
     inputRef.current?.focus();
   };
 
   const openHistory = async () => {
     setHistoryOpen(true);
+    setHistoryLoading(true);
     try {
       setConversations(await listConversations());
     } catch {
       /* a failed history load just shows an empty list */
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -522,32 +576,59 @@ export function AskChat({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {conversations.length === 0 ? (
-              <p className="px-3 py-10 text-center text-sm text-ink-soft">No saved chats yet.</p>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-5 w-5 animate-spin text-ink-soft" />
+              </div>
+            ) : conversations.length === 0 ? (
+              <div className="flex flex-col items-center py-14 text-center">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-ink-soft">
+                  <MessageSquare className="h-5 w-5" />
+                </span>
+                <p className="mt-3 text-sm font-medium text-ink">No saved chats yet</p>
+                <p className="mt-1 text-xs text-ink-soft">Your conversations will appear here.</p>
+              </div>
             ) : (
-              conversations.map((c) => (
-                <div
-                  key={c.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => resumeConversation(c.id)}
-                  onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
-                  className={`group flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent ${
-                    c.id === conversationId ? "bg-accent" : ""
-                  }`}
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm text-ink">{c.title}</span>
-                  <button
-                    type="button"
-                    aria-label="Delete chat"
-                    onClick={(e) => removeConversation(c.id, e)}
-                    className="shrink-0 text-ink-soft opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))
+              <div className="p-2">
+                {groupConversations(conversations).map((group) => (
+                  <div key={group.label} className="mb-1">
+                    <p className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-ink-soft/70">
+                      {group.label}
+                    </p>
+                    {group.items.map((c) => (
+                      <div
+                        key={c.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => resumeConversation(c.id)}
+                        onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
+                        className={`group flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent ${
+                          c.id === conversationId ? "bg-accent" : ""
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-ink">{c.title}</span>
+                          {c.updated_at && (
+                            <span className="block text-[11px] text-ink-soft">
+                              {formatConvoTime(c.updated_at)}
+                            </span>
+                          )}
+                        </span>
+                        {/* Always visible on mobile (no hover), hover-only on desktop */}
+                        <button
+                          type="button"
+                          aria-label="Delete chat"
+                          onClick={(e) => removeConversation(c.id, e)}
+                          className="shrink-0 text-ink-soft opacity-100 transition-opacity hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -566,7 +647,7 @@ export function AskChat({
           <WandSparkles className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-serif text-lg leading-tight text-ink">Ask AI</p>
+          <p className="truncate font-serif text-lg leading-tight text-ink">Clip AI</p>
           {noteTitle && (
             <p className="truncate text-[11px] text-ink-soft">Asking about: {noteTitle}</p>
           )}
