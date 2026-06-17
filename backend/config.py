@@ -158,6 +158,8 @@ class Settings:
     GEMINI_PRICE_OUT: float = float(os.getenv("GEMINI_PRICE_OUT", "9.00"))
     GEMINI_LITE_PRICE_IN: float = float(os.getenv("GEMINI_LITE_PRICE_IN", "0.25"))
     GEMINI_LITE_PRICE_OUT: float = float(os.getenv("GEMINI_LITE_PRICE_OUT", "1.50"))
+    # text-embedding-005 on Vertex AI: ~$0.025/1M tokens (input only; no output).
+    EMBED_PRICE_IN: float = float(os.getenv("EMBED_PRICE_IN", "0.025"))
     USD_TO_INR: float = float(os.getenv("USD_TO_INR", "84.0"))
 
 

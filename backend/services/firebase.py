@@ -201,19 +201,20 @@ async def ensure_user_doc(uid: str, *, display_name: str | None = None,
         await get_db().collection("users").document(uid).set(doc, merge=True)
 
 
-def _split_by_tier(meter: UsageMeter) -> tuple[int, int, int, int]:
-    """Collapse per-model token totals into (main_in, main_out, lite_in, lite_out).
-    Anything that isn't the lite model is billed at main rates (the main model also
-    serves the search-grounded salvage path)."""
-    main_in = main_out = lite_in = lite_out = 0
+def _split_by_tier(meter: UsageMeter) -> tuple[int, int, int, int, int]:
+    """Collapse per-model token totals into (main_in, main_out, lite_in, lite_out, embed_in).
+    Embed model is input-only (no candidates); anything else billed at main rates."""
+    main_in = main_out = lite_in = lite_out = embed_in = 0
     for model, (tin, tout) in meter.by_model.items():
         if model == settings.GEMINI_LITE_MODEL:
             lite_in += tin
             lite_out += tout
+        elif model == settings.EMBED_MODEL:
+            embed_in += tin
         else:
             main_in += tin
             main_out += tout
-    return main_in, main_out, lite_in, lite_out
+    return main_in, main_out, lite_in, lite_out, embed_in
 
 
 async def flush_usage(user_id: str, meter: UsageMeter) -> None:
@@ -224,12 +225,13 @@ async def flush_usage(user_id: str, meter: UsageMeter) -> None:
     a flush failure must never fail the underlying capture/ask."""
     if meter is None or meter.calls == 0:
         return
-    main_in, main_out, lite_in, lite_out = _split_by_tier(meter)
+    main_in, main_out, lite_in, lite_out, embed_in = _split_by_tier(meter)
     fields = {
         "tokens_in_main": Increment(main_in),
         "tokens_out_main": Increment(main_out),
         "tokens_in_lite": Increment(lite_in),
         "tokens_out_lite": Increment(lite_out),
+        "tokens_in_embed": Increment(embed_in),
         "ai_calls": Increment(meter.calls),
     }
     today = datetime.now(timezone.utc).strftime("%Y%m%d")

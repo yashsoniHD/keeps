@@ -34,7 +34,10 @@ async def require_admin(authorization: str | None = Header(default=None)) -> str
     return claims["uid"]
 
 
-def _cost_usd(ti_main: int, to_main: int, ti_lite: int, to_lite: int, images: int = 0) -> float:
+def _cost_usd(
+    ti_main: int, to_main: int, ti_lite: int, to_lite: int,
+    images: int = 0, ti_embed: int = 0,
+) -> float:
     """Per-tier token totals (+ generated images) → USD, using config prices
     (tokens priced per 1M; images per-image)."""
     token_cost = (
@@ -42,6 +45,7 @@ def _cost_usd(ti_main: int, to_main: int, ti_lite: int, to_lite: int, images: in
         + to_main * settings.GEMINI_PRICE_OUT
         + ti_lite * settings.GEMINI_LITE_PRICE_IN
         + to_lite * settings.GEMINI_LITE_PRICE_OUT
+        + ti_embed * settings.EMBED_PRICE_IN
     ) / 1_000_000
     return token_cost + images * settings.IMAGEN_PRICE_PER_IMAGE
 
@@ -82,8 +86,9 @@ async def admin_stats(_: str = Depends(require_admin)):
         to_main = prof.get("lifetime_tokens_out_main", 0)
         ti_lite = prof.get("lifetime_tokens_in_lite", 0)
         to_lite = prof.get("lifetime_tokens_out_lite", 0)
+        ti_embed = prof.get("lifetime_tokens_in_embed", 0)
         images = prof.get("lifetime_images", 0)
-        cost = _cost_usd(ti_main, to_main, ti_lite, to_lite, images)
+        cost = _cost_usd(ti_main, to_main, ti_lite, to_lite, images, ti_embed)
         tokens = ti_main + to_main + ti_lite + to_lite
         total_cost += cost
         total_tokens += tokens
@@ -139,6 +144,7 @@ async def admin_stats(_: str = Depends(require_admin)):
             d_data.get("tok_tokens_in_lite", 0),
             d_data.get("tok_tokens_out_lite", 0),
             images_d,
+            d_data.get("tok_tokens_in_embed", 0),
         )
         daily_trend.append({
             "date": day,

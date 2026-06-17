@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 
 from config import settings
+from services.usage_meter import record_usage
 
 log = logging.getLogger("clipnote.embeddings")
 
@@ -40,6 +41,7 @@ class EmbeddingService:
                 output_dimensionality=settings.EMBED_DIM,
             ),
         )
+        record_usage(settings.EMBED_MODEL, resp)
         return list(resp.embeddings[0].values)
 
     async def embed_document(self, text: str) -> list[float]:
