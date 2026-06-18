@@ -298,8 +298,10 @@ export function AskChat({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerNotes, setPickerNotes] = useState<Note[]>([]);
   const [pickerQuery, setPickerQuery] = useState("");
-  const [longPressId, setLongPressId] = useState<string | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<{ id: string; x: number } | null>(null);
+  const swipeTouchStart = useRef<{ x: number; y: number } | null>(null);
+  const SWIPE_REVEAL = 68;
 
   // Load the user's notes only when the picker is opened; live so new notes appear.
   useEffect(() => {
@@ -598,40 +600,77 @@ export function AskChat({
                     <p className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-ink-soft/70">
                       {group.label}
                     </p>
-                    {group.items.map((c) => (
-                      <div
-                        key={c.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => { setLongPressId(null); resumeConversation(c.id); }}
-                        onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
-                        onContextMenu={(e) => { e.preventDefault(); setLongPressId(c.id === longPressId ? null : c.id); }}
-                        onTouchStart={() => { longPressTimer.current = setTimeout(() => setLongPressId(c.id), 500); }}
-                        onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-                        onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-                        className={`group flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent ${
-                          c.id === conversationId ? "bg-accent" : ""
-                        }`}
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm text-ink">{c.title}</span>
-                          {c.updated_at && (
-                            <span className="block text-[11px] text-ink-soft">
-                              {formatConvoTime(c.updated_at)}
+                    {group.items.map((c) => {
+                      const tx = drag?.id === c.id ? drag.x : swipedId === c.id ? -SWIPE_REVEAL : 0;
+                      const isOpen = swipedId === c.id && drag?.id !== c.id;
+                      return (
+                        <div key={c.id} className="relative overflow-hidden rounded-xl">
+                          {/* Delete zone revealed behind the sliding row */}
+                          <button
+                            type="button"
+                            aria-label="Delete chat"
+                            onClick={(e) => { e.stopPropagation(); removeConversation(c.id, e); setSwipedId(null); }}
+                            className="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 text-white"
+                            style={{ width: SWIPE_REVEAL }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+
+                          {/* Sliding row */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            style={{
+                              transform: `translateX(${tx}px)`,
+                              transition: drag?.id === c.id ? 'none' : 'transform 0.2s ease-out',
+                              touchAction: 'pan-y',
+                            }}
+                            onClick={() => { if (isOpen) { setSwipedId(null); return; } resumeConversation(c.id); }}
+                            onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
+                            onTouchStart={(e) => {
+                              if (swipedId && swipedId !== c.id) setSwipedId(null);
+                              swipeTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                              setDrag({ id: c.id, x: swipedId === c.id ? -SWIPE_REVEAL : 0 });
+                            }}
+                            onTouchMove={(e) => {
+                              if (!swipeTouchStart.current || drag?.id !== c.id) return;
+                              const dx = e.touches[0].clientX - swipeTouchStart.current.x;
+                              const dy = e.touches[0].clientY - swipeTouchStart.current.y;
+                              if (Math.abs(dy) > Math.abs(dx) + 4) { setDrag(null); return; }
+                              const base = swipedId === c.id ? -SWIPE_REVEAL : 0;
+                              setDrag({ id: c.id, x: Math.max(-SWIPE_REVEAL, Math.min(0, base + dx)) });
+                            }}
+                            onTouchEnd={() => {
+                              if (!drag || drag.id !== c.id) return;
+                              setSwipedId(drag.x < -SWIPE_REVEAL / 2 ? c.id : null);
+                              setDrag(null);
+                              swipeTouchStart.current = null;
+                            }}
+                            className={`group flex w-full cursor-pointer items-center gap-2 rounded-xl bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent ${
+                              c.id === conversationId ? "bg-accent" : ""
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm text-ink">{c.title}</span>
+                              {c.updated_at && (
+                                <span className="block text-[11px] text-ink-soft">
+                                  {formatConvoTime(c.updated_at)}
+                                </span>
+                              )}
                             </span>
-                          )}
-                        </span>
-                        {/* Hover-only on desktop; long-press-revealed on mobile */}
-                        <button
-                          type="button"
-                          aria-label="Delete chat"
-                          onClick={(e) => { removeConversation(c.id, e); setLongPressId(null); }}
-                          className={`shrink-0 text-ink-soft transition-opacity hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 ${longPressId === c.id ? "opacity-100" : "opacity-0"}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                            {/* Desktop hover-only delete */}
+                            <button
+                              type="button"
+                              aria-label="Delete chat"
+                              onClick={(e) => removeConversation(c.id, e)}
+                              className="hidden shrink-0 text-ink-soft transition-colors hover:text-red-500 sm:block sm:opacity-0 sm:group-hover:opacity-100"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
