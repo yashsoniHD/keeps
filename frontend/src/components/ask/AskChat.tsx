@@ -298,6 +298,8 @@ export function AskChat({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerNotes, setPickerNotes] = useState<Note[]>([]);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [longPressId, setLongPressId] = useState<string | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load the user's notes only when the picker is opened; live so new notes appear.
   useEffect(() => {
@@ -566,7 +568,7 @@ export function AskChat({
       {historyOpen && (
         <div className="absolute inset-0 z-20 flex flex-col bg-background">
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-            <p className="flex-1 font-serif text-lg text-ink">Chat history</p>
+            <p className="flex-1 text-base font-semibold text-ink">Chat history</p>
             <button
               type="button"
               onClick={() => setHistoryOpen(false)}
@@ -601,8 +603,12 @@ export function AskChat({
                         key={c.id}
                         role="button"
                         tabIndex={0}
-                        onClick={() => resumeConversation(c.id)}
+                        onClick={() => { setLongPressId(null); resumeConversation(c.id); }}
                         onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
+                        onContextMenu={(e) => { e.preventDefault(); setLongPressId(c.id === longPressId ? null : c.id); }}
+                        onTouchStart={() => { longPressTimer.current = setTimeout(() => setLongPressId(c.id), 500); }}
+                        onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                        onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
                         className={`group flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent ${
                           c.id === conversationId ? "bg-accent" : ""
                         }`}
@@ -615,12 +621,12 @@ export function AskChat({
                             </span>
                           )}
                         </span>
-                        {/* Always visible on mobile (no hover), hover-only on desktop */}
+                        {/* Hover-only on desktop; long-press-revealed on mobile */}
                         <button
                           type="button"
                           aria-label="Delete chat"
-                          onClick={(e) => removeConversation(c.id, e)}
-                          className="shrink-0 text-ink-soft opacity-100 transition-opacity hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100"
+                          onClick={(e) => { removeConversation(c.id, e); setLongPressId(null); }}
+                          className={`shrink-0 text-ink-soft transition-opacity hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 ${longPressId === c.id ? "opacity-100" : "opacity-0"}`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -647,7 +653,7 @@ export function AskChat({
           <WandSparkles className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-serif text-lg leading-tight text-ink">Clip AI</p>
+          <p className="truncate text-base font-semibold leading-tight text-ink">Clip AI</p>
           {noteTitle && (
             <p className="truncate text-[11px] text-ink-soft">Asking about: {noteTitle}</p>
           )}
@@ -689,7 +695,7 @@ export function AskChat({
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-summary-soft text-summary">
               <WandSparkles className="h-5 w-5" />
             </span>
-            <h2 className="mt-4 font-serif text-2xl text-ink">
+            <h2 className="mt-4 text-xl font-semibold text-ink">
               {noteTitle ? "Ask about this note" : "What can I help with?"}
             </h2>
             {!noteTitle && (
@@ -866,7 +872,7 @@ export function AskChat({
       )}
 
       {/* Input bar. */}
-      <div className="shrink-0 border-t border-border bg-background/90 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <div className="shrink-0 border-t border-border bg-background/95 px-3 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur">
         {/* Reference-scope pill + selected chips. */}
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <button
@@ -904,36 +910,34 @@ export function AskChat({
           )}
         </div>
         <form
-          className="flex items-center gap-2"
+          className="flex items-end gap-2 rounded-2xl border border-border bg-card px-4 py-2.5"
           onSubmit={(e) => {
             e.preventDefault();
             send(input);
           }}
         >
-          <label className="flex flex-1 items-end rounded-3xl border border-border bg-card px-4 py-2">
-            <textarea
-              ref={inputRef}
-              value={input}
-              rows={1}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter sends; Shift+Enter inserts a newline (standard chat behaviour).
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              placeholder="Ask, search, and create notes"
-              className="max-h-[120px] w-full resize-none self-center bg-transparent py-1.5 text-base leading-relaxed outline-none placeholder:text-ink-soft md:text-sm"
-            />
-          </label>
+          <textarea
+            ref={inputRef}
+            value={input}
+            rows={1}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends; Shift+Enter inserts a newline (standard chat behaviour).
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send(input);
+              }
+            }}
+            placeholder="Ask, search, and create notes"
+            className="max-h-[120px] flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed outline-none placeholder:text-ink-soft"
+          />
           <button
             type="submit"
             disabled={!input.trim() || sending}
             aria-label="Send"
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center self-end rounded-full bg-ink text-paper transition-transform active:scale-95 disabled:opacity-40"
+            className="mb-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform active:scale-95 disabled:opacity-40"
           >
-            <ArrowUp className="h-5 w-5" />
+            <ArrowUp className="h-4 w-4" />
           </button>
         </form>
       </div>

@@ -178,6 +178,16 @@ function Settings() {
 function AppearanceSection() {
   const { resolved, setTheme } = useTheme();
   const isDark = resolved === "dark";
+  const [condensed, setCondensed] = useState<boolean>(
+    () => localStorage.getItem("clipnote.layout") === "condensed",
+  );
+
+  const handleCondensed = (checked: boolean) => {
+    const next = checked ? "condensed" : "standard";
+    localStorage.setItem("clipnote.layout", next);
+    setCondensed(checked);
+  };
+
   return (
     <section className="mt-4 rounded-3xl border border-border bg-card p-6">
       <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
@@ -193,6 +203,17 @@ function AppearanceSection() {
           checked={isDark}
           onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
           aria-label="Toggle dark mode"
+        />
+      </label>
+      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3 border-t border-border pt-4">
+        <span>
+          <span className="block text-sm font-medium text-ink">Condensed view</span>
+          <span className="block text-xs text-ink-soft">Show notes as a compact list instead of cards.</span>
+        </span>
+        <Switch
+          checked={condensed}
+          onCheckedChange={handleCondensed}
+          aria-label="Toggle condensed view"
         />
       </label>
     </section>

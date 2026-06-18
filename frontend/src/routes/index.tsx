@@ -5,25 +5,16 @@ import {
   Search,
   Sparkles,
   Plus,
-  LayoutGrid,
-  List,
   WandSparkles,
   Settings,
   AlertCircle,
   X,
   Check,
   Layers,
-  MoreVertical,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
 import {
   watchNotes,
   watchPendingJobs,
@@ -236,12 +227,6 @@ function Feed() {
     }
   };
 
-  const toggleLayout = () => {
-    const next: Layout = layout === "standard" ? "condensed" : "standard";
-    setLayout(next);
-    localStorage.setItem("clipnote.layout", next);
-  };
-
   // Filter chips emerge from the user's own taxonomy (user doc + loaded notes).
   const categories = useMemo(
     () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
@@ -444,7 +429,7 @@ function Feed() {
                 </span>
                 <span className="font-serif text-2xl text-ink">Clipnote</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => setSearchOpen(true)}
@@ -454,38 +439,18 @@ function Feed() {
                 >
                   <Search className="h-4 w-4" />
                 </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button type="button" aria-label="More options" title="More" className={ICON_BTN}>
-                      <MoreVertical className="h-4 w-4" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        setPendingUrl("");
-                        setShowAdd(true);
-                      }}
-                    >
-                      <Plus className="h-4 w-4" />
-                      New note
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={toggleLayout}>
-                      {layout === "standard" ? (
-                        <List className="h-4 w-4" />
-                      ) : (
-                        <LayoutGrid className="h-4 w-4" />
-                      )}
-                      {layout === "standard" ? "Condensed view" : "Card view"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link to="/settings">
-                        <Settings className="h-4 w-4" />
-                        Settings
-                      </Link>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <button
+                  type="button"
+                  onClick={() => { setPendingUrl(""); setShowAdd(true); }}
+                  aria-label="New note"
+                  title="New note"
+                  className={ICON_BTN}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+                <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
+                  <Settings className="h-4 w-4" />
+                </Link>
               </div>
             </div>
           )}
