@@ -54,6 +54,7 @@ async def _parse_ingest_request(request: Request) -> IngestRequest:
     url = request.headers.get("x-clipnote-url", "")
     source = request.headers.get("x-clipnote-source", "web")
     content = None
+    note_hint = None
     raw = await request.body()
     if raw:
         try:
@@ -62,9 +63,10 @@ async def _parse_ingest_request(request: Request) -> IngestRequest:
                 url = data.get("url") or url
                 content = data.get("content")
                 source = data.get("source") or source
+                note_hint = data.get("note_hint") or None
         except json.JSONDecodeError:
             url = url or raw.decode("utf-8", errors="ignore")
-    return IngestRequest(url=url, content=content, source=source)  # validator sanitizes url
+    return IngestRequest(url=url, content=content, source=source, note_hint=note_hint)  # validator sanitizes url
 
 
 @router.post("/ingest", response_model=JobStatus)
@@ -87,8 +89,9 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
     await db.collection("jobs").document(job_id).set({
         "user_id": user_id,
         "url": body.url,
-        "content": body.content,   # device-extracted text (PWA/shortcut), if any
-        "source": body.source,     # "web" | "shortcut" | "pwa"
+        "content": body.content,       # device-extracted text (PWA/shortcut), if any
+        "source": body.source,         # "web" | "shortcut" | "pwa" | "ai_chat"
+        "note_hint": body.note_hint,   # user instructions for Gemini (from Clip AI chat)
         "status": "pending",
         "note_id": None,
         "error": None,

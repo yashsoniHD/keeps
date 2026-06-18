@@ -156,6 +156,7 @@ export interface ChatMessage {
   citations?: AskCitation[];
   coverage?: string | null;
   artifact?: AskArtifact | null;
+  saved_note_id?: string | null;  // present when Clip AI saved a link on the user's behalf
   pending?: boolean;
   jobId?: string;
   resultNoteId?: string | null;
@@ -202,6 +203,7 @@ export interface AskStreamHandlers {
   onCitations?: (citations: AskCitation[]) => void;
   onArtifact?: (artifact: AskArtifact) => void;
   onCoverage?: (coverage: string) => void;
+  onSavedNote?: (note_id: string) => void;
   onError?: (message: string) => void;
   onDone?: () => void;
 }
@@ -272,6 +274,9 @@ export async function askStream(
         case "coverage":
           handlers.onCoverage?.(String(ev.text ?? ""));
           break;
+        case "saved_note":
+          handlers.onSavedNote?.(String(ev.note_id ?? ""));
+          break;
         case "error":
           handlers.onError?.(String(ev.message ?? "Something went wrong."));
           break;
@@ -333,6 +338,7 @@ export interface ConversationMessage {
   text: string;
   citations?: AskCitation[];
   artifact?: AskArtifact | null;
+  saved_note_id?: string | null;
 }
 
 export async function listConversations(): Promise<ConversationSummary[]> {

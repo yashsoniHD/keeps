@@ -190,6 +190,7 @@ async def process_job(job_id: str, request: Request):
     url: str = job["url"]
     device_content: str | None = job.get("content")
     source: str = job.get("source", "web")
+    note_hint: str | None = job.get("note_hint")
     now = datetime.now(timezone.utc)
     # This run's attempt number — read before the Increment so the ladder below can
     # compare against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
@@ -212,10 +213,10 @@ async def process_job(job_id: str, request: Request):
 
         # 2. Categorize against this user's own categories.
         existing = await get_user_categories(user_id)
-        content_type = await gemini_service.assign_category(url, bundle, existing)
+        content_type = await gemini_service.assign_category(url, bundle, existing, note_hint)
 
         # 3. Type-focused extraction (structured data only — never HTML).
-        extracted = await gemini_service.extract_async(url, bundle, content_type)
+        extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
 
         if not extracted.data or len(str(extracted.data)) < 40:
             raise ValueError("Extraction produced empty or suspiciously short data")

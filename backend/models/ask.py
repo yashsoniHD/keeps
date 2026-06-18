@@ -54,6 +54,8 @@ class AskResponse(BaseModel):
     # Present when the user asked to consolidate notes into a structured artifact
     # (output != prose); the UI renders it and offers "Save as note".
     artifact: ArtifactNote | None = None
+    # Present when intent == "save_link" and the note was successfully created.
+    saved_note_id: str | None = None
 
 
 PERIODS = ("today", "yesterday", "this_week", "last_week", "this_month", "recent")
@@ -67,7 +69,7 @@ class AskPlan(BaseModel):
     fields, so temporal, semantic, type, exhaustive, and combined asks all work, and
     `scope=general` routes to a plain conversational answer with no note retrieval.
     """
-    intent: Literal["answer", "aggregate", "create"] = "answer"
+    intent: Literal["answer", "aggregate", "create", "save_link"] = "answer"
     scope: Literal["notes", "general"] = "notes"
     topic: str | None = None                       # semantic query for vector (may differ from raw message)
     period: Period | None = None                   # temporal filter; backend → exact bounds
@@ -76,6 +78,9 @@ class AskPlan(BaseModel):
     exhaustive: bool = False                        # "all/every/consolidate" → full filtered set, not top-K
     output: Literal["prose", "itinerary", "meal_plan", "comparison", "checklist"] = "prose"
     note_ids: list[str] = Field(default_factory=list)
+    # save_link fields: populated only when intent == "save_link"
+    save_url: str | None = None    # the URL extracted from the user's message
+    save_hint: str | None = None   # any instructions the user gave alongside the URL
 
 
 class GroundedAnswer(BaseModel):

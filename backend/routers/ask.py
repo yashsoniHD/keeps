@@ -18,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from google.cloud import firestore as fs
 
+import re
+
 from config import settings
 from models.ask import AskRequest, AskResponse, Citation
 from models.note import JobStatus
@@ -27,6 +29,8 @@ from services.cloud_tasks import enqueue_process_job
 from services.conversations import persist_exchange
 from services.firebase import flush_usage, get_db
 from services.gemini import gemini_service
+from services.net_guard import BlockedURLError, assert_public_url_async
+from routers.ingest import _enforce_cost_caps
 from services import note_retrieval as nr
 # Retrieval lives in services.note_retrieval (shared with the agent). The endpoint calls it
 # through the `nr` module so a test patching `nr.<fn>` affects both the endpoint and the
@@ -57,6 +61,62 @@ NO_NOTES_ANSWER = (
     "You haven't saved any notes yet — clip a few links first, then ask me about them."
 )
 NOTHING_FOUND_ANSWER = "I couldn't find anything in your notes about that."
+
+_URL_RE = re.compile(r'https?://\S+')
+
+# ──────────────────────────── save-link helper ────────────────────────────
+
+async def _save_link_from_chat(db, user_id: str, save_url: str,
+                               save_hint: str | None) -> dict:
+    """Validate, enqueue, and poll a save_link job initiated from Clip AI chat.
+
+    Returns {"note_id": str, "title": str} on success, or raises HTTPException.
+    Polls Firestore every 1.5 s for up to 45 s — enough for the Cloud Tasks worker
+    to complete even on first-attempt transient retries.
+    """
+    if not save_url.startswith(("http://", "https://")):
+        raise HTTPException(400, "That doesn't look like a valid URL.")
+    try:
+        await assert_public_url_async(save_url)
+    except BlockedURLError:
+        raise HTTPException(400, "That URL points at a private address and can't be saved.")
+
+    await _enforce_cost_caps(db, user_id)
+
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    await db.collection("jobs").document(job_id).set({
+        "user_id": user_id,
+        "url": save_url,
+        "content": None,
+        "source": "ai_chat",
+        "note_hint": save_hint,
+        "status": "pending",
+        "note_id": None,
+        "error": None,
+        "attempt_count": 0,
+        "created_at": now,
+        "updated_at": now,
+    })
+    enqueue_process_job(job_id)
+
+    # Poll until completed/failed, or timeout.
+    for _ in range(30):
+        await asyncio.sleep(1.5)
+        snap = await db.collection("jobs").document(job_id).get()
+        job = snap.to_dict() or {}
+        status = job.get("status")
+        if status == "completed":
+            note_id = job.get("note_id", "")
+            if note_id:
+                note_snap = await db.collection("notes").document(note_id).get()
+                title = (note_snap.to_dict() or {}).get("title", "Untitled")
+                return {"note_id": note_id, "title": title}
+        elif status == "failed":
+            raise HTTPException(502, "Couldn't process that link — please try saving it from the main feed.")
+
+    # Timed out — note is still processing (rare; happens on cold-start + slow source).
+    return {"note_id": None, "title": None}
 
 
 async def _enforce_ask_caps(db, user_id: str) -> None:
@@ -122,6 +182,16 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
             artifact = await gemini_service.create_note(body.question, full_history)
             return AskResponse(answer="Here's a draft — save it if it looks right:",
                                artifact=artifact)
+
+        # Save a link: validate, enqueue the ingest pipeline, poll for completion.
+        if plan.intent == "save_link" and plan.save_url:
+            result = await _save_link_from_chat(db, user_id, plan.save_url, plan.save_hint)
+            if result["note_id"]:
+                return AskResponse(
+                    answer=f'Saved **{result["title"]}**! It\'s now in your notes.',
+                    saved_note_id=result["note_id"],
+                )
+            return AskResponse(answer="Your note is being processed — it'll appear in your feed shortly.")
 
         # Opening Ask from inside a note means it's note-grounded even for terse prompts
         # ("summarize this"), so a focal note overrides a "general" plan.
@@ -259,6 +329,39 @@ async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
         try:
             # Tell the client the conversation id up front so a new chat can track it.
             yield _sse({"type": "conversation", "id": cid})
+
+            # save_link fast-path: if the message contains a URL, run the planner to check
+            # intent before handing off to the agent (zero overhead when no URL present).
+            if _URL_RE.search(body.question):
+                local_now = now_utc + timedelta(minutes=body.tz_offset_minutes)
+                today_str = local_now.strftime("%Y-%m-%d (%A)")
+                index = nr.dated_index(pool, body.tz_offset_minutes)
+                plan = await gemini_service.plan_ask(body.question, history[-4:], today_str, index)
+                if plan.intent == "save_link" and plan.save_url:
+                    yield _sse({"type": "tool", "status": "Saving your link…"})
+                    try:
+                        result = await _save_link_from_chat(db, user_id, plan.save_url, plan.save_hint)
+                    except HTTPException as e:
+                        yield _sse({"type": "delta", "text": e.detail})
+                        yield _sse({"type": "done"})
+                        return
+                    if result["note_id"]:
+                        answer = f'Saved **{result["title"]}**! It\'s now in your notes.'
+                        yield _sse({"type": "delta", "text": answer})
+                        yield _sse({"type": "saved_note", "note_id": result["note_id"]})
+                        try:
+                            await persist_exchange(db, user_id, cid, body.question,
+                                                   {"text": answer, "citations": [],
+                                                    "artifact": None,
+                                                    "saved_note_id": result["note_id"]})
+                        except Exception:
+                            pass
+                    else:
+                        yield _sse({"type": "delta",
+                                    "text": "Your note is being processed — it'll appear in your feed shortly."})
+                    yield _sse({"type": "done"})
+                    return
+
             async for ev in run_agent(ctx):
                 if ev.get("type") == "delta":
                     answer_parts.append(str(ev.get("text", "")))

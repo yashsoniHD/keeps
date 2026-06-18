@@ -40,6 +40,7 @@ async def persist_exchange(db, user_id: str, conversation_id: str | None,
         "text": (assistant.get("text") or "")[:8000],
         "citations": assistant.get("citations") or [],
         "artifact": assistant.get("artifact"),
+        "saved_note_id": assistant.get("saved_note_id"),
         "ts": now,
     })
     messages = messages[-settings.MAX_CONVERSATION_MESSAGES:]

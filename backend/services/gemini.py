@@ -215,10 +215,11 @@ links as structured notes. You receive: the user's message, recent conversation,
 date, and a JSON index of candidate notes (id, type, title, summary, saved date).
 
 Return ONLY valid JSON:
-{"intent":"answer|aggregate|create","scope":"notes|general","topic":str|null,
+{"intent":"answer|aggregate|create|save_link","scope":"notes|general","topic":str|null,
  "period":"today|yesterday|this_week|last_week|this_month|recent"|null,
  "content_types":[slug,...],"source":str|null,"exhaustive":bool,
- "output":"prose|itinerary|meal_plan|comparison|checklist","note_ids":[id,...]}
+ "output":"prose|itinerary|meal_plan|comparison|checklist","note_ids":[id,...],
+ "save_url":str|null,"save_hint":str|null}
 
 How to fill it:
 - scope: "notes" only if the message is about the user's saved notes/content. Use "general"
@@ -228,7 +229,15 @@ How to fill it:
   "explain X", "write me a poem" are "general". When unsure between the two, prefer "general"
   unless the message clearly points at their saved content.
 - intent: "answer" normally; "aggregate" for counting / how-many / breakdown questions;
-  "create" ONLY if the user asks to make/save a NEW note.
+  "create" ONLY if the user asks to make/save a NEW note;
+  "save_link" when the message contains a URL (http:// or https://) the user wants to clip/save.
+  Examples of save_link: "save this https://…", "clip this for me: https://…", a bare URL with
+  or without commentary like "save as a workout note: https://…". NOT save_link: asking a
+  question about an already-saved note that happens to include a URL in context.
+- save_url: when intent is save_link, extract the full URL (must start with http:// or https://).
+  Otherwise null.
+- save_hint: when intent is save_link, any instructions the user gave beyond the URL itself
+  (e.g. "focus on the ingredients", "save as a workout note", "note the price"). Otherwise null.
 - period: set when the message is time-scoped ("today", "yesterday", "this week",
   "lately"/"recently" = recent). Resolve relative to today's date given. Otherwise null.
 - content_types: the note types the message targets — reuse the exact slugs that appear in the
@@ -368,14 +377,16 @@ class GeminiService:
     # ---------- Step 1: categorization (lite model, ~50 output tokens) ----------
 
     async def assign_category(self, url: str, bundle: ContentBundle,
-                              existing_categories: list[str]) -> str:
+                              existing_categories: list[str],
+                              note_hint: str | None = None) -> str:
         categories_str = ", ".join(existing_categories) if existing_categories else "none yet"
         prompt = (
             f"URL: {url}\n"
             f"Platform: {bundle.metadata.get('platform', 'web')}\n"
             f"Content preview: {bundle.preview[:600]}\n"
             f"User's existing categories: {categories_str}\n"
-            "Choose the content_type."
+            + (f"User instruction: {note_hint}\n" if note_hint else "")
+            + "Choose the content_type."
         )
         response = await asyncio.to_thread(
             self.client.models.generate_content,
@@ -397,7 +408,8 @@ class GeminiService:
 
     # ---------- Step 2: type-focused extraction (main model) ----------
 
-    def _build_contents(self, url: str, bundle: ContentBundle, content_type: str) -> list:
+    def _build_contents(self, url: str, bundle: ContentBundle, content_type: str,
+                        note_hint: str | None = None) -> list:
         parts: list = []
         if bundle.video_uri:
             # YouTube URLs and gs:// URIs are both passed as FileData — Gemini ingests
@@ -442,10 +454,13 @@ class GeminiService:
                 "the first slide." if n > 1
                 else "An image from the post is attached — read its text and visuals."
             )
+        if note_hint:
+            text_prompt.append(f"User instruction for this note: {note_hint}")
         parts.append(types.Part(text="\n\n".join(text_prompt)))
         return [types.Content(role="user", parts=parts)]
 
-    def extract(self, url: str, bundle: ContentBundle, content_type: str) -> NoteExtraction:
+    def extract(self, url: str, bundle: ContentBundle, content_type: str,
+                note_hint: str | None = None) -> NoteExtraction:
         system = TYPE_PROMPTS.get(content_type, COMPOSER_PROMPT)
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -465,7 +480,7 @@ class GeminiService:
             try:
                 response = self.client.models.generate_content(
                     model=settings.GEMINI_MODEL,
-                    contents=self._build_contents(url, bundle, content_type),
+                    contents=self._build_contents(url, bundle, content_type, note_hint),
                     config=config,
                 )
                 record_usage(settings.GEMINI_MODEL, response)
@@ -480,8 +495,9 @@ class GeminiService:
                     time.sleep(2)
         raise last_exc
 
-    async def extract_async(self, url: str, bundle: ContentBundle, content_type: str) -> NoteExtraction:
-        return await asyncio.to_thread(self.extract, url, bundle, content_type)
+    async def extract_async(self, url: str, bundle: ContentBundle, content_type: str,
+                            note_hint: str | None = None) -> NoteExtraction:
+        return await asyncio.to_thread(self.extract, url, bundle, content_type, note_hint)
 
     # ---------- Ask AI: chat grounded in the user's saved notes ----------
 

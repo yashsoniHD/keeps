@@ -4,8 +4,9 @@ from pydantic import BaseModel, Field, field_validator
 
 class IngestRequest(BaseModel):
     url: str
-    content: str | None = None   # pre-extracted text (paywall/auth bypass via PWA/shortcut)
-    source: str = "web"          # "web" | "shortcut" | "pwa"
+    content: str | None = None         # pre-extracted text (paywall/auth bypass via PWA/shortcut)
+    source: str = "web"                # "web" | "shortcut" | "pwa" | "ai_chat"
+    note_hint: str | None = Field(default=None, max_length=500)  # user instructions for Gemini
 
     @field_validator("url")
     @classmethod

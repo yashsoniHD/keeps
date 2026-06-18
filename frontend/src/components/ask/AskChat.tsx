@@ -476,6 +476,7 @@ export function AskChat({
           onCitations: (citations) => patchLast({ citations }),
           onArtifact: (artifact) => patchLast({ artifact }),
           onCoverage: (coverage) => patchLast({ coverage }),
+          onSavedNote: (note_id) => patchLast({ saved_note_id: note_id }),
           onError: (message) => setError(message),
         },
       );
@@ -523,6 +524,7 @@ export function AskChat({
           text: m.text,
           citations: m.citations,
           artifact: m.artifact ?? null,
+          saved_note_id: m.saved_note_id ?? null,
         })),
       );
       setConversationId(cid);
@@ -794,6 +796,16 @@ export function AskChat({
                       className="inline-flex items-center gap-2 rounded-full bg-summary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
                     >
                       <Check className="h-4 w-4" /> Done — view the note
+                    </Link>
+                  )}
+                  {m.saved_note_id && (
+                    <Link
+                      to="/notes/$noteId"
+                      params={{ noteId: m.saved_note_id }}
+                      onClick={onClose}
+                      className="inline-flex items-center gap-2 rounded-full bg-summary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                    >
+                      <Check className="h-4 w-4" /> View saved note
                     </Link>
                   )}
                   {m.artifact && (
