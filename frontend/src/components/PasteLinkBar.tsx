@@ -6,11 +6,32 @@ export function PasteLinkBar({ variant = "default" }: { variant?: "default" | "c
   const [url, setUrl] = useState("");
   const [capturing, setCapturing] = useState<string | null>(null);
 
+  function extractUrl(raw: string): string {
+    const trimmed = raw.trim();
+    // If the pasted text contains whitespace, pull out the first http(s) token —
+    // share sheets often prepend/append labels like "Check this: https://… via AppName".
+    if (/\s/.test(trimmed)) {
+      const match = trimmed.match(/https?:\/\/\S+/);
+      if (match) return match[0];
+    }
+    return trimmed;
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!url.trim()) return;
-    setCapturing(url.trim());
+    const cleaned = extractUrl(url);
+    if (!cleaned) return;
+    setCapturing(cleaned);
     setUrl("");
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const pasted = e.clipboardData.getData("text");
+    const cleaned = extractUrl(pasted);
+    if (cleaned !== pasted) {
+      e.preventDefault();
+      setUrl(cleaned);
+    }
   }
 
   const big = variant === "default";
@@ -27,6 +48,7 @@ export function PasteLinkBar({ variant = "default" }: { variant?: "default" | "c
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          onPaste={handlePaste}
           placeholder="Paste any link: article, reel, recipe, product…"
           className={`flex-1 bg-transparent outline-none placeholder:text-ink-soft ${
             big ? "py-2.5 text-base" : "py-1.5 text-sm"
