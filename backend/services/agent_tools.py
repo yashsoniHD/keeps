@@ -29,6 +29,7 @@ from google.genai import types
 from config import settings
 from models.ask import ArtifactNote, AskPlan
 from services import note_retrieval as nr
+from services.firebase import get_user_categories
 from services.gemini import gemini_service
 from services.net_guard import BlockedURLError, assert_public_url_async, guarded_async_client
 from services.usage_meter import record_usage
@@ -277,14 +278,16 @@ async def _sub_build_artifact(ctx: AgentContext, note_ids: list[str], output: st
     valid = {"itinerary", "meal_plan", "comparison", "checklist", "document"}
     out = output if output in valid else "document"
     focal_title = ctx.focal.get("title") if ctx.focal else None
-    synth = await gemini_service.synthesize(instruction, ctx.history, notes, out, focal_title)
+    synth = await gemini_service.synthesize(instruction, ctx.history, notes, out, focal_title,
+                                            await get_user_categories(ctx.user_id))
     ctx.artifact = synth.artifact
     return {"built": True, "title": synth.artifact.title, "kind": out}
 
 
 async def _sub_author_note(ctx: AgentContext, instruction: str) -> dict:
     full_history = ctx.history + [{"role": "user", "text": instruction}]
-    artifact = await gemini_service.create_note(instruction, full_history)
+    artifact = await gemini_service.create_note(instruction, full_history,
+                                                await get_user_categories(ctx.user_id))
     ctx.artifact = artifact
     return {"built": True, "title": artifact.title}
 

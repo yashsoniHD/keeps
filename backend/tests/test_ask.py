@@ -37,6 +37,12 @@ def patch_ask(fake_db, monkeypatch):
     # The real decorator needs a real Transaction; run _bump directly instead.
     monkeypatch.setattr(ask_mod.fs, "async_transactional", lambda f: f)
 
+    # get_user_categories reads the unpatched module-level db; back it with fake_db instead.
+    async def get_cats(uid):
+        return list(fake_db.docs.get(("users", uid), {}).get("categories", []))
+
+    monkeypatch.setattr(ask_mod, "get_user_categories", get_cats)
+
     async def pool(db, user_id, question):
         return [INDEX_N1]
 
@@ -64,14 +70,17 @@ def _gemini(monkeypatch, plan, answer=None, chat=None, synth=None, created=None)
         calls["chat"].append(question)
         return chat or GroundedAnswer(answer_markdown="Paris is the capital of France.")
 
-    async def synthesize(question, history, notes, output, focal_title=None):
+    async def synthesize(question, history, notes, output, focal_title=None,
+                         existing_categories=None):
         calls["synth"].append(output)
         calls.setdefault("focal", []).append(focal_title)
+        calls.setdefault("synth_categories", []).append(existing_categories)
         return synth or SynthAnswer(answer_markdown="Here it is:",
                                     artifact=ArtifactNote(title="Artifact"), cited_note_ids=["n1"])
 
-    async def create_note(question, history):
+    async def create_note(question, history, existing_categories=None):
         calls["create"].append(question)
+        calls.setdefault("create_categories", []).append(existing_categories)
         return created or ArtifactNote(title="Draft", origin="created")
 
     monkeypatch.setattr(ask_mod.gemini_service, "plan_ask", plan_ask)
@@ -225,6 +234,7 @@ async def test_consolidation_returns_artifact_and_skips_prose(fake_db, monkeypat
         title="3 days in Tokyo", ai_summary="A packed weekend.", content_type="itinerary",
         data={"sections": [{"heading": "Day 1", "items": ["Tsukiji breakfast"]}]},
     )
+    fake_db.seed("users", "u", {"categories": ["travel"]})  # an existing category to reuse
     calls = _gemini(
         monkeypatch,
         AskPlan(scope="notes", note_ids=["n1"], output="itinerary", exhaustive=True),
@@ -240,6 +250,8 @@ async def test_consolidation_returns_artifact_and_skips_prose(fake_db, monkeypat
     assert [c.id for c in res.citations] == ["n1"]
     assert calls["synth"] == ["itinerary"]
     assert calls["answer"] == []  # prose answerer skipped for artifact output
+    # The user's existing categories are handed to the synthesizer so it can reuse, not fork.
+    assert calls["synth_categories"] == [["travel"]]
 
 
 async def test_create_intent_returns_draft_artifact(fake_db, monkeypatch):
@@ -247,6 +259,7 @@ async def test_create_intent_returns_draft_artifact(fake_db, monkeypatch):
         title="Lisbon cafes", content_type="cafes",
         data={"checklist": ["Fábrica Coffee", "Copenhagen Coffee Lab"]}, origin="created",
     )
+    fake_db.seed("users", "u", {"categories": ["travel"]})  # an existing category to reuse
     calls = _gemini(monkeypatch, AskPlan(intent="create", scope="notes"), created=art)
     res = await ask_mod.ask(AskRequest(question="make a note about Lisbon cafes"), user_id="u")
     assert res.artifact is not None
@@ -254,6 +267,8 @@ async def test_create_intent_returns_draft_artifact(fake_db, monkeypatch):
     assert res.artifact.title == "Lisbon cafes"
     assert calls["create"] == ["make a note about Lisbon cafes"]
     assert calls["answer"] == [] and calls["synth"] == []  # no retrieval/answer for create
+    # The user's existing categories are handed to the author so it can reuse, not fork.
+    assert calls["create_categories"] == [["travel"]]
 
 
 async def test_zero_notes_general_scope_still_answers(fake_db, monkeypatch):

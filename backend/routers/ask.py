@@ -27,7 +27,7 @@ from services.agent_tools import AgentContext, run_agent
 from services.auth_dep import require_user
 from services.cloud_tasks import enqueue_process_job
 from services.conversations import persist_exchange
-from services.firebase import flush_usage, get_db
+from services.firebase import flush_usage, get_db, get_user_categories
 from services.gemini import gemini_service
 from services.net_guard import BlockedURLError, assert_public_url_async
 from routers.ingest import _enforce_cost_caps
@@ -179,7 +179,9 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
         # answer stages get) and return it as a savable artifact — no retrieval needed.
         if plan.intent == "create":
             full_history = [t.model_dump() for t in body.history]
-            artifact = await gemini_service.create_note(body.question, full_history)
+            artifact = await gemini_service.create_note(
+                body.question, full_history, await get_user_categories(user_id)
+            )
             return AskResponse(answer="Here's a draft — save it if it looks right:",
                                artifact=artifact)
 
@@ -237,8 +239,10 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
         focal_title = focal.get("title") if focal else None
         try:
             if plan.output != "prose":
-                synth = await gemini_service.synthesize(body.question, history, notes,
-                                                        plan.output, focal_title)
+                synth = await gemini_service.synthesize(
+                    body.question, history, notes, plan.output, focal_title,
+                    await get_user_categories(user_id)
+                )
                 answer_md, cited_ids, artifact = (
                     synth.answer_markdown, synth.cited_note_ids, synth.artifact
                 )

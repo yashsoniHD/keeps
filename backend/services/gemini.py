@@ -314,6 +314,9 @@ Shape it to the requested OUTPUT kind:
   - checklist  → a single checklist (optionally grouped into sections). content_type "checklist".
 
 Rules:
+- content_type: if one of the user's existing categories (listed in the request) fits the
+  artifact, REUSE it verbatim instead of inventing a near-duplicate; otherwise use the slug
+  suggested above for the OUTPUT kind.
 - NEVER FABRICATE: use only details present in the notes; omit anything missing. A sparse but
   truthful artifact beats an invented complete-looking one.
 - Be specific: real names, times, prices, quantities from the notes.
@@ -340,8 +343,10 @@ one flat bullet list):
 Rules:
 - Use the conversation to understand exactly what to capture, then fill in helpful, accurate
   detail from your own knowledge. Be concrete, specific, and skimmable.
-- content_type: a short slug describing the note ("travel-tips", "cafes", "packing-list").
-  Never "general", "misc", or "other"."""
+- content_type: a short slug describing the note. If one of the user's existing categories
+  (listed in the request) fits, REUSE it verbatim — do not invent a near-duplicate (e.g. don't
+  emit "travel-tips" when "travel" already exists). Only coin a new slug when none fits. Never
+  "general", "misc", or "other"."""
 
 
 def _history_lines(history: list[dict]) -> str:
@@ -608,8 +613,12 @@ class GeminiService:
                                        focal_title)
 
     def _synthesize(self, question: str, history: list[dict], notes: list[dict],
-                    output: str, focal_title: str | None = None) -> SynthAnswer:
+                    output: str, focal_title: str | None = None,
+                    existing_categories: list[str] | None = None) -> SynthAnswer:
+        existing_categories = existing_categories or []
         prompt_parts = [f"OUTPUT kind requested: {output}"]
+        cats = ", ".join(existing_categories) if existing_categories else "none yet"
+        prompt_parts.append(f"User's existing categories: {cats}")
         if history:
             prompt_parts.append("Conversation so far:\n" + _history_lines(history))
         if focal_title:
@@ -635,7 +644,12 @@ class GeminiService:
                     ),
                 )
                 record_usage(settings.GEMINI_MODEL, response)
-                return SynthAnswer.model_validate_json(_strip_code_fences(response.text))
+                synth = SynthAnswer.model_validate_json(_strip_code_fences(response.text))
+                # Final safety net: collapse case/space/plural variants to an existing category.
+                synth.artifact.content_type = match_existing(
+                    synth.artifact.content_type, existing_categories
+                )
+                return synth
             except Exception as e:
                 last_exc = e
                 if attempt == 1:
@@ -645,14 +659,18 @@ class GeminiService:
         raise last_exc
 
     async def synthesize(self, question: str, history: list[dict], notes: list[dict],
-                         output: str, focal_title: str | None = None) -> SynthAnswer:
+                         output: str, focal_title: str | None = None,
+                         existing_categories: list[str] | None = None) -> SynthAnswer:
         return await asyncio.to_thread(self._synthesize, question, history, notes, output,
-                                       focal_title)
+                                       focal_title, existing_categories)
 
-    def _create_note(self, question: str, history: list[dict]) -> ArtifactNote:
+    def _create_note(self, question: str, history: list[dict],
+                     existing_categories: list[str]) -> ArtifactNote:
         prompt_parts = []
         if history:
             prompt_parts.append("Conversation:\n" + _history_lines(history))
+        cats = ", ".join(existing_categories) if existing_categories else "none yet"
+        prompt_parts.append(f"User's existing categories: {cats}")
         prompt_parts.append(f"Create-note request: {question}")
         last_exc: Exception | None = None
         for attempt in (1, 2):
@@ -669,6 +687,8 @@ class GeminiService:
                 record_usage(settings.GEMINI_MODEL, response)
                 artifact = ArtifactNote.model_validate_json(_strip_code_fences(response.text))
                 artifact.origin = "created"
+                # Final safety net: collapse case/space/plural variants to an existing category.
+                artifact.content_type = match_existing(artifact.content_type, existing_categories)
                 return artifact
             except Exception as e:
                 last_exc = e
@@ -678,8 +698,10 @@ class GeminiService:
                     time.sleep(2)
         raise last_exc
 
-    async def create_note(self, question: str, history: list[dict]) -> ArtifactNote:
-        return await asyncio.to_thread(self._create_note, question, history)
+    async def create_note(self, question: str, history: list[dict],
+                          existing_categories: list[str] | None = None) -> ArtifactNote:
+        return await asyncio.to_thread(self._create_note, question, history,
+                                       existing_categories or [])
 
     # ---------- Search-grounded page lookup (for bot-blocked pages) ----------
 
