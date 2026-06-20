@@ -60,7 +60,7 @@ const SLOW_PHRASES = [
   "Almost there…",
 ];
 
-const EXAMPLES = ["Summarize today's notes", "Find my recipes", "Plan a trip from my notes"];
+const EXAMPLES = ["Summarize today's notes", "Plan a trip from my notes", "Compare my saved products"];
 
 function CitationChip({
   citation,
@@ -570,7 +570,7 @@ export function AskChat({
     <div className="relative flex h-full min-h-0 flex-col">
       {/* Chat history drawer — a self-contained overlay so the message view stays untouched. */}
       {historyOpen && (
-        <div className="absolute inset-0 z-20 flex flex-col bg-background">
+        <div className="absolute inset-0 z-20 flex flex-col bg-white">
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
             <p className="flex-1 text-base font-semibold text-ink">Chat history</p>
             <button
@@ -874,7 +874,7 @@ export function AskChat({
 
       {/* Reference-scope picker panel (opens above the input). */}
       {pickerOpen && (
-        <div className="shrink-0 border-t border-border bg-background px-3 pt-3">
+        <div className="shrink-0 border-t border-border bg-white px-3 pt-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-ink">Reference specific notes</p>
             <button
@@ -923,7 +923,7 @@ export function AskChat({
       )}
 
       {/* Input bar. */}
-      <div className="shrink-0 border-t border-border bg-background/95 px-3 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <div className="shrink-0 border-t border-border bg-white/95 px-3 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur">
         {/* Reference-scope pill + selected chips. */}
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <button

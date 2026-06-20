@@ -209,7 +209,7 @@ export function AskFab() {
               // the easing only for the spring-back after a released drag.
               transition: dragging || kb.open ? "none" : "transform 0.24s cubic-bezier(0.32,0.72,0,1)",
             }}
-            className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)+0.5rem)] z-50 flex flex-col overflow-hidden rounded-t-3xl border-t border-border bg-background shadow-2xl duration-300 animate-in fade-in-0 slide-in-from-bottom-8 sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[440px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:slide-in-from-right-4 sm:slide-in-from-bottom-0"
+            className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)+0.5rem)] z-50 flex flex-col overflow-hidden rounded-t-3xl border-t border-border bg-white shadow-2xl duration-300 animate-in fade-in-0 slide-in-from-bottom-8 sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[440px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:slide-in-from-right-4 sm:slide-in-from-bottom-0"
           >
             <AskChat
               noteId={focalNoteId}
