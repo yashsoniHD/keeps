@@ -47,9 +47,18 @@ class FakeCollection:
         self._order = None
         self._desc = False
         self._limit = None
+        self._filters: list[tuple[str, str, object]] = []
 
     def document(self, doc_id):
         return FakeDocRef(self._db, self._name, doc_id)
+
+    def where(self, field, op, value):
+        # Only "==" is needed by the code under test (e.g. notes by user_id/content_type).
+        self._filters.append((field, op, value))
+        return self
+
+    def select(self, _fields):
+        return self  # projection is irrelevant to the in-memory store
 
     def order_by(self, field, direction="ASCENDING"):
         self._order = field
@@ -61,7 +70,10 @@ class FakeCollection:
         return self
 
     async def stream(self):
-        items = [(k[1], v) for k, v in self._db.docs.items() if k[0] == self._name]
+        items = [
+            (k[1], v) for k, v in self._db.docs.items()
+            if k[0] == self._name and all(v.get(f) == val for f, op, val in self._filters)
+        ]
         if self._order:
             items.sort(key=lambda kv: (kv[1].get(self._order) is None, kv[1].get(self._order)),
                        reverse=self._desc)

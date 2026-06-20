@@ -10,7 +10,13 @@ from config import settings
 from routers.ingest import _enforce_cost_caps
 from services.auth_dep import require_user
 from services.embeddings import embedding_service
-from services.firebase import add_user_category, firestore_safe, get_db, get_user_categories
+from services.firebase import (
+    add_user_category,
+    firestore_safe,
+    get_db,
+    get_user_categories,
+    prune_category_if_empty,
+)
 from services.gemini import match_existing, normalize_slug
 
 router = APIRouter(tags=["notes"])
@@ -105,7 +111,11 @@ async def delete_note(note_id: str, user_id: str = Depends(require_user)):
     doc = await db.collection("notes").document(note_id).get()
     if not doc.exists or doc.to_dict().get("user_id") != user_id:
         raise HTTPException(404, "Note not found")
+    content_type = (doc.to_dict() or {}).get("content_type")
     await db.collection("notes").document(note_id).delete()
+    # Auto-remove the category if that was its last note (a no-op otherwise). Placeholder
+    # categories the user added but never filled are untouched — nothing ever leaves them.
+    await prune_category_if_empty(user_id, content_type)
     return {"status": "deleted"}
 
 
@@ -137,8 +147,12 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
         # (e.g. "Recipes" → existing "recipe"), then register it so it shows in the
         # filter chips and the classifier can prefer it for future saves.
         slug = match_existing(normalize_slug(body.content_type), await get_user_categories(user_id))
+        old_ct = (((await ref.get()).to_dict()) or {}).get("content_type")
         await ref.update({"content_type": slug, "updated_at": datetime.now(timezone.utc)})
         await add_user_category(user_id, slug)
+        # If this note was the last of its previous type, retire that now-empty category.
+        if old_ct and old_ct != slug:
+            await prune_category_if_empty(user_id, old_ct)
 
     if body.user_note is not None:
         await db.collection("annotations").document(note_id).set(

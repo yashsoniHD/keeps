@@ -5,8 +5,9 @@ import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { AskChat } from "./AskChat";
 
-// Routes where the Ask-AI FAB has no place: signed-out / public viewer surfaces.
-const HIDDEN_PREFIXES = ["/login", "/share", "/p/"];
+// Routes where the Ask-AI FAB has no place: signed-out / public viewer surfaces, plus the
+// settings page (account management, not a place to chat).
+const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/settings"];
 
 // Past this much downward drag, releasing dismisses the mobile sheet (otherwise it snaps back).
 const DISMISS_THRESHOLD = 110;

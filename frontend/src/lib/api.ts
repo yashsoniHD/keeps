@@ -61,6 +61,14 @@ export async function updateNote(
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the note."), res.status);
 }
 
+// Delete a note. Routes through the backend (not a direct Firestore delete) so the server
+// can retire the note's category if it was the last one of its type. The feed's onSnapshot
+// listener still removes the card live once the doc is gone.
+export async function deleteNote(id: string): Promise<void> {
+  const res = await apiFetch(`/api/notes/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete the note."), res.status);
+}
+
 // --- Categories (manage the user's taxonomy) ---
 
 // The taxonomy joined with per-type note counts. Rename/delete re-tag the affected

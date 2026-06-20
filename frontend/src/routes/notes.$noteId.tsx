@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
-import { getNote, getAnnotation, deleteNote } from "@/lib/firestore";
+import { getNote, getAnnotation } from "@/lib/firestore";
+import { deleteNote } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";

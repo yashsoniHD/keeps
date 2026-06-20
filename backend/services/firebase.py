@@ -154,6 +154,26 @@ async def remove_category_meta(uid: str, slug: str) -> None:
         pass  # field may not exist; nothing to clean up
 
 
+async def prune_category_if_empty(uid: str, slug: str) -> bool:
+    """Auto-remove a category once its last note is gone. Called after a note is deleted or
+    re-categorised; a no-op if any note of this type remains (cheap — reads at most one doc).
+    Placeholder categories the user added but never filled never trigger this (no note ever
+    leaves them), so the manual "Add a category" flow is preserved. Returns True if pruned."""
+    if not slug:
+        return False
+    query = (
+        get_db().collection("notes")
+        .where("user_id", "==", uid)
+        .where("content_type", "==", slug)
+        .limit(1)
+    )
+    async for _ in query.stream():
+        return False  # still has at least one note — keep it
+    await remove_user_category(uid, slug)
+    await remove_category_meta(uid, slug)
+    return True
+
+
 async def count_notes_by_type(uid: str) -> dict[str, int]:
     """Tally of the user's notes by content_type, in one streamed pass — used by the
     Categories management UI (cheaper than one aggregation query per category)."""

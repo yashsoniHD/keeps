@@ -6,7 +6,6 @@ import {
   limit,
   getDoc,
   setDoc,
-  deleteDoc,
   doc,
   arrayUnion,
   onSnapshot,
@@ -51,12 +50,6 @@ export async function getNote(noteId: string): Promise<Note | null> {
 export async function getAnnotation(noteId: string): Promise<string> {
   const snap = await getDoc(doc(db, "annotations", noteId));
   return snap.exists() ? ((snap.data().user_note ?? "") as string) : "";
-}
-
-// Security rules allow owners to delete their own notes, so this needs no API call —
-// and the onSnapshot feed removes the card instantly.
-export async function deleteNote(noteId: string): Promise<void> {
-  await deleteDoc(doc(db, "notes", noteId));
 }
 
 export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): Unsubscribe {

@@ -8,6 +8,15 @@ import routers.notes as notes_mod
 @pytest.fixture(autouse=True)
 def patch_db(fake_db, monkeypatch):
     monkeypatch.setattr(notes_mod, "get_db", lambda: fake_db)
+    # prune_category_if_empty reads the unpatched module-level db; record its calls instead.
+    pruned: list[tuple[str, str]] = []
+
+    async def fake_prune(uid, slug):
+        pruned.append((uid, slug))
+        return False
+
+    monkeypatch.setattr(notes_mod, "prune_category_if_empty", fake_prune)
+    return pruned
 
 
 async def test_user_note_stored_off_note_in_owner_only_doc(fake_db):
@@ -21,9 +30,10 @@ async def test_user_note_stored_off_note_in_owner_only_doc(fake_db):
     assert fake_db.docs[("annotations", "n1")]["user_id"] == "u"
 
 
-async def test_recategorise_collapses_to_existing_and_registers(fake_db, monkeypatch):
+async def test_recategorise_collapses_to_existing_and_registers(fake_db, monkeypatch, patch_db):
     """"Recipes" with an existing "recipe" category collapses to "recipe" (no fragmenting)
-    and is registered via add_user_category so it shows in filters + trains the classifier."""
+    and is registered via add_user_category so it shows in filters + trains the classifier.
+    The note's old type ("summary") is offered for pruning in case it was its last note."""
     fake_db.seed("notes", "n1", {"user_id": "u", "content_type": "summary"})
     calls: list[tuple[str, str]] = []
 
@@ -39,6 +49,7 @@ async def test_recategorise_collapses_to_existing_and_registers(fake_db, monkeyp
     await notes_mod.update_note("n1", notes_mod.NoteUpdate(content_type="Recipes"), user_id="u")
     assert fake_db.docs[("notes", "n1")]["content_type"] == "recipe"
     assert calls == [("u", "recipe")]
+    assert patch_db == [("u", "summary")]  # old type handed to the pruner
 
 
 async def test_new_category_kept_as_slug(fake_db, monkeypatch):
