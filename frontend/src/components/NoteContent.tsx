@@ -15,6 +15,8 @@ import { ItineraryNote } from "./note/templates/ItineraryNote";
 import { ProductNote } from "./note/templates/ProductNote";
 import { SummaryNote } from "./note/templates/SummaryNote";
 import { WorkoutNote } from "./note/templates/WorkoutNote";
+import { PlaceNote } from "./note/templates/PlaceNote";
+import { BookNote } from "./note/templates/BookNote";
 import { GenericNote } from "./note/templates/GenericNote";
 
 // Which bespoke template a note's `data` map was built for. This is a STRUCTURAL fact
@@ -31,6 +33,8 @@ function resolveTemplate(note: Note): string {
   if (data.specs || data.pros || data.cons || data.buyUrl || (data.price && data.brand))
     return "product";
   if (data.tldr || Array.isArray(data.keyPoints)) return "summary";
+  if (Array.isArray(data.highlights) && (data.location || data.timings)) return "place";
+  if (data.premise || data.whoShouldRead || Array.isArray(data.keyIdeas)) return "book";
   return ""; // generic blocks (facts/sections/steps/table/checklist/quotes)
 }
 
@@ -46,6 +50,10 @@ function NoteBody({ note }: { note: Note }) {
       return <SummaryNote note={note} />;
     case "workout":
       return <WorkoutNote note={note} />;
+    case "place":
+      return <PlaceNote note={note} />;
+    case "book":
+      return <BookNote note={note} />;
     default:
       return <GenericNote note={note} />; // any AI-invented type
   }

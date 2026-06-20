@@ -13,4 +13,8 @@ export default defineConfig({
     react(),
   ],
   server: { port: 3000 },
+  // The /landing route re-exports a component from ../../marketing (outside this app's
+  // root), whose bare imports can't otherwise resolve. dedupe forces these to resolve
+  // from frontend/node_modules — also guaranteeing a single React copy.
+  resolve: { dedupe: ["react", "react-dom", "lucide-react"] },
 });
