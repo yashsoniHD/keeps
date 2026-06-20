@@ -249,7 +249,7 @@ function ArtifactCard({
           </>
         )}
         {state === "error" && (
-          <span className="text-sm text-red-600">Couldn't save. Try again.</span>
+          <span className="text-sm text-destructive">Couldn't save. Try again.</span>
         )}
       </div>
     </div>
@@ -570,7 +570,7 @@ export function AskChat({
     <div className="relative flex h-full min-h-0 flex-col">
       {/* Chat history drawer — a self-contained overlay so the message view stays untouched. */}
       {historyOpen && (
-        <div className="absolute inset-0 z-20 flex flex-col bg-white">
+        <div className="absolute inset-0 z-20 flex flex-col bg-card">
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
             <p className="flex-1 text-base font-semibold text-ink">Chat history</p>
             <button
@@ -784,7 +784,7 @@ export function AskChat({
                     </div>
                   )}
                   {m.failed && (
-                    <p className="text-sm text-red-600">
+                    <p className="text-sm text-destructive">
                       That task couldn't be completed. Please try again.
                     </p>
                   )}
@@ -851,7 +851,7 @@ export function AskChat({
                 </div>
               ))}
             {error && (
-              <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="flex items-start gap-2.5 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1">
                   <p>{error}</p>
@@ -874,7 +874,7 @@ export function AskChat({
 
       {/* Reference-scope picker panel (opens above the input). */}
       {pickerOpen && (
-        <div className="shrink-0 border-t border-border bg-white px-3 pt-3">
+        <div className="shrink-0 border-t border-border bg-card px-3 pt-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-ink">Reference specific notes</p>
             <button
@@ -923,7 +923,7 @@ export function AskChat({
       )}
 
       {/* Input bar. */}
-      <div className="shrink-0 border-t border-border bg-white/95 px-3 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <div className="shrink-0 border-t border-border bg-card/95 px-3 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur">
         {/* Reference-scope pill + selected chips. */}
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <button
