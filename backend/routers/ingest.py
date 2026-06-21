@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -9,15 +10,22 @@ from config import settings
 from models.note import IngestRequest, JobStatus
 from services.auth_dep import require_user
 from services.cloud_tasks import enqueue_process_job
-from services.firebase import get_db
+from services.firebase import get_db, touch_user_activity
 from services.net_guard import BlockedURLError, assert_public_url_async
 
 router = APIRouter(tags=["ingest"])
+log = logging.getLogger("clipnote.ingest")
 
 
-async def _enforce_cost_caps(db, user_id: str) -> None:
-    """Budget guardrails: per-user note cap, per-user daily ingest cap, global daily
-    kill-switch. Raises 429 when a limit is hit. Counters bump transactionally."""
+async def _enforce_cost_caps(db, user_id: str) -> bool:
+    """Budget guardrails. Returns True when the capture must be *deferred* (parked, not
+    processed today) and False when it may proceed now.
+
+    Per-user caps are an abuse backstop and still raise 429. The *global* daily kill-switch,
+    however, does NOT reject — erroring a brand-new user on their first save during a launch
+    spike is the worst possible first impression. Instead it returns True so the capture is
+    queued and drained when budget resets (see /process/drain-deferred). Counters bump
+    transactionally; a deferred capture bumps nothing because it consumes no budget today."""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
 
     notes_q = db.collection("notes").where("user_id", "==", user_id)
@@ -29,7 +37,7 @@ async def _enforce_cost_caps(db, user_id: str) -> None:
     transaction = db.transaction()
 
     @fs.async_transactional
-    async def _bump(tx):
+    async def _bump(tx) -> bool:
         user_ref = db.collection("usage").document(f"{user_id}-{today}")
         global_ref = db.collection("system").document(f"usage-{today}")
         user_snap = await user_ref.get(transaction=tx)
@@ -39,11 +47,12 @@ async def _enforce_cost_caps(db, user_id: str) -> None:
         if user_n >= settings.MAX_INGESTS_PER_USER_PER_DAY:
             raise HTTPException(429, "Daily limit reached. Try again tomorrow.")
         if global_n >= settings.DAILY_GLOBAL_NOTE_CAP:
-            raise HTTPException(429, "Service is at capacity today. Try again tomorrow.")
+            return True  # defer — park the capture instead of rejecting it
         tx.set(user_ref, {"user_id": user_id, "date": today, "ingest_count": user_n + 1}, merge=True)
         tx.set(global_ref, {"date": today, "note_count": global_n + 1}, merge=True)
+        return False
 
-    await _bump(transaction)
+    return await _bump(transaction)
 
 
 async def _parse_ingest_request(request: Request) -> IngestRequest:
@@ -82,23 +91,30 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
         raise HTTPException(status_code=400, detail="This URL points at a private address and can't be saved.")
 
     db = get_db()
-    await _enforce_cost_caps(db, user_id)
+    deferred = await _enforce_cost_caps(db, user_id)
 
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+    status = "deferred" if deferred else "pending"
     await db.collection("jobs").document(job_id).set({
         "user_id": user_id,
         "url": body.url,
         "content": body.content,       # device-extracted text (PWA/shortcut), if any
         "source": body.source,         # "web" | "shortcut" | "pwa" | "ai_chat"
         "note_hint": body.note_hint,   # user instructions for Gemini (from Clip AI chat)
-        "status": "pending",
+        "status": status,              # "deferred" → parked until budget resets (drain endpoint)
         "note_id": None,
         "error": None,
         "attempt_count": 0,
         "created_at": now,
         "updated_at": now,
     })
+
+    await touch_user_activity(user_id)  # retention signal (best-effort)
+    if deferred:
+        log.info("ingest deferred (global cap reached) — capture parked",
+                 extra={"job_id": job_id, "user_id": user_id, "url": body.url})
+        return JobStatus(job_id=job_id, status="deferred")
 
     enqueue_process_job(job_id)
     return JobStatus(job_id=job_id, status="pending")

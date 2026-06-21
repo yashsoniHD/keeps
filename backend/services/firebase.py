@@ -221,6 +221,29 @@ async def ensure_user_doc(uid: str, *, display_name: str | None = None,
         await get_db().collection("users").document(uid).set(doc, merge=True)
 
 
+async def touch_user_activity(uid: str, *, first_note: bool = False) -> None:
+    """Best-effort activation/retention milestones on users/{uid}:
+      - last_active_at: overwritten on every metered action (ingest/ask) → powers
+        'active in the last N days' and the retention cohorts in the admin dashboard.
+      - first_note_at: written once, when the user's first note lands → anchors
+        time-to-activate and the D0 cohort. Only set when absent so it stays immutable.
+    Signup time comes free from Firebase Auth (creationTime), so it isn't stored here.
+    A failure here must never fail the underlying capture/ask — all errors are swallowed."""
+    now = datetime.now(timezone.utc)
+    ref = get_db().collection("users").document(uid)
+    try:
+        if first_note:
+            snap = await ref.get()
+            updates = {"last_active_at": now}
+            if not (snap.to_dict() or {}).get("first_note_at"):
+                updates["first_note_at"] = now
+            await ref.set(updates, merge=True)
+        else:
+            await ref.set({"last_active_at": now}, merge=True)
+    except Exception:
+        log.warning("touch_user_activity failed for uid=%s", uid, exc_info=True)
+
+
 def _split_by_tier(meter: UsageMeter) -> tuple[int, int, int, int, int]:
     """Collapse per-model token totals into (main_in, main_out, lite_in, lite_out, embed_in).
     Embed model is input-only (no candidates); anything else billed at main rates."""

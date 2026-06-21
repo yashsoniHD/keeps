@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from services.logging_setup import setup_logging
+from services.rate_limit import RateLimitMiddleware
 
 setup_logging()
 log = logging.getLogger("clipnote.app")
@@ -14,6 +15,10 @@ log = logging.getLogger("clipnote.app")
 os.makedirs(settings.TEMP_DOWNLOAD_DIR, exist_ok=True)
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
+
+# Order matters: add the rate limiter BEFORE CORS so CORS stays the outermost middleware and
+# wraps the limiter's 429 with CORS headers (otherwise the browser can't read the response).
+app.add_middleware(RateLimitMiddleware, limit_per_min=settings.RATE_LIMIT_PER_MIN)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,6 +72,7 @@ from routers.admin import router as admin_router        # noqa: E402
 from routers.search import router as search_router      # noqa: E402
 from routers.categories import router as categories_router  # noqa: E402
 from routers.conversations import router as conversations_router  # noqa: E402
+from routers.digest import router as digest_router              # noqa: E402
 
 app.include_router(ingest_router, prefix="/api")
 app.include_router(process_router, prefix="/api")
@@ -78,3 +84,4 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(conversations_router, prefix="/api")
+app.include_router(digest_router, prefix="/api")

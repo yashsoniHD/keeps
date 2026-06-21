@@ -19,17 +19,16 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
-from google.auth.transport import requests as google_requests
 from google.cloud import firestore as fs
 from google.cloud.firestore_v1.vector import Vector
 from google.genai import errors as genai_errors
-from google.oauth2 import id_token
 
 from config import settings
 from models.note import ContentBundle
 from services import note_retrieval as nr
 from services import sources
 from services.agent_tools import AgentContext, run_agent_collect
+from services.cloud_tasks import enqueue_process_job
 from services.covers import persist_cover
 from services.embeddings import embedding_service
 from services.firebase import (
@@ -41,10 +40,12 @@ from services.firebase import (
     get_user_categories,
     record_image_generated,
     reserve_image_slot,
+    touch_user_activity,
 )
 from services.gemini import gemini_service, match_existing, normalize_slug
 from services.imagen import generate_cover
 from services.net_guard import BlockedURLError, guarded_async_client
+from services.oidc import verify_oidc
 from services.usage_meter import start_metering
 
 router = APIRouter(tags=["process"])
@@ -156,20 +157,10 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str,
 
 
 def _verify_oidc(request: Request) -> None:
-    """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email."""
-    auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(403, "Forbidden")
-    try:
-        claims = id_token.verify_oauth2_token(
-            auth_header.removeprefix("Bearer "),
-            google_requests.Request(),
-            audience=settings.CLOUD_TASKS_WORKER_URL,
-        )
-    except Exception:
-        raise HTTPException(403, "Forbidden")
-    if claims.get("email") != settings.CLOUD_TASKS_SA_EMAIL or not claims.get("email_verified"):
-        raise HTTPException(403, "Forbidden")
+    """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email.
+    Thin wrapper over the shared verifier (kept as a module-level name so existing tests can
+    patch process._verify_oidc)."""
+    verify_oidc(request)
 
 
 @router.post("/process/{job_id}")
@@ -266,6 +257,7 @@ async def process_job(job_id: str, request: Request):
         await add_user_source(user_id, source_domain)
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "updated_at": datetime.now(timezone.utc)})
+        await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
         log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
                  extra={"job_id": job_id, "user_id": user_id, "url": url, "strategy": bundle.strategy})
         return {"status": "completed", "note_id": note_id}
@@ -305,6 +297,7 @@ async def process_job(job_id: str, request: Request):
             await job_ref.update({"status": "completed", "note_id": note_id,
                                   "error": f"salvaged: {type(e).__name__}: {e}"[:500],
                                   "updated_at": datetime.now(timezone.utc)})
+            await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
             return {"status": "completed", "note_id": note_id, "salvaged": True}
         except Exception as salvage_exc:
             # Even the URL-only Firestore write failed — the one path left is "failed".
@@ -317,6 +310,36 @@ async def process_job(job_id: str, request: Request):
     finally:
         # Attribute token spend even when the job re-raised for a Cloud Tasks retry.
         await flush_usage(user_id, meter)
+
+
+@router.post("/process/drain-deferred")
+async def drain_deferred(request: Request):
+    """Re-enqueue captures parked by the global daily cap (status "deferred"), up to the
+    budget that has freed up — e.g. after the daily counter rolls over. Triggered by Cloud
+    Scheduler (OIDC-authed with the same SA as Cloud Tasks). The batch is bounded by the
+    remaining global budget, so draining can never itself bust the kill-switch."""
+    _verify_oidc(request)
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    global_ref = db.collection("system").document(f"usage-{today}")
+    snap = await global_ref.get()
+    used = (snap.to_dict() or {}).get("note_count", 0)
+    budget = settings.DAILY_GLOBAL_NOTE_CAP - used
+    if budget <= 0:
+        return {"drained": 0, "reason": "no budget today"}
+
+    now = datetime.now(timezone.utc)
+    drained = 0
+    q = db.collection("jobs").where("status", "==", "deferred").limit(budget)
+    async for doc in q.stream():
+        await doc.reference.update({"status": "pending", "updated_at": now})
+        enqueue_process_job(doc.id)
+        drained += 1
+    if drained:
+        # Atomic so concurrent live ingests can't double-spend the same budget slot.
+        await global_ref.set({"date": today, "note_count": fs.Increment(drained)}, merge=True)
+    log.info("drained %d deferred captures (budget was %d)", drained, budget)
+    return {"drained": drained}
 
 
 @router.post("/process-agent/{job_id}")

@@ -184,23 +184,12 @@ async def test_admin_stats_rolls_up_cost_and_activity(monkeypatch):
         {"user_id": "u1", "date": d_recent},
         {"user_id": "u2", "date": d_old},
     ]
+    # Today's global rollup lives in the "system" collection (read via .where(date>=).stream()).
+    system = [{"__id__": f"usage-{d_recent}", "date": d_recent, "note_count": 5, "ask_count": 2}]
     fake_db = FakeDb(
-        {"users": users, "notes": notes, "jobs": jobs, "usage": usage},
-        sys_doc={"note_count": 5, "ask_count": 2},
+        {"users": users, "notes": notes, "jobs": jobs, "usage": usage, "system": system},
+        sys_doc=None,
     )
-
-    # system uses .document(id).get(); patch collection("system") specially.
-    real_collection = fake_db.collection
-
-    def collection(name):
-        if name == "system":
-            class SysCol:
-                def document(self, _id):
-                    return FakeDocRef({"note_count": 5, "ask_count": 2})
-            return SysCol()
-        return real_collection(name)
-
-    fake_db.collection = collection
     monkeypatch.setattr(admin_mod, "get_db", lambda: fake_db)
 
     out = await admin_mod.admin_stats(_="admin-uid")
@@ -213,6 +202,10 @@ async def test_admin_stats_rolls_up_cost_and_activity(monkeypatch):
     assert out["totals"]["active_30d"] == 2
     assert out["totals"]["notes_today"] == 5
     assert out["totals"]["asks_today"] == 2
+    # Funding metrics: both users have notes → 100% activation; cost spread over 2 active users.
+    assert out["totals"]["activated"] == 2
+    assert out["totals"]["activation_rate"] == pytest.approx(1.0)
+    assert out["totals"]["cost_per_active_user_usd"] == pytest.approx(0.5)
     # u1: 1M tokens, every tier $1/1M → $1.00 → ₹80
     assert out["totals"]["cost_usd"] == pytest.approx(1.0)
     assert out["totals"]["cost_inr"] == pytest.approx(80.0)
