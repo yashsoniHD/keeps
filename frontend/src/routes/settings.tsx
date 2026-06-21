@@ -12,11 +12,9 @@ import {
   Share2,
   Moon,
   Sun,
-  Mail,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ADMIN_EMAILS } from "@/routes/admin";
-import { getDigestOptIn, setDigestOptIn } from "@/lib/firestore";
 import {
   createToken,
   listTokens,
@@ -114,8 +112,6 @@ function Settings() {
 
         <AppearanceSection />
 
-        <DigestSection />
-
         <ConnectPhone />
 
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
@@ -174,47 +170,6 @@ function Settings() {
         </div>
       )}
     </AppShell>
-  );
-}
-
-// Theme control. A manual toggle commits an explicit light/dark choice (dropping the
-// "follow system" default); the resolved value drives both the icon and the switch state.
-function DigestSection() {
-  const { user } = useAuth();
-  const [optIn, setOptIn] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    getDigestOptIn(user.uid)
-      .then(setOptIn)
-      .catch(() => {});
-  }, [user]);
-
-  const handleToggle = (checked: boolean) => {
-    setOptIn(checked); // optimistic
-    if (user) setDigestOptIn(user.uid, checked).catch(() => setOptIn(!checked));
-  };
-
-  return (
-    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
-      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        <Mail className="h-3.5 w-3.5" />
-        Email
-      </h2>
-      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3">
-        <span>
-          <span className="block text-sm font-medium text-ink">Weekly digest</span>
-          <span className="block text-xs text-ink-soft">
-            A Sunday email of the notes you saved that week, worth a re-read.
-          </span>
-        </span>
-        <Switch
-          checked={optIn}
-          onCheckedChange={handleToggle}
-          aria-label="Toggle weekly digest email"
-        />
-      </label>
-    </section>
   );
 }
 
