@@ -6,6 +6,7 @@ import { saveSharedNote } from "@/lib/api";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/contexts/auth-context";
+import { setSignupRef } from "@/lib/attribution";
 import type { Note } from "@/lib/types";
 
 // Public, login-free view of a shared note. Firestore rules allow an anonymous read
@@ -63,6 +64,8 @@ function PublicNote() {
     if (user) {
       void doSave();
     } else {
+      // Attribute this signup to the shared-note viral loop before bouncing to sign-in.
+      setSignupRef("shared-note");
       navigate({ to: "/login", search: { redirect: `/p/${noteId}?save=1` } });
     }
   }, [user, doSave, navigate, noteId]);
@@ -111,6 +114,26 @@ function PublicNote() {
       />
       {saveError && (
         <p className="mx-auto max-w-4xl px-5 pb-8 text-sm text-destructive md:px-8">{saveError}</p>
+      )}
+      {!user && (
+        <div className="mx-auto max-w-4xl px-5 pb-12 md:px-8">
+          <div className="flex flex-col items-center gap-3 rounded-3xl border border-border bg-card p-7 text-center sm:flex-row sm:justify-between sm:text-left">
+            <div>
+              <p className="font-serif text-xl text-ink">Made with Clipnote</p>
+              <p className="mt-1 text-sm text-ink-soft">
+                Turn any link — recipe, reel, product, article — into a structured note like this.
+              </p>
+            </div>
+            <Link
+              to="/landing"
+              search={{ ref: "shared-note" }}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+            >
+              <Sparkles className="h-4 w-4" />
+              Start your own — free
+            </Link>
+          </div>
+        </div>
       )}
     </AppShell>
   );

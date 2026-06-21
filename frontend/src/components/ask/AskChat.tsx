@@ -405,6 +405,7 @@ export function AskChat({
     const question = raw.trim();
     if (!question || sending) return;
     analytics.askSubmitted();
+    analytics.clipAiUsed(); // funnel: first time the user engages Clip AI (once per browser)
     const base = replaceLast ? messages.slice(0, -1) : messages;
     const history = base.map(({ role, text }) => ({ role, text })).slice(-10);
 

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, X } from "lucide-react";
+import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, Clock, X } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import {
   formatDateShort,
@@ -212,6 +212,7 @@ export function NoteRowList({
   notes,
   jobs = [],
   queuedJobs = [],
+  deferredJobs = [],
   failedJobs = [],
   onRetry,
   onDismiss,
@@ -219,6 +220,7 @@ export function NoteRowList({
   notes: Note[];
   jobs?: Job[];
   queuedJobs?: Job[];
+  deferredJobs?: Job[];
   failedJobs?: Job[];
   onRetry?: (job: Job) => void;
   onDismiss?: (jobId: string) => void;
@@ -236,6 +238,9 @@ export function NoteRowList({
             onRetry={onRetry ?? (() => {})}
             onDismiss={onDismiss ?? (() => {})}
           />
+        ))}
+        {deferredJobs.map((j) => (
+          <ProcessingRow key={j.id} job={j} label="Queued — high demand" />
         ))}
         {queuedJobs.map((j) => (
           <ProcessingRow key={j.id} job={j} label="Waiting for connection" />
@@ -263,17 +268,25 @@ function jobDomain(url: string): string {
   }
 }
 
+// Pick the status glyph from the label: a spinner while actively processing, a wifi-off
+// for offline-held captures, and a clock for anything else parked (e.g. "Queued — high demand").
+function StatusIcon({ label, className }: { label: string; className: string }) {
+  if (label === "Processing") return <Loader2 className={`${className} animate-spin`} />;
+  if (label.toLowerCase().includes("connection")) return <WifiOff className={className} />;
+  return <Clock className={className} />;
+}
+
 export function ProcessingCard({ job, label = "Processing" }: { job: Job; label?: string }) {
   const domain = jobDomain(job.url);
-  const waiting = label !== "Processing"; // offline-queued: held locally, not spinning
+  const waiting = label !== "Processing"; // not actively processing → no pulsing spinner
   return (
     <div
       className="relative flex min-w-0 animate-pulse flex-col rounded-2xl border border-dashed border-border bg-card p-4"
-      aria-label={waiting ? "Capture waiting for connection" : "Note processing"}
+      aria-label={waiting ? `Capture ${label.toLowerCase()}` : "Note processing"}
     >
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-ink-soft">
-          {waiting ? <WifiOff className="h-3 w-3" /> : <Loader2 className="h-3 w-3 animate-spin" />}
+          <StatusIcon label={label} className="h-3 w-3" />
           {label}
         </span>
         <span className="text-[11px] text-ink-soft">just now</span>
@@ -403,10 +416,10 @@ export function ProcessingRow({ job, label = "Processing" }: { job: Job; label?:
   return (
     <div
       className="flex w-full min-w-0 animate-pulse items-center gap-3.5 px-4 py-3"
-      aria-label={waiting ? "Capture waiting for connection" : "Note processing"}
+      aria-label={waiting ? `Capture ${label.toLowerCase()}` : "Note processing"}
     >
       <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-muted text-ink-soft">
-        {waiting ? <WifiOff className="h-5 w-5" /> : <Loader2 className="h-5 w-5 animate-spin" />}
+        <StatusIcon label={label} className="h-5 w-5" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="h-4 w-2/3 rounded bg-muted" />

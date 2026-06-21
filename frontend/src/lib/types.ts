@@ -25,7 +25,7 @@ export interface Job {
   id: string;
   user_id: string;
   url: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "deferred";
   note_id: string | null;
   error: string | null;
   attempt_count: number;

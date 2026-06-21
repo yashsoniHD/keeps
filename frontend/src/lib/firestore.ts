@@ -9,10 +9,31 @@ import {
   doc,
   arrayUnion,
   onSnapshot,
+  serverTimestamp,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
 import type { Note, Job } from "@/lib/types";
+
+// Record signup attribution on the user's own doc (rules allow owner writes). Merge so it
+// never clobbers backend-written fields; called once, on first sign-in.
+export async function recordSignup(uid: string, ref: string | null): Promise<void> {
+  await setDoc(
+    doc(db, "users", uid),
+    { signup_ref: ref || "direct", signup_at: serverTimestamp() },
+    { merge: true },
+  );
+}
+
+// Weekly-digest opt-in lives on the user's own doc. Absent field = opted in (the default).
+export async function getDigestOptIn(uid: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, "users", uid));
+  return snap.exists() ? snap.data().digest_opt_in === true : false;
+}
+
+export async function setDigestOptIn(uid: string, on: boolean): Promise<void> {
+  await setDoc(doc(db, "users", uid), { digest_opt_in: on }, { merge: true });
+}
 
 // Real-time feed: notes appear/update without a manual refetch. Returns an unsubscribe fn.
 // contentType filters server-side via the (user_id, content_type, created_at) composite
@@ -85,6 +106,7 @@ export function watchPendingJobs(
         (j) =>
           j.status === "pending" ||
           j.status === "processing" ||
+          j.status === "deferred" || // parked by the global cap — shown as "Queued"
           (j.status === "failed" && ((j.updated_at ?? j.created_at)?.toMillis() ?? 0) > cutoff),
       );
     callback(jobs);

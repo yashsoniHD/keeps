@@ -10,10 +10,12 @@ import { getInstallPrompt, isIOS, isStandalone } from "@/lib/platform";
 export function GettingStarted({
   notesCount,
   onAddLink,
+  onTrySample,
   onDismiss,
 }: {
   notesCount: number;
   onAddLink: () => void;
+  onTrySample?: () => void;
   onDismiss: () => void;
 }) {
   const [hasToken, setHasToken] = useState(false);
@@ -41,6 +43,33 @@ export function GettingStarted({
     detail: React.ReactNode;
     action?: React.ReactNode;
   }[] = [
+    {
+      // Lead with the aha — activation comes from the first note, not from installing the PWA.
+      done: notesCount > 0,
+      icon: Compass,
+      title: "Save your first link",
+      detail: "Paste any URL (recipe, reel, product, article) and watch it become a note.",
+      action: (
+        <div className="flex shrink-0 items-center gap-2">
+          {onTrySample && (
+            <button
+              type="button"
+              onClick={onTrySample}
+              className="rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-ink"
+            >
+              Try a sample
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onAddLink}
+            className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper"
+          >
+            Add a link
+          </button>
+        </div>
+      ),
+    },
     {
       done: installed,
       icon: MonitorDown,
@@ -92,21 +121,6 @@ export function GettingStarted({
           Set up
           <ChevronRight className="h-3 w-3" />
         </Link>
-      ),
-    },
-    {
-      done: notesCount > 0,
-      icon: Compass,
-      title: "Save your first link",
-      detail: "Paste any URL (recipe, reel, product, article) and watch it become a note.",
-      action: (
-        <button
-          type="button"
-          onClick={onAddLink}
-          className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper"
-        >
-          Add a link
-        </button>
       ),
     },
   ];

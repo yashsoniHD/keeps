@@ -8,6 +8,7 @@ import {
   WandSparkles,
   Settings,
   AlertCircle,
+  ClipboardPaste,
   X,
   Check,
   Layers,
@@ -49,6 +50,12 @@ type Layout = "standard" | "condensed";
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+
+// First-run "try a sample" link: lets a new user reach the aha (a real, structured note)
+// in one tap, without having to go find a URL. It runs the real pipeline — a recipe page
+// with JSON-LD makes the most visually striking first note. Curated; verify it still
+// resolves if first-run extraction ever looks off.
+const SAMPLE_LINK = "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe";
 
 // Tracks whether a horizontal scroller sits at its start/end, so the caller can show edge
 // fades only when content actually overflows. Recomputes on scroll, on resize, and when
@@ -113,7 +120,9 @@ function Feed() {
   const [ingestError, setIngestError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
+    // Logged-out visitors land on the marketing page (the pitch + signup CTA),
+    // not the bare sign-in screen — that's where cold traffic converts.
+    if (!loading && !user) navigate({ to: "/landing" });
   }, [user, loading, navigate]);
 
   // Real-time feed: new/updated notes stream in without a refetch. The active type
@@ -212,6 +221,7 @@ function Feed() {
     setTimeout(() => setOptimistic((prev) => prev.filter((o) => o.id !== tempId)), 120_000);
     try {
       await ingest(url);
+      analytics.firstCapture(); // funnel: first successful capture (once per browser)
       analytics.noteSaved();
     } catch (e) {
       setOptimistic((prev) => prev.filter((o) => o.id !== tempId));
@@ -226,6 +236,33 @@ function Feed() {
       }
     }
   };
+
+  // A URL pasted on the landing page before sign-in is parked in localStorage and
+  // captured here once the user is authed — so "Try it free" lands a real first note
+  // instead of dropping the user onto an empty feed.
+  const pendingHandled = useRef(false);
+  useEffect(() => {
+    if (!user || pendingHandled.current) return;
+    let pending: string | null = null;
+    try {
+      pending = localStorage.getItem("clipnote.pendingCapture");
+      if (pending) localStorage.removeItem("clipnote.pendingCapture");
+    } catch {
+      /* private mode / storage disabled — nothing to replay */
+    }
+    if (!pending) return;
+    pendingHandled.current = true;
+    handleCapture(pending);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Funnel signals: a per-day "returned" visit, and the activation milestone the moment
+  // the user's first note actually renders (both dedupe internally).
+  useEffect(() => {
+    if (user) analytics.returned();
+  }, [user]);
+  useEffect(() => {
+    if (notes.length > 0) analytics.activated();
+  }, [notes.length]);
 
   // Filter chips emerge from the user's own taxonomy (user doc + loaded notes).
   const categories = useMemo(
@@ -330,6 +367,14 @@ function Feed() {
       .filter((q) => !jobUrls.has(q.url) && !noteUrls.has(q.url))
       .map((q) => ({ id: `queued-${q.url}`, url: q.url, status: "pending" }) as Job);
   }, [queued, jobs, notes, active, source, query]);
+
+  // Captures parked by the global daily cap (launch-spike protection). They render as a calm
+  // "Queued — high demand" card instead of an error, and drain automatically when budget frees.
+  const deferredJobs = useMemo<Job[]>(() => {
+    if (active !== "all" || source !== "all" || query.trim()) return [];
+    const noteUrls = new Set(notes.map((n) => n.source_url));
+    return jobs.filter((j) => j.status === "deferred" && !noteUrls.has(j.url));
+  }, [jobs, notes, active, source, query]);
 
   // Failed captures stay visible (with the error) until dismissed or retried — a card
   // that silently disappears reads as data loss.
@@ -540,6 +585,7 @@ function Feed() {
               setPendingUrl("");
               setShowAdd(true);
             }}
+            onTrySample={() => handleCapture(SAMPLE_LINK)}
             onDismiss={dismissGuide}
           />
         )}
@@ -556,21 +602,27 @@ function Feed() {
         ) : displayNotes.length === 0 &&
           pendingJobs.length === 0 &&
           failedJobs.length === 0 &&
+          deferredJobs.length === 0 &&
           queuedJobs.length === 0 ? (
           showGuide && !searchActive ? null : (
             <EmptyState
               hasNotes={notes.length > 0 || active !== "all" || source !== "all" || searchActive}
+              onTrySample={() => handleCapture(SAMPLE_LINK)}
             />
           )
         ) : (
           <div className="space-y-8">
             {/* In-flight captures ("just now") sit above the dated groups. */}
-            {(failedJobs.length > 0 || queuedJobs.length > 0 || pendingJobs.length > 0) &&
+            {(failedJobs.length > 0 ||
+              queuedJobs.length > 0 ||
+              deferredJobs.length > 0 ||
+              pendingJobs.length > 0) &&
               (layout === "condensed" ? (
                 <NoteRowList
                   notes={[]}
                   jobs={pendingJobs}
                   queuedJobs={queuedJobs}
+                  deferredJobs={deferredJobs}
                   failedJobs={failedJobs}
                   onRetry={retryJob}
                   onDismiss={dismissJob}
@@ -579,6 +631,9 @@ function Feed() {
                 <section className={GRID_CLS}>
                   {failedJobs.map((j) => (
                     <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
+                  ))}
+                  {deferredJobs.map((j) => (
+                    <ProcessingCard key={j.id} job={j} label="Queued — high demand" />
                   ))}
                   {queuedJobs.map((j) => (
                     <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
@@ -773,6 +828,18 @@ function AddSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // iOS auto-fill is intentionally skipped above (it blocks behind a system prompt on open).
+  // A tap, however, is a user gesture — so an explicit "Paste from clipboard" button lets iOS
+  // users fill the box in one tap instead of typing. Shown only while the box is empty.
+  const pasteFromClipboard = async () => {
+    try {
+      const t = (await navigator.clipboard.readText()).trim();
+      if (t) setUrl(t);
+    } catch {
+      /* permission denied / no clipboard API — the user can still type */
+    }
+  };
+
   return (
     <div
       data-no-refresh
@@ -800,6 +867,16 @@ function AddSheet({
             spellCheck={false}
             className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
           />
+          {!url.trim() && (
+            <button
+              type="button"
+              onClick={pasteFromClipboard}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-paper px-4 py-2.5 text-sm font-medium text-ink-soft transition-colors hover:text-ink"
+            >
+              <ClipboardPaste className="h-4 w-4" />
+              Paste from clipboard
+            </button>
+          )}
           <div className="flex gap-2">
             <button
               type="button"
@@ -851,7 +928,7 @@ function FallbackNoteCard({ note }: { note: Note }) {
   );
 }
 
-function EmptyState({ hasNotes }: { hasNotes: boolean }) {
+function EmptyState({ hasNotes, onTrySample }: { hasNotes: boolean; onTrySample?: () => void }) {
   return (
     <div className="mx-auto max-w-xl rounded-3xl border border-dashed border-border bg-card p-10 text-center">
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-summary-soft">
@@ -861,8 +938,20 @@ function EmptyState({ hasNotes }: { hasNotes: boolean }) {
         {hasNotes ? "Nothing matches" : "No notes yet"}
       </h3>
       <p className="mt-2 text-sm text-ink-soft">
-        {hasNotes ? "Try a different search or filter." : "Tap + to clip your first link."}
+        {hasNotes
+          ? "Try a different search or filter."
+          : "Tap + to clip your first link — or see one in action."}
       </p>
+      {!hasNotes && onTrySample && (
+        <button
+          type="button"
+          onClick={onTrySample}
+          className={`mt-5 inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+        >
+          <WandSparkles className="h-4 w-4" />
+          Try a sample note
+        </button>
+      )}
     </div>
   );
 }

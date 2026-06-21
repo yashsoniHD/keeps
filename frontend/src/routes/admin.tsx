@@ -295,6 +295,58 @@ function AdminPage() {
               />
             </div>
 
+            {/* ── Growth & retention (the fundraising numbers) ── */}
+            <h2 className="mt-8 text-xs font-medium uppercase tracking-wider text-ink-soft">
+              Growth & retention
+            </h2>
+            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <StatCard
+                icon={TrendingUp}
+                label="Activation"
+                value={`${Math.round(t.activation_rate * 100)}%`}
+                sub={`${fmt(t.activated)} of ${fmt(t.users)} saved a note`}
+              />
+              <StatCard
+                icon={Users}
+                label="Retained · 7d"
+                value={`${Math.round(t.retained_7d * 100)}%`}
+                sub="of users >7d old, active in last 7d"
+              />
+              <StatCard
+                icon={Users}
+                label="New users"
+                value={fmt(t.new_users_7d)}
+                sub={`${fmt(t.new_users_30d)} in 30d`}
+              />
+              <StatCard
+                icon={Coins}
+                label="Cost / active user"
+                value={usdSmall(t.cost_per_active_user_usd)}
+                sub="30-day active"
+              />
+            </div>
+
+            {stats.signups_by_source && Object.keys(stats.signups_by_source).length > 0 && (
+              <div className="mt-3 rounded-2xl border border-border bg-card p-4">
+                <p className="text-xs font-medium uppercase tracking-wider text-ink-soft">
+                  Signups by source
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {Object.entries(stats.signups_by_source)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([src, n]) => (
+                      <span
+                        key={src}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-paper px-3 py-1 text-sm text-ink"
+                      >
+                        <span className="text-ink-soft">{src}</span>
+                        <span className="font-medium">{fmt(n)}</span>
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {/* ── 30-day trend charts ── */}
             {stats.daily_trend.length > 0 && (
               <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
