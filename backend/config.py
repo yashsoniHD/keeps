@@ -102,6 +102,17 @@ class Settings:
     # Max size for downloaded social media files we upload to GCS for analysis.
     MAX_MEDIA_DOWNLOAD_MB: int = int(os.getenv("MAX_MEDIA_DOWNLOAD_MB", "100"))
 
+    # Direct user uploads (screenshot / image / PDF / voice via /api/ingest/upload).
+    # A per-input ceiling bounds both the GCS object and the Gemini token cost of a single
+    # capture — the cheapest safe equivalent of a page cap for PDFs (we don't parse pages).
+    MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
+    ALLOWED_UPLOAD_MIME: dict[str, set[str]] = {
+        "image": {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/gif"},
+        "pdf": {"application/pdf"},
+        "voice": {"audio/mpeg", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
+                  "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"},
+    }
+
     # Optional paid fallback for Instagram/TikTok when yt-dlp is IP-blocked from Cloud Run
     # (datacenter IPs hit a login/rate-limit wall cookie-less). Apify owns the proxies +
     # accounts; we pay per scrape. Dormant until APIFY_TOKEN is set — the og-caption

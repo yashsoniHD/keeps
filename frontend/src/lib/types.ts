@@ -10,7 +10,8 @@ export interface Note {
   user_note?: string; // owner's private annotation — never shown on public /p/{id}
   source_url: string;
   source_domain: string;
-  source: "web" | "shortcut" | "pwa";
+  source: "web" | "shortcut" | "pwa" | "upload" | "ai";
+  input_type?: "url" | "text" | "image" | "pdf" | "voice"; // how it was captured (default url)
   cover_image_url: string | null;
   data: Record<string, unknown>;
   acquisition?: string;

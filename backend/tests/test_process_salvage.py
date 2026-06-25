@@ -62,10 +62,10 @@ def patch_pipeline(monkeypatch, *, acquire_exc=None, extract_exc=None, extractio
 
     monkeypatch.setattr(process.sources, "acquire", fake_acquire)
 
-    async def fake_assign(url, bundle, existing):
+    async def fake_assign(url, bundle, existing, note_hint=None):
         return "summary"
 
-    async def fake_extract(url, bundle, content_type):
+    async def fake_extract(url, bundle, content_type, note_hint=None):
         if extract_exc:
             raise extract_exc
         return extraction

@@ -46,6 +46,48 @@ export async function ingest(url: string): Promise<{ job_id: string; status: str
   return res.json();
 }
 
+// Save a typed thought / pasted passage as a note (no URL). Same job pipeline as ingest().
+export async function ingestText(
+  text: string,
+  title?: string,
+): Promise<{ job_id: string; status: string }> {
+  const res = await apiFetch("/api/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input_type: "text", text, title: title || undefined }),
+  });
+  if (!res.ok) {
+    throw new ApiError(
+      await errorDetail(res, "Couldn't save the note. Please try again."),
+      res.status,
+    );
+  }
+  return res.json();
+}
+
+// Save a screenshot/image or PDF. Multipart so the bytes go straight to GCS; the backend
+// returns a job_id the same way the URL path does. Do NOT set Content-Type — the browser
+// adds the multipart boundary itself.
+export async function ingestMedia(
+  file: File,
+  inputType: "image" | "pdf",
+  title?: string,
+): Promise<{ job_id: string; status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("input_type", inputType);
+  form.append("source", "upload");
+  if (title) form.append("title", title);
+  const res = await apiFetch("/api/ingest/upload", { method: "POST", body: form });
+  if (!res.ok) {
+    throw new ApiError(
+      await errorDetail(res, "Couldn't add that file. Please try again."),
+      res.status,
+    );
+  }
+  return res.json();
+}
+
 // Owner edits to a note: a private annotation (user_note) and/or recategorisation
 // (content_type). Writes route through the backend (Firestore forbids client writes);
 // the feed's onSnapshot listener reflects the change live.
@@ -164,7 +206,7 @@ export interface ChatMessage {
   citations?: AskCitation[];
   coverage?: string | null;
   artifact?: AskArtifact | null;
-  saved_note_id?: string | null;  // present when Clip AI saved a link on the user's behalf
+  saved_note_id?: string | null; // present when Clip AI saved a link on the user's behalf
   pending?: boolean;
   jobId?: string;
   resultNoteId?: string | null;

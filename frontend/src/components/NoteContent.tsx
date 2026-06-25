@@ -56,11 +56,18 @@ function NoteBody({ note }: { note: Note }) {
 function PlainBody({ note }: { note: Note }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 text-sm text-ink-soft">
-      This note's details couldn't be displayed;{" "}
-      <a href={note.source_url} target="_blank" rel="noreferrer" className="underline">
-        open the original
-      </a>{" "}
-      instead.
+      This note's details couldn't be displayed
+      {note.source_url ? (
+        <>
+          ;{" "}
+          <a href={note.source_url} target="_blank" rel="noreferrer" className="underline">
+            open the original
+          </a>{" "}
+          instead.
+        </>
+      ) : (
+        "."
+      )}
     </div>
   );
 }
@@ -99,16 +106,19 @@ function FallbackBanner({ note }: { note: Note }) {
   };
   return (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/50 px-4 py-3 text-sm text-ink-soft">
-      <span>Limited preview. We saved the link, but couldn't process the content.</span>
-      <button
-        type="button"
-        onClick={retry}
-        disabled={retrying}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
-      >
-        <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />
-        {retrying ? "Retrying…" : "Retry"}
-      </button>
+      <span>Limited preview — we couldn't fully process this capture.</span>
+      {/* Retry re-ingests the original URL; a typed/uploaded capture has none, so it's hidden. */}
+      {note.source_url && (
+        <button
+          type="button"
+          onClick={retry}
+          disabled={retrying}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
+        >
+          <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />
+          {retrying ? "Retrying…" : "Retry"}
+        </button>
+      )}
     </div>
   );
 }
@@ -156,7 +166,11 @@ function PublicSaveBar({ onSave, saving, isAuthed }: PublicSaveProps) {
         disabled={saving}
         className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
       >
-        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}
+        {saving ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <BookmarkPlus className="h-4 w-4" />
+        )}
         {saving ? "Saving…" : isAuthed ? "Save" : "Save to Clipnote"}
       </button>
     </div>
@@ -184,7 +198,11 @@ function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
           disabled={saving}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
         >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <BookmarkPlus className="h-4 w-4" />
+          )}
           {saving ? "Saving…" : isAuthed ? "Save to my notes" : "Sign up to save"}
         </button>
       ) : (

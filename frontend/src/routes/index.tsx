@@ -11,6 +11,9 @@ import {
   X,
   Check,
   Layers,
+  Link2,
+  Type,
+  ImagePlus,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
@@ -23,7 +26,7 @@ import {
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
-import { ingest, searchNotes } from "@/lib/api";
+import { ingest, ingestMedia, ingestText, searchNotes } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
@@ -227,6 +230,29 @@ function Feed() {
     }
   };
 
+  // Typed-note capture: no URL, so no optimistic placeholder (the real job card lands in a
+  // few hundred ms and drives the feedback). The offline replay queue only knows how to
+  // replay URLs, so a failed text/file capture surfaces an error rather than being parked.
+  const handleCaptureText = async (text: string, title?: string) => {
+    setShowAdd(false);
+    setIngestError(null);
+    try {
+      await ingestText(text, title);
+      analytics.noteSaved();
+    } catch (e) {
+      setIngestError(e instanceof Error ? e.message : "Couldn't save the note.");
+    }
+  };
+
+  // Image/PDF capture: the multipart upload to GCS takes a beat, so AddSheet shows its own
+  // "Adding…" state and awaits this; we only surface errors here.
+  const handleUploadFile = async (file: File, kind: "image" | "pdf") => {
+    setIngestError(null);
+    await ingestMedia(file, kind, file.name);
+    analytics.noteSaved();
+    setShowAdd(false);
+  };
+
   // Filter chips emerge from the user's own taxonomy (user doc + loaded notes).
   const categories = useMemo(
     () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
@@ -277,7 +303,9 @@ function Feed() {
       try {
         const results = await searchNotes(trimmedQuery);
         setSearchResults(
-          results.map((r) => ({ ...r, source_url: "", source: "web", data: {} }) as unknown as Note),
+          results.map(
+            (r) => ({ ...r, source_url: "", source: "web", data: {} }) as unknown as Note,
+          ),
         );
       } catch {
         setSearchResults([]);
@@ -441,7 +469,10 @@ function Feed() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setPendingUrl(""); setShowAdd(true); }}
+                  onClick={() => {
+                    setPendingUrl("");
+                    setShowAdd(true);
+                  }}
                   aria-label="New note"
                   title="New note"
                   className={ICON_BTN}
@@ -472,35 +503,35 @@ function Feed() {
                     maskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
                   }}
                 >
-                <button
-                  type="button"
-                  onClick={() => setActive("all")}
-                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
-                    active === "all"
-                      ? "bg-ink text-paper"
-                      : "border border-border bg-card text-ink-soft hover:text-ink"
-                  }`}
-                >
-                  All
-                </button>
-                {categories.map((c) => {
-                  const accent = noteAccent(c);
-                  const Icon = noteIcon(c);
-                  const isActive = active === c;
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setActive(c)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
-                        isActive ? `${accent.dot} text-white` : accent.chip
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0" />
-                      {noteLabel(c)}
-                    </button>
-                  );
-                })}
+                  <button
+                    type="button"
+                    onClick={() => setActive("all")}
+                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
+                      active === "all"
+                        ? "bg-ink text-paper"
+                        : "border border-border bg-card text-ink-soft hover:text-ink"
+                    }`}
+                  >
+                    All
+                  </button>
+                  {categories.map((c) => {
+                    const accent = noteAccent(c);
+                    const Icon = noteIcon(c);
+                    const isActive = active === c;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setActive(c)}
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
+                          isActive ? `${accent.dot} text-white` : accent.chip
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        {noteLabel(c)}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -630,6 +661,8 @@ function Feed() {
           setUrl={setPendingUrl}
           onCancel={() => setShowAdd(false)}
           onSubmit={handleCapture}
+          onSubmitText={handleCaptureText}
+          onUploadFile={handleUploadFile}
         />
       )}
     </AppShell>
@@ -674,7 +707,10 @@ function SourceFilter({
     setPos({ top: r.bottom + 8, left: r.left });
   }, [open]);
 
-  const options = [{ id: "all", label: "All sources" }, ...sources.map((s) => ({ id: s, label: sourceLabel(s) }))];
+  const options = [
+    { id: "all", label: "All sources" },
+    ...sources.map((s) => ({ id: s, label: sourceLabel(s) })),
+  ];
 
   return (
     <div className="shrink-0">
@@ -749,12 +785,23 @@ function AddSheet({
   setUrl,
   onCancel,
   onSubmit,
+  onSubmitText,
+  onUploadFile,
 }: {
   url: string;
   setUrl: (v: string) => void;
   onCancel: () => void;
   onSubmit: (u: string) => void;
+  onSubmitText: (text: string, title?: string) => void;
+  onUploadFile: (file: File, kind: "image" | "pdf") => Promise<void>;
 }) {
+  const [mode, setMode] = useState<"link" | "text">("link");
+  const [text, setText] = useState("");
+  const [title, setTitle] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
   // Auto-fill from the clipboard, best-effort and non-blocking. The modal is already
   // mounted/painted by the time this effect runs, so the open is instant. We skip the
   // read on iOS, where readText() can only proceed behind a blocking "Paste" system
@@ -773,6 +820,40 @@ function AddSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const onFilePicked = async (file: File | undefined) => {
+    if (!file) return;
+    const kind: "image" | "pdf" | null = file.type.startsWith("image/")
+      ? "image"
+      : file.type === "application/pdf"
+        ? "pdf"
+        : null;
+    if (!kind) {
+      setFileError("Pick an image or a PDF.");
+      return;
+    }
+    setFileError(null);
+    setUploading(true);
+    try {
+      await onUploadFile(file, kind); // closes the sheet on success
+    } catch (e) {
+      setUploading(false);
+      setFileError(e instanceof Error ? e.message : "Couldn't add that file.");
+    }
+  };
+
+  const tab = (key: "link" | "text", icon: React.ReactNode, label: string) => (
+    <button
+      type="button"
+      onClick={() => setMode(key)}
+      className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium transition ${
+        mode === key ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
     <div
       data-no-refresh
@@ -781,42 +862,108 @@ function AddSheet({
       <div className="w-full max-w-md rounded-3xl border border-border bg-card p-5 shadow-2xl">
         <h2 className="font-serif text-2xl text-ink">New note</h2>
         <p className="mt-1 text-sm text-ink-soft">
-          Paste any link: reel, video, recipe, product, article.
+          Save a link, a screenshot or PDF, or jot a note — Clipnote structures it for you.
         </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (url.trim()) onSubmit(url.trim());
-          }}
-          className="mt-4 space-y-3"
-        >
-          <input
-            autoFocus
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://…"
-            inputMode="url"
-            autoComplete="off"
-            spellCheck={false}
-            className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex-1 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!url.trim()}
-              className="flex-1 rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
-            >
-              Capture
-            </button>
-          </div>
-        </form>
+
+        {/* Mode switch + file picker (a file capture is one tap, so it lives beside the tabs). */}
+        <div className="mt-4 flex items-center gap-2 rounded-full border border-border bg-paper p-1">
+          {tab("link", <Link2 className="h-4 w-4" />, "Link")}
+          {tab("text", <Type className="h-4 w-4" />, "Note")}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-ink-soft transition hover:text-ink disabled:opacity-50"
+          >
+            <ImagePlus className="h-4 w-4" />
+            {uploading ? "Adding…" : "Photo / PDF"}
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*,application/pdf"
+          className="hidden"
+          onChange={(e) => onFilePicked(e.target.files?.[0])}
+        />
+        {fileError && <p className="mt-2 text-sm text-red-600">{fileError}</p>}
+
+        {mode === "link" ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (url.trim()) onSubmit(url.trim());
+            }}
+            className="mt-4 space-y-3"
+          >
+            <input
+              autoFocus
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://…"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!url.trim()}
+                className="flex-1 rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
+              >
+                Capture
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (text.trim()) onSubmitText(text.trim(), title.trim() || undefined);
+            }}
+            className="mt-4 space-y-3"
+          >
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Title (optional)"
+              autoComplete="off"
+              className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
+            />
+            <textarea
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Type or paste anything…"
+              rows={4}
+              className="w-full resize-none rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!text.trim()}
+                className="flex-1 rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
+              >
+                Save note
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
