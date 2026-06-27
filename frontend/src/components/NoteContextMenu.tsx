@@ -196,12 +196,18 @@ function NoteMenu({
     });
   }, [pos, view]);
 
-  // A scroll or resize invalidates the anchor — close rather than float in the wrong spot.
+  // A page scroll or resize invalidates the anchor — close rather than float in the wrong spot.
+  // But ignore scrolls that originate *inside* the menu (e.g. the recategorise list's own
+  // overflow), otherwise scrolling to a category below the fold instantly closes the menu.
   useEffect(() => {
-    window.addEventListener("scroll", onClose, true);
+    const onScroll = (e: Event) => {
+      if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return;
+      onClose();
+    };
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
     return () => {
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onClose);
     };
   }, [onClose]);

@@ -16,6 +16,7 @@ import { Route as LibraryRouteImport } from './routes/library'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LibraryIndexRouteImport } from './routes/library.index'
 import { Route as PNoteIdRouteImport } from './routes/p.$noteId'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
 import { Route as LibraryCollectionIdRouteImport } from './routes/library.$collectionId'
@@ -55,6 +56,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LibraryIndexRoute = LibraryIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LibraryRoute,
+} as any)
 const PNoteIdRoute = PNoteIdRouteImport.update({
   id: '/p/$noteId',
   path: '/p/$noteId',
@@ -82,18 +88,19 @@ export interface FileRoutesByFullPath {
   '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
+  '/library/': typeof LibraryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
-  '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
   '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
+  '/library': typeof LibraryIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -107,6 +114,7 @@ export interface FileRoutesById {
   '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
+  '/library/': typeof LibraryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -121,18 +129,19 @@ export interface FileRouteTypes {
     | '/library/$collectionId'
     | '/notes/$noteId'
     | '/p/$noteId'
+    | '/library/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
     | '/ask'
-    | '/library'
     | '/login'
     | '/settings'
     | '/share'
     | '/library/$collectionId'
     | '/notes/$noteId'
     | '/p/$noteId'
+    | '/library'
   id:
     | '__root__'
     | '/'
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/library/$collectionId'
     | '/notes/$noteId'
     | '/p/$noteId'
+    | '/library/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -210,6 +220,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/library/': {
+      id: '/library/'
+      path: '/'
+      fullPath: '/library/'
+      preLoaderRoute: typeof LibraryIndexRouteImport
+      parentRoute: typeof LibraryRoute
+    }
     '/p/$noteId': {
       id: '/p/$noteId'
       path: '/p/$noteId'
@@ -236,10 +253,12 @@ declare module '@tanstack/react-router' {
 
 interface LibraryRouteChildren {
   LibraryCollectionIdRoute: typeof LibraryCollectionIdRoute
+  LibraryIndexRoute: typeof LibraryIndexRoute
 }
 
 const LibraryRouteChildren: LibraryRouteChildren = {
   LibraryCollectionIdRoute: LibraryCollectionIdRoute,
+  LibraryIndexRoute: LibraryIndexRoute,
 }
 
 const LibraryRouteWithChildren =
