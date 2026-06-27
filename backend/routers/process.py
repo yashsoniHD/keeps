@@ -42,10 +42,11 @@ from services.firebase import (
     record_image_generated,
     reserve_image_slot,
 )
-from services.gemini import gemini_service, match_existing, normalize_slug
+from services.gemini import gemini_service, is_entertainment, match_existing, normalize_slug
 from services.imagen import generate_cover
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.usage_meter import start_metering
+from services.watchlist import enrich_titles
 
 router = APIRouter(tags=["process"])
 log = logging.getLogger("clipnote.process")
@@ -262,6 +263,20 @@ async def process_job(job_id: str, request: Request):
         if embedding is not None:
             note_doc["embedding"] = embedding
         await db.collection("notes").document(note_id).set(note_doc)
+        # Watchlist mini-app: fan the note's extracted titles out into per-title watch_items
+        # (TMDB-enriched). Best-effort and fully guarded — the note already exists, so a
+        # failure here must never reach the outer salvage path (which would duplicate it).
+        if is_entertainment(extracted.content_type):
+            try:
+                titles = (extracted.data or {}).get("titles") or []
+                poster = await enrich_titles(user_id, note_id, titles)
+                if poster and not cover_image_url:
+                    await db.collection("notes").document(note_id).update(
+                        {"cover_image_url": poster, "updated_at": datetime.now(timezone.utc)}
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("watchlist enrichment failed: %s: %s", type(e).__name__, e,
+                            extra={"job_id": job_id, "user_id": user_id, "url": url})
         await add_user_category(user_id, extracted.content_type)
         await add_user_source(user_id, source_domain)
         await job_ref.update({"status": "completed", "note_id": note_id,

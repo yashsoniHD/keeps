@@ -53,6 +53,7 @@ Imagen-generated covers at scale.
 | GCP Service Account | `clip-note-sa@weekly-updates-automation.iam.gserviceaccount.com` |
 | Firebase web app | "Clip Note" `1:674775099277:web:5a3293c1c0b570e392bfc4` |
 | Models | `gemini-3.5-flash` (extraction) · `gemini-3.1-flash-lite` (categorization) |
+| TMDB (Watchlist) | `TMDB_BEARER` env/secret on Cloud Run = TMDB v4 Read Access Token. Empty = enrichment no-op. Free API; "Streaming data by JustWatch" credit is mandatory wherever providers render. |
 | Billing budget | "Clip Note credits guard" ₹30,000 (50/80/100% alerts) |
 | Distill reference app | `/Users/yashsoni/dev/distill` |
 | Lovable frontend source | `/Users/yashsoni/Downloads/Clip Note` |
@@ -268,7 +269,18 @@ usage/{uid}-{date}    user_id, date, ingest_count, ask_count   # per-user daily 
 system/usage-{date}   date, note_count, ask_count,             # global daily kill-switch
                       tok_tokens_{in,out}_{main,lite}, tok_ai_calls  # global daily token spend
 shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used_at  # Phase 2 (PAT)
+users/{uid}/watch_items/{id}  source_note_ids[], title, year, media_type, tmdb_id?,  # Watchlist mini-app
+                      poster_url?, providers?[{name,logo_url,type}], providers_region?,
+                      watch_status (to_watch|watched), watched_at?, rating? (1-5)
+                      # owner-READ only; backend writes enrichment + /api/watch-items toggles
+tmdb_cache/{key}      cached TMDB details/providers (24h TTL); backend-only
 ```
+
+**Watchlist mini-app:** entertainment notes (slug matched by `is_entertainment`, `gemini.py`) extract a
+structured `data.titles[]` via the `entertainment` `TYPE_PROMPT`; the worker (`process.py`) fans each
+title out into `users/{uid}/watch_items` (TMDB-enriched, deduped by tmdb id, never clobbering user
+state) and adopts the primary poster as the note cover when coverless. Frontend `/watchlist` route
+(`components/watchlist/`) is a read-only poster wall; region lives on `users/{uid}.region`.
 
 `users/{uid}.categories` is the source of truth for a user's note types (kept current with
 `ArrayUnion` on each new slug) — read it instead of scanning `notes`. `notes` docs store **structured

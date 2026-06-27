@@ -67,6 +67,7 @@ from routers.admin import router as admin_router        # noqa: E402
 from routers.search import router as search_router      # noqa: E402
 from routers.categories import router as categories_router  # noqa: E402
 from routers.conversations import router as conversations_router  # noqa: E402
+from routers.watch_items import router as watch_items_router  # noqa: E402
 
 app.include_router(ingest_router, prefix="/api")
 app.include_router(process_router, prefix="/api")
@@ -78,3 +79,4 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(conversations_router, prefix="/api")
+app.include_router(watch_items_router, prefix="/api")

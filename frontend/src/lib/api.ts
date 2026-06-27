@@ -69,6 +69,29 @@ export async function deleteNote(id: string): Promise<void> {
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete the note."), res.status);
 }
 
+// --- Watchlist mini-app ---
+
+// Toggle watched / set a 1–5 rating on a watch item. Writes route through the backend
+// (Firestore forbids client writes to watch_items); the view's onSnapshot reflects it live.
+export async function updateWatchItem(
+  itemId: string,
+  updates: { watch_status?: "to_watch" | "watched"; rating?: number },
+): Promise<void> {
+  const res = await apiFetch(`/api/watch-items/${itemId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't update the watch item."), res.status);
+}
+
+export async function deleteWatchItem(itemId: string): Promise<void> {
+  const res = await apiFetch(`/api/watch-items/${itemId}`, { method: "DELETE" });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't remove the title."), res.status);
+}
+
 // --- Categories (manage the user's taxonomy) ---
 
 // The taxonomy joined with per-type note counts. Rename/delete re-tag the affected

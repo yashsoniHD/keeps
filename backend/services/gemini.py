@@ -35,6 +35,23 @@ def normalize_slug(raw: str) -> str:
     return s or "summary"
 
 
+# The Watchlist mini-app's content family. Entertainment slugs are AI-invented and open
+# (`entertainment-recommendations`, `movie`, `film`, `tv`, …), so the family is defined by a
+# keyword matcher rather than a fixed enum. Used to (a) route extraction through the
+# `entertainment` schema and (b) gate TMDB enrichment in the worker. Keep this list in sync
+# with the frontend family matcher.
+ENTERTAINMENT_KEYWORDS = (
+    "movie", "film", "tv", "show", "series", "anime", "cinema",
+    "entertainment", "sitcom", "netflix", "documentary", "watchlist",
+)
+
+
+def is_entertainment(content_type: str) -> bool:
+    """True when a content_type slug belongs to the movies/shows family."""
+    slug = normalize_slug(content_type)
+    return any(kw in slug for kw in ENTERTAINMENT_KEYWORDS)
+
+
 def match_existing(slug: str, existing: list[str]) -> str:
     """Collapse to an existing category if it's effectively the same (case/space/plural)."""
     norm = normalize_slug(slug)
@@ -190,6 +207,27 @@ Watch the demonstration: capture sets/reps/tempo even if only shown on screen te
   "keyIdeas"?: ["for non-fiction: the core ideas", ...],
   "whoShouldRead": str
 }""",
+
+    "entertainment": _SHARED_RULES + """
+
+This is a movie/show recommendation — a single title OR a list (a "5 films to watch" reel,
+a thread, a best-of article). Extract EVERY distinct work mentioned as its own entry so each
+becomes a trackable watchlist item. NEVER merge two different works into one entry, and NEVER
+invent a title that is not named in the source.
+
+`data` schema for entertainment:
+{
+  "titles": [{
+    "title": "the work's name exactly as stated",
+    "year"?: "release year if shown or said, e.g. '2014'",
+    "mediaType": "movie | tv | unknown",   // tv = series/show/anime; unknown if unclear
+    "creator"?: "director or showrunner, only if mentioned",
+    "why"?: "one short line on why it's recommended, from the source"
+  }],
+  "listTheme"?: "the theme of the list if it's a themed roundup, e.g. 'feel-good sci-fi'"
+}
+A single-title post yields a one-element `titles` array; a listicle yields one entry per work.
+The note's own `title`/`ai_summary` should describe the reel/list as a whole.""",
 }
 
 
@@ -466,7 +504,14 @@ class GeminiService:
 
     def extract(self, url: str, bundle: ContentBundle, content_type: str,
                 note_hint: str | None = None) -> NoteExtraction:
-        system = TYPE_PROMPTS.get(content_type, COMPOSER_PROMPT)
+        # Exact known type → its schema; else an entertainment-family slug → the
+        # entertainment schema (structured titles); else the open composer.
+        if content_type in TYPE_PROMPTS:
+            system = TYPE_PROMPTS[content_type]
+        elif is_entertainment(content_type):
+            system = TYPE_PROMPTS["entertainment"]
+        else:
+            system = COMPOSER_PROMPT
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             system_instruction=system,

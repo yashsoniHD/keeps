@@ -6,6 +6,13 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
+    // Watchlist items (per-title, TMDB-enriched): owner reads live via onSnapshot.
+    // Backend-write-only — the worker writes enrichment, and watched/rating go through the
+    // /api/watch-items endpoints — so the client can never tamper with poster/provider data.
+    match /users/{uid}/watch_items/{itemId} {
+      allow read:  if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
     // Notes: owner reads/deletes; anyone may read a note the owner has shared
     // (is_public == true) — that powers the public /p/{id} link. Created and updated
     // only by the backend (which toggles is_public via the admin SDK).

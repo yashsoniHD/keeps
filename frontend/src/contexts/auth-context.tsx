@@ -7,6 +7,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { auth } from "@/integrations/firebase/client";
+import { ensureUserRegion } from "@/lib/firestore";
 
 interface AuthCtx {
   user: User | null;
@@ -30,6 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
+      // Seed the Watchlist "where to watch" region once, the first time we see this user.
+      if (u) ensureUserRegion(u.uid).catch(() => {});
     });
   }, []);
 

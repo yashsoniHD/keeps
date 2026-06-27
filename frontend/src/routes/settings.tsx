@@ -12,7 +12,9 @@ import {
   Share2,
   Moon,
   Sun,
+  Clapperboard,
 } from "lucide-react";
+import { getUserRegion, setUserRegion } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
 import { ADMIN_EMAILS } from "@/routes/admin";
 import {
@@ -110,6 +112,8 @@ function Settings() {
 
         <CategoriesSection />
 
+        <WatchRegionSection uid={user.uid} />
+
         <AppearanceSection />
 
         <ConnectPhone />
@@ -175,6 +179,75 @@ function Settings() {
 
 // Theme control. A manual toggle commits an explicit light/dark choice (dropping the
 // "follow system" default); the resolved value drives both the icon and the switch state.
+// Common "where to watch" regions for the Watchlist. ISO-3166-1 alpha-2; the backend uses
+// this when looking up streaming-provider availability for saved movies/shows.
+const WATCH_REGIONS: { code: string; label: string }[] = [
+  { code: "IN", label: "India" },
+  { code: "US", label: "United States" },
+  { code: "GB", label: "United Kingdom" },
+  { code: "CA", label: "Canada" },
+  { code: "AU", label: "Australia" },
+  { code: "DE", label: "Germany" },
+  { code: "FR", label: "France" },
+  { code: "ES", label: "Spain" },
+  { code: "BR", label: "Brazil" },
+  { code: "JP", label: "Japan" },
+  { code: "SG", label: "Singapore" },
+  { code: "AE", label: "United Arab Emirates" },
+];
+
+function WatchRegionSection({ uid }: { uid: string }) {
+  const [region, setRegion] = useState<string>("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    getUserRegion(uid)
+      .then((r) => setRegion(r || "IN"))
+      .catch(() => setRegion("IN"));
+  }, [uid]);
+
+  const handleChange = async (next: string) => {
+    setRegion(next);
+    try {
+      await setUserRegion(uid, next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // non-critical — the backend default applies if this never persists.
+    }
+  };
+
+  return (
+    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
+      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
+        <Clapperboard className="h-3.5 w-3.5" />
+        Movies &amp; shows
+      </h2>
+      <label className="mt-4 flex items-center justify-between gap-3">
+        <span>
+          <span className="block text-sm font-medium text-ink">Where to watch region</span>
+          <span className="block text-xs text-ink-soft">
+            Streaming availability in your Watchlist is shown for this country.
+            {saved && <span className="ml-1 text-media">Saved</span>}
+          </span>
+        </span>
+        <select
+          value={region}
+          onChange={(e) => handleChange(e.target.value)}
+          className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-ink"
+          aria-label="Where to watch region"
+        >
+          {WATCH_REGIONS.map((r) => (
+            <option key={r.code} value={r.code}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}
+
 function AppearanceSection() {
   const { resolved, setTheme } = useTheme();
   const isDark = resolved === "dark";

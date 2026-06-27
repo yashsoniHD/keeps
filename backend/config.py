@@ -125,6 +125,18 @@ class Settings:
     # Hard ceiling so a runaway/abuse spike can't drain the budget via paid scrapes.
     APIFY_DAILY_GLOBAL_CAP: int = int(os.getenv("APIFY_DAILY_GLOBAL_CAP", "200"))
 
+    # --- Watchlist mini-app (TMDB enrichment) ---
+    # TMDB v4 Read Access Token (sent as `Authorization: Bearer`). When empty, enrichment is a
+    # graceful no-op: entertainment notes still save and watch_items render from the raw title.
+    # TMDB is free for this use, so no per-user cost cap (unlike Gemini/Imagen).
+    TMDB_BEARER: str = os.getenv("TMDB_BEARER", "")
+    TMDB_API_BASE: str = os.getenv("TMDB_API_BASE", "https://api.themoviedb.org/3")
+    TMDB_IMAGE_BASE: str = os.getenv("TMDB_IMAGE_BASE", "https://image.tmdb.org/t/p")
+    # Region (ISO-3166-1 alpha-2) used for "where to watch" when a user has none set.
+    DEFAULT_WATCH_REGION: str = os.getenv("DEFAULT_WATCH_REGION", "IN")
+    # Provider lookups cache per (tmdb_id, region) for this many hours (JustWatch data lags ~8h).
+    TMDB_PROVIDER_CACHE_HOURS: int = int(os.getenv("TMDB_PROVIDER_CACHE_HOURS", "24"))
+
     # Optional Firecrawl API key for bot-protected product pages (tier 2 fallback).
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY", "")
     # Optional Jina Reader key (r.jina.ai works keyless at low volume; key raises limits).

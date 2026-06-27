@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WatchlistRouteImport } from './routes/watchlist'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
@@ -18,6 +19,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PNoteIdRouteImport } from './routes/p.$noteId'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
 
+const WatchlistRoute = WatchlistRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ShareRoute = ShareRouteImport.update({
   id: '/share',
   path: '/share',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
+  '/watchlist': typeof WatchlistRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
+  '/watchlist': typeof WatchlistRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
+  '/watchlist': typeof WatchlistRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/share'
+    | '/watchlist'
     | '/notes/$noteId'
     | '/p/$noteId'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/share'
+    | '/watchlist'
     | '/notes/$noteId'
     | '/p/$noteId'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/share'
+    | '/watchlist'
     | '/notes/$noteId'
     | '/p/$noteId'
   fileRoutesById: FileRoutesById
@@ -130,12 +142,20 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   ShareRoute: typeof ShareRoute
+  WatchlistRoute: typeof WatchlistRoute
   NotesNoteIdRoute: typeof NotesNoteIdRoute
   PNoteIdRoute: typeof PNoteIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/watchlist': {
+      id: '/watchlist'
+      path: '/watchlist'
+      fullPath: '/watchlist'
+      preLoaderRoute: typeof WatchlistRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/share': {
       id: '/share'
       path: '/share'
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   ShareRoute: ShareRoute,
+  WatchlistRoute: WatchlistRoute,
   NotesNoteIdRoute: NotesNoteIdRoute,
   PNoteIdRoute: PNoteIdRoute,
 }
