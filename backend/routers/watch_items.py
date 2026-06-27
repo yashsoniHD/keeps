@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from services.auth_dep import require_user
-from services.firebase import get_db
+from services.firebase import flush_usage, get_db
+from services.usage_meter import start_metering
+from services.watchlist import backfill_user
 
 router = APIRouter(tags=["watch_items"])
 
@@ -46,6 +48,19 @@ async def update_watch_item(item_id: str, body: WatchItemUpdate,
         updates["rating"] = body.rating
     await ref.update(updates)
     return {"ok": True}
+
+
+@router.post("/watch-items/backfill")
+async def backfill_watch_items(user_id: str = Depends(require_user)):
+    """Import movies & shows from the user's existing entertainment notes into the watchlist.
+    Extracts the titles named in each note (no re-scraping) and TMDB-enriches them. Safe to
+    re-run (e.g. after the TMDB token is configured, to add posters)."""
+    meter = start_metering()
+    try:
+        result = await backfill_user(user_id)
+    finally:
+        await flush_usage(user_id, meter)
+    return result
 
 
 @router.delete("/watch-items/{item_id}")

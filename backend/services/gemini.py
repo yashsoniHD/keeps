@@ -100,6 +100,17 @@ Rules, in priority order:
    recipe/workout/itinerary when the source actually CONTAINS that artifact."""
 
 
+TITLES_FROM_NOTE_SYSTEM = """You extract the movie and TV show titles named in a saved note.
+Return ONLY valid JSON:
+{"titles":[{"title":str,"year"?:str,"mediaType":"movie|tv|unknown","why"?:"one short line"}]}
+
+Rules:
+- List EVERY distinct film/series named. A roundup ("5 sci-fi films") yields one entry per title.
+- A note about a single work yields one entry — use the work's real name, NOT the note's headline.
+- NEVER invent a title that isn't in the note. If none are identifiable, return {"titles":[]}.
+- `year` only if stated; `mediaType` is your best guess (tv = series/show/anime/miniseries)."""
+
+
 _SHARED_RULES = """You are a note extraction engine. The user saves links and never wants to
 open the source again — your note must be MORE useful than the source.
 
@@ -448,6 +459,36 @@ class GeminiService:
         except (json.JSONDecodeError, AttributeError):
             slug = "summary"
         return match_existing(slug, existing_categories)
+
+    # ---------- Backfill: pull titles out of an already-saved note ----------
+
+    async def extract_titles_from_note(self, title: str, ai_summary: str,
+                                       data: dict | None) -> list[dict]:
+        """For the Watchlist backfill: extract the movie/show titles from a note that was
+        already saved (so its `data` predates the entertainment schema and has no titles[]).
+        Works off the STORED text only — no re-scraping. Lite model, JSON mode."""
+        blob = (
+            f"Note title: {title}\n"
+            f"Summary: {ai_summary}\n"
+            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
+        )
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=settings.GEMINI_LITE_MODEL,
+                contents=[blob],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    system_instruction=TITLES_FROM_NOTE_SYSTEM,
+                ),
+            )
+            record_usage(settings.GEMINI_LITE_MODEL, response)
+            out = json.loads(_strip_code_fences(response.text))
+            titles = out.get("titles", []) if isinstance(out, dict) else []
+            return [t for t in titles if isinstance(t, dict) and t.get("title")]
+        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
+            log.warning("title backfill extract failed: %s: %s", type(e).__name__, e)
+            return []
 
     # ---------- Step 2: type-focused extraction (main model) ----------
 

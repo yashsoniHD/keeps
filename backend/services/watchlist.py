@@ -14,6 +14,7 @@ from google.cloud.firestore_v1 import ArrayUnion
 from config import settings
 from services import tmdb
 from services.firebase import get_db
+from services.gemini import gemini_service, is_entertainment
 
 log = logging.getLogger("clipnote.watchlist")
 
@@ -106,3 +107,35 @@ async def enrich_titles(uid: str, note_id: str, titles: list[dict],
                         title, type(e).__name__, e)
 
     return primary_poster
+
+
+async def backfill_user(uid: str, limit: int = 100) -> dict:
+    """Populate watch_items from a user's EXISTING entertainment notes (saved before the
+    entertainment schema existed, so they carry no titles[]). For each such note we extract
+    the named titles from its stored text (no re-scrape) and enrich into watch_items.
+
+    Idempotent: enrich_titles upserts by tmdb id and never clobbers user state, so re-running
+    (e.g. once the TMDB token is set, to add posters) is safe. Returns a small summary."""
+    db = get_db()
+    region = await get_user_region(uid)
+    notes_seen = 0
+    titles_found = 0
+    query = db.collection("notes").where("user_id", "==", uid)
+    async for snap in query.stream():
+        if notes_seen >= limit:
+            break
+        note = snap.to_dict() or {}
+        if not is_entertainment(note.get("content_type", "")):
+            continue
+        notes_seen += 1
+        try:
+            titles = await gemini_service.extract_titles_from_note(
+                note.get("title", ""), note.get("ai_summary", ""), note.get("data"),
+            )
+            if titles:
+                titles_found += len(titles)
+                await enrich_titles(uid, snap.id, titles, region=region)
+        except Exception as e:  # noqa: BLE001 — one note must not sink the backfill.
+            log.warning("backfill failed for note %s: %s: %s", snap.id, type(e).__name__, e)
+    log.info("watchlist backfill for %s: %d notes, %d titles", uid, notes_seen, titles_found)
+    return {"notes_processed": notes_seen, "titles_found": titles_found}

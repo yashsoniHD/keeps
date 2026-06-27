@@ -92,6 +92,18 @@ export async function deleteWatchItem(itemId: string): Promise<void> {
     throw new ApiError(await errorDetail(res, "Couldn't remove the title."), res.status);
 }
 
+// Import movies & shows from the user's existing entertainment notes into the watchlist.
+// Safe to re-run (idempotent); returns how many notes were scanned and titles found.
+export async function backfillWatchItems(): Promise<{
+  notes_processed: number;
+  titles_found: number;
+}> {
+  const res = await apiFetch("/api/watch-items/backfill", { method: "POST" });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't import from your notes."), res.status);
+  return res.json();
+}
+
 // --- Categories (manage the user's taxonomy) ---
 
 // The taxonomy joined with per-type note counts. Rename/delete re-tag the affected

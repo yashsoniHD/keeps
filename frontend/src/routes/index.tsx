@@ -11,7 +11,7 @@ import {
   X,
   Check,
   Layers,
-  Clapperboard,
+  LibraryBig,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
@@ -449,8 +449,8 @@ function Feed() {
                 >
                   <Plus className="h-4 w-4" />
                 </button>
-                <Link to="/watchlist" aria-label="Watchlist" title="Watchlist" className={ICON_BTN}>
-                  <Clapperboard className="h-4 w-4" />
+                <Link to="/library" aria-label="Library" title="Library" className={ICON_BTN}>
+                  <LibraryBig className="h-4 w-4" />
                 </Link>
                 <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
                   <Settings className="h-4 w-4" />

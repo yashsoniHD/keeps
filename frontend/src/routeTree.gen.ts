@@ -13,6 +13,7 @@ import { Route as WatchlistRouteImport } from './routes/watchlist'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as LibraryRouteImport } from './routes/library'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -37,6 +38,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LibraryRoute = LibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AskRoute = AskRouteImport.update({
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
+  '/library': typeof LibraryRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
+  '/library': typeof LibraryRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
+  '/library': typeof LibraryRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
+    | '/library'
     | '/login'
     | '/settings'
     | '/share'
@@ -116,6 +126,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
+    | '/library'
     | '/login'
     | '/settings'
     | '/share'
@@ -127,6 +138,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
+    | '/library'
     | '/login'
     | '/settings'
     | '/share'
@@ -139,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AskRoute: typeof AskRoute
+  LibraryRoute: typeof LibraryRoute
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   ShareRoute: typeof ShareRoute
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ask': {
@@ -219,6 +239,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AskRoute: AskRoute,
+  LibraryRoute: LibraryRoute,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   ShareRoute: ShareRoute,
