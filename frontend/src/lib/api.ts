@@ -47,14 +47,21 @@ export async function ingest(url: string): Promise<{ job_id: string; status: str
 }
 
 // Save a typed thought / pasted passage as a note (no URL). Same job pipeline as ingest().
+// processAI=false saves the text verbatim (no Gemini structuring) — the user titles/tags it.
 export async function ingestText(
   text: string,
   title?: string,
+  processAI = true,
 ): Promise<{ job_id: string; status: string }> {
   const res = await apiFetch("/api/ingest", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ input_type: "text", text, title: title || undefined }),
+    body: JSON.stringify({
+      input_type: "text",
+      text,
+      title: title || undefined,
+      process_ai: processAI,
+    }),
   });
   if (!res.ok) {
     throw new ApiError(
@@ -70,7 +77,7 @@ export async function ingestText(
 // adds the multipart boundary itself.
 export async function ingestMedia(
   file: File,
-  inputType: "image" | "pdf" | "voice",
+  inputType: "image" | "pdf" | "voice" | "video",
   title?: string,
 ): Promise<{ job_id: string; status: string }> {
   const form = new FormData();
@@ -111,7 +118,13 @@ export async function ingestVoice(
 // the feed's onSnapshot listener reflects the change live.
 export async function updateNote(
   id: string,
-  updates: { user_note?: string; content_type?: string; title?: string },
+  updates: {
+    user_note?: string;
+    content_type?: string;
+    title?: string;
+    ai_summary?: string;
+    data?: Record<string, unknown>;
+  },
 ): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}`, {
     method: "PATCH",

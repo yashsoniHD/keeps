@@ -437,7 +437,7 @@ class GeminiService:
             # the video directly (visuals + audio). Never inline bytes. Vertex requires
             # an explicit mimeType even for YouTube URLs (400 without it).
             parts.append(types.Part(file_data=types.FileData(file_uri=bundle.video_uri,
-                                                             mime_type="video/mp4")))
+                                                             mime_type=bundle.media_mime or "video/mp4")))
         if bundle.media_uri:
             # A user-saved image / PDF (and later audio), read straight from gs:// — same
             # FileData mechanism as video. Vertex requires the explicit mimeType.

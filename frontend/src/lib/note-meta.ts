@@ -59,20 +59,69 @@ export interface NoteAccent {
 }
 
 const PALETTES: NoteAccent[] = [
-  { dot: "bg-recipe", chip: "bg-recipe-soft text-recipe", ring: "group-hover:ring-recipe/30", text: "text-recipe", soft: "bg-recipe-soft/40" },
-  { dot: "bg-itinerary", chip: "bg-itinerary-soft text-itinerary", ring: "group-hover:ring-itinerary/30", text: "text-itinerary", soft: "bg-itinerary-soft/40" },
-  { dot: "bg-product", chip: "bg-product-soft text-product", ring: "group-hover:ring-product/30", text: "text-product", soft: "bg-product-soft/40" },
-  { dot: "bg-summary", chip: "bg-summary-soft text-summary", ring: "group-hover:ring-summary/30", text: "text-summary", soft: "bg-summary-soft/60" },
-  { dot: "bg-media", chip: "bg-media-soft text-media", ring: "group-hover:ring-media/30", text: "text-media", soft: "bg-media-soft/40" },
-  { dot: "bg-tech", chip: "bg-tech-soft text-tech", ring: "group-hover:ring-tech/30", text: "text-tech", soft: "bg-tech-soft/40" },
-  { dot: "bg-business", chip: "bg-business-soft text-business", ring: "group-hover:ring-business/30", text: "text-business", soft: "bg-business-soft/40" },
-  { dot: "bg-health", chip: "bg-health-soft text-health", ring: "group-hover:ring-health/30", text: "text-health", soft: "bg-health-soft/40" },
+  {
+    dot: "bg-recipe",
+    chip: "bg-recipe-soft text-recipe",
+    ring: "group-hover:ring-recipe/30",
+    text: "text-recipe",
+    soft: "bg-recipe-soft/40",
+  },
+  {
+    dot: "bg-itinerary",
+    chip: "bg-itinerary-soft text-itinerary",
+    ring: "group-hover:ring-itinerary/30",
+    text: "text-itinerary",
+    soft: "bg-itinerary-soft/40",
+  },
+  {
+    dot: "bg-product",
+    chip: "bg-product-soft text-product",
+    ring: "group-hover:ring-product/30",
+    text: "text-product",
+    soft: "bg-product-soft/40",
+  },
+  {
+    dot: "bg-summary",
+    chip: "bg-summary-soft text-summary",
+    ring: "group-hover:ring-summary/30",
+    text: "text-summary",
+    soft: "bg-summary-soft/60",
+  },
+  {
+    dot: "bg-media",
+    chip: "bg-media-soft text-media",
+    ring: "group-hover:ring-media/30",
+    text: "text-media",
+    soft: "bg-media-soft/40",
+  },
+  {
+    dot: "bg-tech",
+    chip: "bg-tech-soft text-tech",
+    ring: "group-hover:ring-tech/30",
+    text: "text-tech",
+    soft: "bg-tech-soft/40",
+  },
+  {
+    dot: "bg-business",
+    chip: "bg-business-soft text-business",
+    ring: "group-hover:ring-business/30",
+    text: "text-business",
+    soft: "bg-business-soft/40",
+  },
+  {
+    dot: "bg-health",
+    chip: "bg-health-soft text-health",
+    ring: "group-hover:ring-health/30",
+    text: "text-health",
+    soft: "bg-health-soft/40",
+  },
 ];
 
 // Known categories: a fixed icon + palette, and optionally a short display label
 // (slugs like "entertainment-recommendations" render as "Entertainment").
 const KNOWN: Record<string, { icon: LucideIcon; palette: number; label?: string }> = {
   bookmark: { icon: Bookmark, palette: 3 }, // salvage notes from the backend
+  note: { icon: FileText, palette: 3, label: "Note" }, // save-as-is typed notes (no AI)
   recipe: { icon: ChefHat, palette: 0 },
   itinerary: { icon: MapPin, palette: 1 },
   product: { icon: ShoppingBag, palette: 2 },
@@ -116,15 +165,51 @@ export const PALETTE_DOTS = PALETTES.map((p) => p.dot);
 // The curated icon set offered in the picker, keyed by a stable string name (that name is
 // what's persisted). Kept to a tidy, recognisable spread rather than all of lucide.
 export const CATEGORY_ICONS: Record<string, LucideIcon> = {
-  Sparkles, Bookmark, Star, Tag, Lightbulb,
-  ChefHat, UtensilsCrossed, MapPin, Compass, Plane,
-  ShoppingBag, Wallet, PiggyBank, TrendingUp, Briefcase,
-  FileText, BookOpen, GraduationCap, Newspaper, Mic,
-  Dumbbell, HeartPulse, Trophy, Baby, PawPrint,
-  Clapperboard, Music, Gamepad2, Camera, Palette,
-  Cpu, Code2, AppWindow, Bot, Rocket,
-  Home, Hammer, Leaf, Car, Shirt,
-  Landmark, Globe, FlaskConical, Megaphone, CalendarDays,
+  Sparkles,
+  Bookmark,
+  Star,
+  Tag,
+  Lightbulb,
+  ChefHat,
+  UtensilsCrossed,
+  MapPin,
+  Compass,
+  Plane,
+  ShoppingBag,
+  Wallet,
+  PiggyBank,
+  TrendingUp,
+  Briefcase,
+  FileText,
+  BookOpen,
+  GraduationCap,
+  Newspaper,
+  Mic,
+  Dumbbell,
+  HeartPulse,
+  Trophy,
+  Baby,
+  PawPrint,
+  Clapperboard,
+  Music,
+  Gamepad2,
+  Camera,
+  Palette,
+  Cpu,
+  Code2,
+  AppWindow,
+  Bot,
+  Rocket,
+  Home,
+  Hammer,
+  Leaf,
+  Car,
+  Shirt,
+  Landmark,
+  Globe,
+  FlaskConical,
+  Megaphone,
+  CalendarDays,
   MessageSquare,
 };
 
@@ -150,40 +235,117 @@ export function noteAccent(contentType: string): NoteAccent {
 // Keyword → icon for invented slugs ("home-renovation-ideas" → Hammer). First
 // matching word wins, so put the most specific sense of an ambiguous word here.
 const WORD_ICONS: Record<string, LucideIcon> = {
-  recipe: ChefHat, cooking: ChefHat, baking: ChefHat,
-  food: UtensilsCrossed, restaurant: UtensilsCrossed, dining: UtensilsCrossed,
-  travel: Compass, trip: Plane, flight: Plane, vacation: Plane,
-  fitness: Dumbbell, gym: Dumbbell, exercise: Dumbbell,
-  health: HeartPulse, wellness: HeartPulse, yoga: HeartPulse, mental: HeartPulse,
-  finance: PiggyBank, financial: PiggyBank, saving: PiggyBank,
-  investing: TrendingUp, investment: TrendingUp, stock: TrendingUp, stocks: TrendingUp,
-  money: Wallet, budget: Wallet,
-  news: Newspaper, politics: Landmark, history: Landmark,
-  podcast: Mic, interview: Mic,
-  music: Music, song: Music, playlist: Music,
-  movie: Clapperboard, film: Clapperboard, tv: Clapperboard,
-  photo: Camera, photography: Camera,
-  art: Palette, design: Palette, craft: Palette,
-  science: FlaskConical, research: FlaskConical,
-  gaming: Gamepad2, game: Gamepad2, games: Gamepad2,
-  fashion: Shirt, style: Shirt, outfit: Shirt,
-  home: Home, interior: Home, decor: Home,
-  diy: Hammer, renovation: Hammer, repair: Hammer,
-  garden: Leaf, gardening: Leaf, plant: Leaf, plants: Leaf, sustainability: Leaf,
-  parenting: Baby, kids: Baby, baby: Baby,
-  pet: PawPrint, pets: PawPrint, dog: PawPrint, cat: PawPrint,
-  car: Car, cars: Car, auto: Car, automotive: Car, bike: Car,
-  sports: Trophy, sport: Trophy, cricket: Trophy, football: Trophy,
-  event: CalendarDays, events: CalendarDays, festival: CalendarDays,
-  tech: Cpu, technology: Cpu, gadget: Cpu, gadgets: Cpu,
-  coding: Code2, programming: Code2, developer: Code2, software: AppWindow, app: AppWindow,
-  career: Briefcase, job: Briefcase, jobs: Briefcase, business: Briefcase,
-  startup: Rocket, entrepreneurship: Rocket,
-  marketing: Megaphone, social: Megaphone,
-  book: BookOpen, books: BookOpen, reading: BookOpen,
-  learning: GraduationCap, education: GraduationCap, course: GraduationCap, tutorial: GraduationCap,
-  productivity: Lightbulb, motivation: Lightbulb, idea: Lightbulb, ideas: Lightbulb,
-  culture: Globe, language: Globe, world: Globe,
+  recipe: ChefHat,
+  cooking: ChefHat,
+  baking: ChefHat,
+  food: UtensilsCrossed,
+  restaurant: UtensilsCrossed,
+  dining: UtensilsCrossed,
+  travel: Compass,
+  trip: Plane,
+  flight: Plane,
+  vacation: Plane,
+  fitness: Dumbbell,
+  gym: Dumbbell,
+  exercise: Dumbbell,
+  health: HeartPulse,
+  wellness: HeartPulse,
+  yoga: HeartPulse,
+  mental: HeartPulse,
+  finance: PiggyBank,
+  financial: PiggyBank,
+  saving: PiggyBank,
+  investing: TrendingUp,
+  investment: TrendingUp,
+  stock: TrendingUp,
+  stocks: TrendingUp,
+  money: Wallet,
+  budget: Wallet,
+  news: Newspaper,
+  politics: Landmark,
+  history: Landmark,
+  podcast: Mic,
+  interview: Mic,
+  music: Music,
+  song: Music,
+  playlist: Music,
+  movie: Clapperboard,
+  film: Clapperboard,
+  tv: Clapperboard,
+  photo: Camera,
+  photography: Camera,
+  art: Palette,
+  design: Palette,
+  craft: Palette,
+  science: FlaskConical,
+  research: FlaskConical,
+  gaming: Gamepad2,
+  game: Gamepad2,
+  games: Gamepad2,
+  fashion: Shirt,
+  style: Shirt,
+  outfit: Shirt,
+  home: Home,
+  interior: Home,
+  decor: Home,
+  diy: Hammer,
+  renovation: Hammer,
+  repair: Hammer,
+  garden: Leaf,
+  gardening: Leaf,
+  plant: Leaf,
+  plants: Leaf,
+  sustainability: Leaf,
+  parenting: Baby,
+  kids: Baby,
+  baby: Baby,
+  pet: PawPrint,
+  pets: PawPrint,
+  dog: PawPrint,
+  cat: PawPrint,
+  car: Car,
+  cars: Car,
+  auto: Car,
+  automotive: Car,
+  bike: Car,
+  sports: Trophy,
+  sport: Trophy,
+  cricket: Trophy,
+  football: Trophy,
+  event: CalendarDays,
+  events: CalendarDays,
+  festival: CalendarDays,
+  tech: Cpu,
+  technology: Cpu,
+  gadget: Cpu,
+  gadgets: Cpu,
+  coding: Code2,
+  programming: Code2,
+  developer: Code2,
+  software: AppWindow,
+  app: AppWindow,
+  career: Briefcase,
+  job: Briefcase,
+  jobs: Briefcase,
+  business: Briefcase,
+  startup: Rocket,
+  entrepreneurship: Rocket,
+  marketing: Megaphone,
+  social: Megaphone,
+  book: BookOpen,
+  books: BookOpen,
+  reading: BookOpen,
+  learning: GraduationCap,
+  education: GraduationCap,
+  course: GraduationCap,
+  tutorial: GraduationCap,
+  productivity: Lightbulb,
+  motivation: Lightbulb,
+  idea: Lightbulb,
+  ideas: Lightbulb,
+  culture: Globe,
+  language: Globe,
+  world: Globe,
 };
 
 // Last resort for slugs with no recognizable keyword: a stable pick from a small
@@ -205,9 +367,23 @@ export function noteIcon(contentType: string): LucideIcon {
 // Filler words the AI tends to append to invented slugs; stripping them keeps
 // chips short ("travel-destination-guide" → "Travel") without a per-slug mapping.
 const LABEL_NOISE = new Set([
-  "recommendation", "recommendations", "guide", "guides", "advice", "ideas",
-  "tips", "list", "lists", "collection", "collections", "destination",
-  "destinations", "discussion", "discussions", "tutorial", "tutorials",
+  "recommendation",
+  "recommendations",
+  "guide",
+  "guides",
+  "advice",
+  "ideas",
+  "tips",
+  "list",
+  "lists",
+  "collection",
+  "collections",
+  "destination",
+  "destinations",
+  "discussion",
+  "discussions",
+  "tutorial",
+  "tutorials",
 ]);
 
 export function noteLabel(contentType: string): string {
@@ -235,7 +411,10 @@ const SECOND_LEVEL_TLDS = new Set(["co", "com", "net", "org", "ac", "gov", "edu"
 // The brand is the registrable label, not the first one — "open.substack.com"
 // must read "substack", not "open".
 export function sourceLabel(domain: string): string {
-  const parts = domain.replace(/^www\./, "").split(".").filter(Boolean);
+  const parts = domain
+    .replace(/^www\./, "")
+    .split(".")
+    .filter(Boolean);
   let label = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] ?? domain);
   if (SECOND_LEVEL_TLDS.has(label) && parts.length >= 3) label = parts[parts.length - 3];
   return SOURCE_ALIASES[label] ?? label;
@@ -243,7 +422,9 @@ export function sourceLabel(domain: string): string {
 
 export function formatDate(ts?: Timestamp): string {
   if (!ts?.toDate) return "";
-  return ts.toDate().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return ts
+    .toDate()
+    .toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 // Compact variant for dense rows: "11 Jun", year only when it differs from today.
@@ -269,8 +450,7 @@ const DAY_MS = 86_400_000;
 
 export function groupNotesByDate(notes: Note[]): NoteGroup[] {
   const now = new Date();
-  const startOfDay = (d: Date) =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const today = startOfDay(now);
   const yesterday = today - DAY_MS;
   const weekStart = today - 6 * DAY_MS; // today + the previous 6 days count as "this week"

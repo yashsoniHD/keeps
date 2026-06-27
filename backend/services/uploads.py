@@ -21,6 +21,7 @@ _DEST = {
     "image": ("COVERS_BUCKET", "uploads/images", True),
     "pdf": ("CLOUD_STORAGE_BUCKET", "uploads/docs", False),
     "voice": ("CLOUD_STORAGE_BUCKET", "uploads/audio", False),
+    "video": ("CLOUD_STORAGE_BUCKET", "uploads/video", False),
 }
 
 # Fallback file extensions when the client doesn't send a usable filename.
@@ -31,6 +32,9 @@ _SUFFIX = {
     "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/m4a": ".m4a",
     "audio/x-m4a": ".m4a", "audio/aac": ".aac", "audio/wav": ".wav",
     "audio/x-wav": ".wav", "audio/webm": ".webm", "audio/ogg": ".ogg",
+    "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+    "video/x-matroska": ".mkv", "video/x-msvideo": ".avi", "video/mpeg": ".mpeg",
+    "video/3gpp": ".3gp",
 }
 
 

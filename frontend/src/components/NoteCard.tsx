@@ -4,6 +4,7 @@ import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, Clock, X } from "luci
 import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
+import { WithNoteMenu } from "@/components/NoteContextMenu";
 
 // Footer label for a note with no web source (typed note / uploaded image or PDF / Clip AI).
 function savedLabel(note: Note): string {
@@ -16,6 +17,8 @@ function savedLabel(note: Note): string {
       return "Note";
     case "voice":
       return "Voice";
+    case "video":
+      return "Video";
     default:
       return note.source === "ai" ? "Clip AI" : "Saved";
   }
@@ -126,61 +129,66 @@ export function NoteCard({ note }: { note: Note }) {
   const summaryClamp = titleLines >= 2 ? "line-clamp-2" : "line-clamp-3";
 
   return (
-    <Link
-      to="/notes/$noteId"
-      params={{ noteId: note.id }}
-      className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-5 ring-2 ring-transparent transition-all hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {/* The type icon always rides with the label; the cover thumbnail only appears
+    <WithNoteMenu note={note}>
+      <Link
+        to="/notes/$noteId"
+        params={{ noteId: note.id }}
+        className={`group relative flex min-w-0 flex-col rounded-2xl border border-border bg-card p-5 ring-2 ring-transparent transition-all [-webkit-touch-callout:none] select-none hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* The type icon always rides with the label; the cover thumbnail only appears
               when the note actually has a (working) cover image — no placeholder tiles. */}
-          {hasCover && (
-            <CoverThumb
-              note={note}
-              className="h-12 w-12 shrink-0 rounded-xl"
-              onImageError={onImageError}
-            />
-          )}
-          <span
-            className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${accent.chip}`}
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{noteLabel(note.content_type)}</span>
+            {hasCover && (
+              <CoverThumb
+                note={note}
+                className="h-12 w-12 shrink-0 rounded-xl"
+                onImageError={onImageError}
+              />
+            )}
+            <span
+              className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${accent.chip}`}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{noteLabel(note.content_type)}</span>
+            </span>
+          </div>
+          <span className="shrink-0 text-[11px] text-ink-soft">
+            {formatDateShort(note.created_at)}
           </span>
         </div>
-        <span className="shrink-0 text-[11px] text-ink-soft">
-          {formatDateShort(note.created_at)}
-        </span>
-      </div>
 
-      <h3 ref={titleRef} className="mt-4 font-serif text-2xl leading-[1.15] text-ink line-clamp-2">
-        {note.title}
-      </h3>
-      <p className={`mt-2 text-sm leading-relaxed text-ink-soft ${summaryClamp}`}>
-        {note.ai_summary}
-      </p>
+        <h3
+          ref={titleRef}
+          className="mt-4 font-serif text-2xl leading-[1.15] text-ink line-clamp-2"
+        >
+          {note.title}
+        </h3>
+        <p className={`mt-2 text-sm leading-relaxed text-ink-soft ${summaryClamp}`}>
+          {note.ai_summary}
+        </p>
 
-      <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
-        {note.source_domain ? (
-          <>
-            <img
-              src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
-              onError={(e) => {
-                e.currentTarget.style.visibility = "hidden";
-              }}
-              alt=""
-              className="h-3.5 w-3.5 rounded-sm"
-            />
-            <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
-          </>
-        ) : (
-          // Typed-note / uploaded capture: no web source — label by how it was saved.
-          <span className="truncate capitalize">{savedLabel(note)}</span>
-        )}
-        {price && <span className="ml-auto font-serif text-sm text-ink">{price}</span>}
-      </div>
-    </Link>
+        <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
+          {note.source_domain ? (
+            <>
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+                onError={(e) => {
+                  e.currentTarget.style.visibility = "hidden";
+                }}
+                alt=""
+                className="h-3.5 w-3.5 rounded-sm"
+              />
+              <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
+            </>
+          ) : (
+            // Typed-note / uploaded capture: no web source — label by how it was saved.
+            <span className="truncate capitalize">{savedLabel(note)}</span>
+          )}
+          {price && <span className="ml-auto font-serif text-sm text-ink">{price}</span>}
+        </div>
+      </Link>
+    </WithNoteMenu>
   );
 }
 
@@ -195,38 +203,40 @@ export function NoteRow({ note }: { note: Note }) {
   const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
 
   return (
-    <Link
-      to="/notes/$noteId"
-      params={{ noteId: note.id }}
-      className={`group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent ${FOCUS_RING}`}
-    >
-      {hasCover && (
-        <CoverThumb
-          note={note}
-          className="h-14 w-14 shrink-0 self-start rounded-lg border border-border/60"
-          onImageError={onImageError}
-        />
-      )}
+    <WithNoteMenu note={note}>
+      <Link
+        to="/notes/$noteId"
+        params={{ noteId: note.id }}
+        className={`group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors [-webkit-touch-callout:none] select-none hover:bg-accent ${FOCUS_RING}`}
+      >
+        {hasCover && (
+          <CoverThumb
+            note={note}
+            className="h-14 w-14 shrink-0 self-start rounded-lg border border-border/60"
+            onImageError={onImageError}
+          />
+        )}
 
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${accent.chip}`}
-          >
-            <Icon className="h-3 w-3 shrink-0" />
-            {noteLabel(note.content_type)}
-          </span>
-          {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${accent.chip}`}
+            >
+              <Icon className="h-3 w-3 shrink-0" />
+              {noteLabel(note.content_type)}
+            </span>
+            {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
+          </div>
+          <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-2">
+            {note.title}
+          </h3>
         </div>
-        <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-2">
-          {note.title}
-        </h3>
-      </div>
 
-      <span className="shrink-0 self-start text-[11px] tabular-nums text-ink-soft">
-        {formatDateShort(note.created_at)}
-      </span>
-    </Link>
+        <span className="shrink-0 self-start text-[11px] tabular-nums text-ink-soft">
+          {formatDateShort(note.created_at)}
+        </span>
+      </Link>
+    </WithNoteMenu>
   );
 }
 

@@ -38,7 +38,7 @@ function resolveTemplate(note: Note): string {
   return ""; // generic blocks (facts/sections/steps/table/checklist/quotes)
 }
 
-function NoteBody({ note }: { note: Note }) {
+function NoteBody({ note, onPatch }: { note: Note; onPatch?: (patch: Partial<Note>) => void }) {
   switch (resolveTemplate(note)) {
     case "recipe":
       return <RecipeNote note={note} />;
@@ -55,7 +55,9 @@ function NoteBody({ note }: { note: Note }) {
     case "book":
       return <BookNote note={note} />;
     default:
-      return <GenericNote note={note} />; // any AI-invented type
+      // Any AI-invented type — plus save-as-is typed notes, whose editable `body` block
+      // GenericNote renders when onPatch is wired (owner view only).
+      return <GenericNote note={note} onPatch={onPatch} />;
   }
 }
 
@@ -83,7 +85,7 @@ function PlainBody({ note }: { note: Note }) {
 // AI-shaped data hitting typed templates is the riskiest render path in the app. The
 // ladder degrades per-note instead of white-screening: typed template → GenericNote
 // (renders any block shape) → plain card. Each rung reports to /api/client-errors.
-function SafeNoteBody({ note }: { note: Note }) {
+function SafeNoteBody({ note, onPatch }: { note: Note; onPatch?: (patch: Partial<Note>) => void }) {
   return (
     <ErrorBoundary
       label={`template:${note.content_type}`}
@@ -93,7 +95,7 @@ function SafeNoteBody({ note }: { note: Note }) {
         </ErrorBoundary>
       }
     >
-      <NoteBody note={note} />
+      <NoteBody note={note} onPatch={onPatch} />
     </ErrorBoundary>
   );
 }
@@ -330,7 +332,9 @@ export function NoteContent({
         </>
       )}
       <div className="mt-8">
-        <SafeNoteBody note={note} />
+        {/* onPatch is owner-only (undefined on the public view), so the editable body block
+            inside GenericNote stays read-only for shared notes. */}
+        <SafeNoteBody note={note} onPatch={isPublic ? undefined : onPatch} />
       </div>
       {/* Private annotation — owner view only, at the very bottom of the note. */}
       {!isPublic && (

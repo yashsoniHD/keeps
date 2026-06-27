@@ -7,11 +7,15 @@ class IngestRequest(BaseModel):
     # save things that aren't a clean link (a typed thought, a screenshot, a PDF, a voice
     # memo). Binary inputs (image/pdf/voice) arrive pre-uploaded to GCS via /ingest/upload,
     # so the request only carries a reference (media_gcs_uri), never the bytes.
-    input_type: Literal["url", "text", "image", "pdf", "voice"] = "url"
+    input_type: Literal["url", "text", "image", "pdf", "voice", "video"] = "url"
     url: str = ""                      # required only when input_type == "url"
     text: str | None = None            # the note body when input_type == "text"
+    # Typed notes only: when False the note is saved verbatim (no Gemini extraction) — the
+    # raw text becomes the body, the user titles/tags it themselves. Default True keeps the
+    # AI-structured behaviour for every other path.
+    process_ai: bool = True
     title: str | None = Field(default=None, max_length=300)  # user-supplied title (non-url inputs)
-    media_gcs_uri: str | None = None   # gs:// URI of the uploaded file (image/pdf/voice)
+    media_gcs_uri: str | None = None   # gs:// URI of the uploaded file (image/pdf/voice/video)
     media_mime: str | None = None      # MIME of the uploaded file (Vertex needs it on FileData)
     media_cover_url: str | None = None # public https cover (images double as their own cover)
     content: str | None = None         # pre-extracted text (paywall/auth bypass via PWA/shortcut)

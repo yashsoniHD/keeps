@@ -66,6 +66,61 @@ async def test_text_ingest_creates_text_job(fake_db):
     assert job["url"] is None
 
 
+async def test_text_ingest_defaults_to_ai(fake_db):
+    await ingest.ingest(FakeRequest({"input_type": "text", "text": "structure me"}), user_id="u-1")
+    assert only_job(fake_db)["process_ai"] is True
+
+
+async def test_save_as_is_sets_process_ai_false(fake_db):
+    """An explicit process_ai=false opts the typed note out of Gemini structuring."""
+    await ingest.ingest(
+        FakeRequest({"input_type": "text", "text": "raw thought, keep verbatim", "process_ai": False}),
+        user_id="u-1",
+    )
+    job = only_job(fake_db)
+    assert job["process_ai"] is False
+    assert job["input_type"] == "text"
+
+
+async def test_save_as_is_does_not_promote_a_url_body(fake_db):
+    """A link in a save-as-is note stays a verbatim text note — the user opted out of fetching it."""
+    await ingest.ingest(
+        FakeRequest({"input_type": "text", "text": "https://example.com/x", "process_ai": False}),
+        user_id="u-1",
+    )
+    job = only_job(fake_db)
+    assert job["input_type"] == "text"  # NOT promoted to a url capture
+    assert job["text"] == "https://example.com/x"
+
+
+async def test_upload_video_creates_video_job(fake_db, monkeypatch):
+    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "media-bucket")
+
+    async def fake_store(input_type, data, mime):
+        return "gs://media-bucket/uploads/video/x.mp4", None  # private bucket, no cover
+
+    monkeypatch.setattr(ingest.uploads, "store_upload", fake_store)
+    res = await ingest.ingest_upload(
+        file=FakeUpload(b"fake video bytes", "video/mp4"),
+        input_type="video", title="Clip", source="upload", note_hint=None, user_id="u-1",
+    )
+    assert res.status == "pending"
+    job = only_job(fake_db)
+    assert job["input_type"] == "video"
+    assert job["media_gcs_uri"].startswith("gs://media-bucket/")
+    assert job["media_mime"] == "video/mp4"
+
+
+async def test_upload_rejects_unsupported_video_mime(fake_db, monkeypatch):
+    from fastapi import HTTPException
+    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "b")
+    with pytest.raises(HTTPException) as exc:
+        await ingest.ingest_upload(file=FakeUpload(b"x", "video/x-flv"),
+                                   input_type="video", title=None, source="upload",
+                                   note_hint=None, user_id="u-1")
+    assert exc.value.status_code == 415
+
+
 async def test_empty_text_rejected(fake_db):
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc:
@@ -282,6 +337,33 @@ async def test_worker_voice_input(fake_db, capture_pipeline):
     note = the_note(fake_db)
     assert note["input_type"] == "voice"
     assert note["source_url"] == ""           # no web source for a recording
+
+
+async def test_worker_video_input(fake_db, capture_pipeline):
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u-1", "input_type": "video",
+                               "media_gcs_uri": "gs://media/uploads/video/x.mp4",
+                               "media_mime": "video/quicktime", "title": "Clip"})
+    await process.process_job("j", DummyRequest())
+    bundle = capture_pipeline["bundle"]
+    assert bundle.kind == "video_uri"          # rides the direct-video FileData path
+    assert bundle.video_uri == "gs://media/uploads/video/x.mp4"
+    assert bundle.media_mime == "video/quicktime"
+    assert bundle.strategy == "video_upload"
+    assert the_note(fake_db)["input_type"] == "video"
+
+
+async def test_worker_save_as_is_skips_gemini(fake_db, capture_pipeline):
+    """process_ai=False saves the text verbatim: no categorize/extract call, body kept as-is."""
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u-1", "input_type": "text",
+                               "text": "First line\nmore detail here", "process_ai": False})
+    await process.process_job("j", DummyRequest())
+    assert "bundle" not in capture_pipeline  # extract_async was never invoked
+    note = the_note(fake_db)
+    assert note["content_type"] == "note"
+    assert note["template"] == "note"
+    assert note["data"]["body"] == "First line\nmore detail here"
+    assert note["title"] == "First line"        # derived from the first line
+    assert note["source_url"] == ""
 
 
 async def test_worker_url_still_uses_resolver(fake_db, capture_pipeline, monkeypatch):

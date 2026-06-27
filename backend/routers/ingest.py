@@ -68,6 +68,7 @@ async def _parse_ingest_request(request: Request) -> IngestRequest:
     source = request.headers.get("x-clipnote-source", "web")
     input_type = "url"
     text = title = content = note_hint = None
+    process_ai = True
     raw = await request.body()
     if raw:
         try:
@@ -80,14 +81,17 @@ async def _parse_ingest_request(request: Request) -> IngestRequest:
                 input_type = data.get("input_type") or "url"
                 text = data.get("text") or None
                 title = data.get("title") or None
+                # Default True — only an explicit `false` opts a typed note out of AI structuring.
+                process_ai = data.get("process_ai", True) is not False
         except json.JSONDecodeError:
             url = url or raw.decode("utf-8", errors="ignore")
     # A URL hiding in the body of a "text" share is still a URL — treat it as one so the
-    # full extraction pipeline runs instead of saving the raw link as a plain note.
-    if input_type == "text" and (text or "").strip().startswith(("http://", "https://")):
+    # full extraction pipeline runs instead of saving the raw link as a plain note. (A
+    # save-as-is note keeps the link verbatim — the user opted out of fetching it.)
+    if input_type == "text" and process_ai and (text or "").strip().startswith(("http://", "https://")):
         input_type, url = "url", text.strip()
     return IngestRequest(input_type=input_type, url=url, text=text, title=title,
-                         content=content, source=source, note_hint=note_hint)
+                         content=content, source=source, note_hint=note_hint, process_ai=process_ai)
 
 
 async def _create_job(db, user_id: str, body: IngestRequest) -> JobStatus:
@@ -103,6 +107,7 @@ async def _create_job(db, user_id: str, body: IngestRequest) -> JobStatus:
         "input_type": body.input_type,    # "url" | "text" | "image" | "pdf" | "voice"
         "url": body.url or None,
         "text": body.text,                # typed-note body (input_type == "text")
+        "process_ai": body.process_ai,    # False → save the typed note verbatim (no Gemini)
         "title": body.title,              # user-supplied title (non-url inputs)
         "media_gcs_uri": body.media_gcs_uri,    # gs:// of the uploaded file
         "media_mime": body.media_mime,          # MIME for the worker's FileData part
@@ -157,10 +162,10 @@ async def ingest_upload(
     note_hint: str | None = Form(None),
     user_id: str = Depends(require_user),
 ):
-    """Binary capture path: a screenshot/image, PDF, or voice memo shared into the app.
-    Uploads the bytes to GCS, then creates the same job shape the URL path does so the
+    """Binary capture path: a screenshot/image, PDF, voice memo, or video shared into the
+    app. Uploads the bytes to GCS, then creates the same job shape the URL path does so the
     worker pipeline is identical from here on."""
-    if input_type not in ("image", "pdf", "voice"):
+    if input_type not in ("image", "pdf", "voice", "video"):
         raise HTTPException(status_code=400, detail="Unsupported upload type.")
     if not uploads.bucket_for(input_type):
         raise HTTPException(status_code=503, detail="File uploads aren't configured on this server.")
@@ -168,8 +173,11 @@ async def ingest_upload(
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="The file is empty.")
-    if len(data) > settings.MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"File too large (max {settings.MAX_UPLOAD_MB} MB).")
+    # Video gets a larger ceiling than images/PDFs — even a short clip dwarfs a screenshot,
+    # while the per-input cap still bounds the Gemini token cost of a single capture.
+    cap_mb = settings.MAX_VIDEO_UPLOAD_MB if input_type == "video" else settings.MAX_UPLOAD_MB
+    if len(data) > cap_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File too large (max {cap_mb} MB).")
     mime = (file.content_type or "").split(";")[0].strip().lower()
     if mime not in settings.ALLOWED_UPLOAD_MIME.get(input_type, set()):
         raise HTTPException(status_code=415, detail=f"Unsupported {input_type} format ({mime or 'unknown'}).")

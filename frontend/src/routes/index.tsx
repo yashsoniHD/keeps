@@ -4,6 +4,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Search,
   Sparkles,
+  Sparkle,
   Plus,
   WandSparkles,
   Settings,
@@ -16,6 +17,7 @@ import {
   ImagePlus,
   Mic,
   ArrowLeft,
+  type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
@@ -40,6 +42,7 @@ import {
 import { groupNotesByDate, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
+import { NoteMenuProvider } from "@/components/NoteContextMenu";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
@@ -54,6 +57,44 @@ type Layout = "standard" | "condensed";
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+
+// A source-filter option: either a web domain (rendered with its favicon) or a synthetic
+// "manual" group for captures that have no web source (typed/voice/uploaded/Clip-AI notes),
+// rendered with a lucide icon. `id` is what `source` filter state holds.
+type SourceOption = { id: string; label: string; domain?: string; icon?: LucideIcon };
+
+// Manual capture groups, keyed by a `manual:*` id (see noteMatchesSource). Shown only when
+// the loaded feed actually contains a matching note, so the filter never lists empty buckets.
+const MANUAL_SOURCES: { id: string; label: string; icon: LucideIcon }[] = [
+  { id: "manual:text", label: "Written", icon: AlignLeft },
+  { id: "manual:voice", label: "Voice notes", icon: Mic },
+  { id: "manual:upload", label: "Uploads", icon: ImagePlus },
+  { id: "manual:ai", label: "Clip AI", icon: Sparkle },
+];
+
+// True if a note belongs to the selected source. Web sources match on domain; the synthetic
+// `manual:*` groups match on how the note was captured (Clip-AI provenance wins over its
+// input_type so an AI-authored text note lands under "Clip AI", not "Written").
+function noteMatchesSource(n: Note, source: string): boolean {
+  if (source === "all") return true;
+  if (source === "manual:ai") return n.source === "ai";
+  if (source === "manual:text") return n.source !== "ai" && n.input_type === "text";
+  if (source === "manual:voice") return n.input_type === "voice";
+  if (source === "manual:upload")
+    return n.input_type === "image" || n.input_type === "pdf" || n.input_type === "video";
+  return n.source_domain === source;
+}
+
+// Which manual groups have at least one note in the loaded feed.
+function presentManualSources(notes: Note[]): Set<string> {
+  const present = new Set<string>();
+  for (const n of notes) {
+    for (const g of MANUAL_SOURCES) {
+      if (!present.has(g.id) && noteMatchesSource(n, g.id)) present.add(g.id);
+    }
+  }
+  return present;
+}
 
 // First-run "try a sample" link: lets a new user reach the aha (a real, structured note)
 // in one tap, without having to go find a URL. It runs the real pipeline — a recipe page
@@ -271,11 +312,11 @@ function Feed() {
   // Typed-note capture: no URL, so no optimistic placeholder (the real job card lands in a
   // few hundred ms and drives the feedback). The offline replay queue only knows how to
   // replay URLs, so a failed text/file capture surfaces an error rather than being parked.
-  const handleCaptureText = async (text: string, title?: string) => {
+  const handleCaptureText = async (text: string, title?: string, processAI = true) => {
     setShowAdd(false);
     setIngestError(null);
     try {
-      await ingestText(text, title);
+      await ingestText(text, title, processAI);
       analytics.noteSaved();
     } catch (e) {
       setIngestError(e instanceof Error ? e.message : "Couldn't save the note.");
@@ -284,7 +325,7 @@ function Feed() {
 
   // Image/PDF capture: the multipart upload to GCS takes a beat, so AddSheet shows its own
   // "Adding…" state and awaits this; we only surface errors here.
-  const handleUploadFile = async (file: File, kind: "image" | "pdf") => {
+  const handleUploadFile = async (file: File, kind: "image" | "pdf" | "video" | "voice") => {
     setIngestError(null);
     await ingestMedia(file, kind, file.name);
     analytics.noteSaved();
@@ -306,20 +347,37 @@ function Feed() {
     () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
     [notes, userCategories],
   );
-  // Sources come from users/{uid}.sources (whole-corpus source of truth) unioned with
-  // loaded notes, so the source filter doesn't vanish when a server-side category filter
-  // narrows the loaded notes to a single domain — same trick as the category chips above.
-  const sources = useMemo(
-    () => Array.from(new Set([...userSources, ...notes.map((n) => n.source_domain)])).sort(),
+  // Web-source domains come from users/{uid}.sources (whole-corpus source of truth) unioned
+  // with loaded notes, so the filter doesn't vanish when a server-side category filter
+  // narrows the loaded notes to one domain — same trick as the category chips above. Empty
+  // domains (manual captures) are dropped here and surfaced as the manual groups below.
+  const domainSources = useMemo(
+    () =>
+      Array.from(new Set([...userSources, ...notes.map((n) => n.source_domain)]))
+        .filter(Boolean)
+        .sort(),
     [notes, userSources],
   );
+  // The full ordered option list for the source filter: web domains first, then any manual
+  // capture groups present in the feed (Written / Voice / Uploads / Clip AI).
+  const sourceOptions = useMemo<SourceOption[]>(() => {
+    const present = presentManualSources(notes);
+    return [
+      ...domainSources.map((d) => ({ id: d, label: sourceLabel(d), domain: d })),
+      ...MANUAL_SOURCES.filter((g) => present.has(g.id)).map((g) => ({
+        id: g.id,
+        label: g.label,
+        icon: g.icon,
+      })),
+    ];
+  }, [domainSources, notes]);
 
   // Edge fades on the category scroller — only shown when chips actually overflow.
   const {
     ref: catScrollRef,
     atStart: catAtStart,
     atEnd: catAtEnd,
-  } = useScrollEdges<HTMLDivElement>([categories.length, sources.length]);
+  } = useScrollEdges<HTMLDivElement>([categories.length, sourceOptions.length]);
 
   // Browse view: the live feed filtered only by the type/source chips. Text queries no
   // longer filter this slice — they run server-side semantic search (below) over the
@@ -327,7 +385,7 @@ function Feed() {
   const filtered = useMemo(() => {
     return notes.filter((n) => {
       if (active !== "all" && n.content_type !== active) return false;
-      if (source !== "all" && n.source_domain !== source) return false;
+      if (!noteMatchesSource(n, source)) return false;
       return true;
     });
   }, [notes, active, source]);
@@ -370,7 +428,7 @@ function Feed() {
     if (!searchActive) return filtered;
     return (searchResults ?? []).filter((n) => {
       if (active !== "all" && n.content_type !== active) return false;
-      if (source !== "all" && n.source_domain !== source) return false;
+      if (!noteMatchesSource(n, source)) return false;
       return true;
     });
   }, [searchActive, searchResults, filtered, active, source]);
@@ -444,295 +502,299 @@ function Feed() {
   }
 
   return (
-    <AppShell>
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-4 pt-4 pb-3 md:px-8">
-          {searchOpen ? (
-            <div className="mb-3 flex items-center gap-2">
-              <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card py-2.5 pl-4 pr-1.5">
-                <Search className="h-4 w-4 shrink-0 text-ink-soft" />
-                <input
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      setQuery("");
-                      setSearchOpen(false);
-                    }
-                  }}
-                  onBlur={() => {
-                    // Dismissing the keyboard blurs the input — collapse the bar so an
-                    // empty search doesn't linger. A typed query stays open, since
-                    // scrolling results on mobile also blurs and shouldn't wipe them.
-                    if (!query.trim()) setSearchOpen(false);
-                  }}
-                  placeholder="Search your notes"
-                  className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
-                />
-                {/* Only reveal the Clip AI button after the user has typed at least one
+    <NoteMenuProvider categories={categories}>
+      <AppShell>
+        <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
+          <div className="mx-auto max-w-7xl px-4 pt-4 pb-3 md:px-8">
+            {searchOpen ? (
+              <div className="mb-3 flex items-center gap-2">
+                <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card py-2.5 pl-4 pr-1.5">
+                  <Search className="h-4 w-4 shrink-0 text-ink-soft" />
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setQuery("");
+                        setSearchOpen(false);
+                      }
+                    }}
+                    onBlur={() => {
+                      // Dismissing the keyboard blurs the input — collapse the bar so an
+                      // empty search doesn't linger. A typed query stays open, since
+                      // scrolling results on mobile also blurs and shouldn't wipe them.
+                      if (!query.trim()) setSearchOpen(false);
+                    }}
+                    placeholder="Search your notes"
+                    className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
+                  />
+                  {/* Only reveal the Clip AI button after the user has typed at least one
                     character — an empty search bar shouldn't suggest AI immediately.
                     onMouseDown.preventDefault keeps the input from blurring (which would
                     collapse the bar) before the click navigates. */}
-                {query.trim().length > 0 && (
+                  {query.trim().length > 0 && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        // Hand the typed query to the global Ask-AI overlay (seeds + auto-sends).
+                        openChat(query.trim());
+                        setQuery("");
+                        setSearchOpen(false);
+                      }}
+                      aria-label="Clip AI"
+                      title="Clip AI"
+                      className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
+                    >
+                      <Sparkle className="h-4 w-4" />
+                      Clip AI
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setSearchOpen(false);
+                  }}
+                  aria-label="Close search"
+                  className={`shrink-0 ${ICON_BTN}`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
+                    <Sparkles className="h-4 w-4" />
+                  </span>
+                  <span className="font-serif text-2xl text-ink">Clipnote</span>
+                </div>
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      // Hand the typed query to the global Ask-AI overlay (seeds + auto-sends).
-                      openChat(query.trim());
-                      setQuery("");
-                      setSearchOpen(false);
-                    }}
-                    aria-label="Clip AI"
-                    title="Clip AI"
-                    className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
+                    onClick={() => setSearchOpen(true)}
+                    aria-label="Search notes"
+                    title="Search"
+                    className={ICON_BTN}
                   >
-                    <WandSparkles className="h-4 w-4" />
-                    Clip AI
+                    <Search className="h-4 w-4" />
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingUrl("");
+                      setShowAdd(true);
+                    }}
+                    aria-label="New note"
+                    title="New note"
+                    className={ICON_BTN}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                  <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
+                    <Settings className="h-4 w-4" />
+                  </Link>
+                </div>
               </div>
+            )}
+
+            {(categories.length > 0 || sourceOptions.length > 1) && (
+              <div className="flex items-center gap-2">
+                {sourceOptions.length > 1 && (
+                  <SourceFilter options={sourceOptions} source={source} setSource={setSource} />
+                )}
+                <div className="min-w-0 flex-1">
+                  {/* Edge fades via a mask on the scroller itself — fades the actual chips to
+                    transparent, so it's background-agnostic (no opaque-overlay seam against the
+                    translucent, blurred header) and only fades the side that actually overflows. */}
+                  <div
+                    ref={catScrollRef}
+                    className="-mx-1 flex gap-1.5 overflow-x-auto px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    style={{
+                      WebkitMaskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
+                      maskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActive("all")}
+                      className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
+                        active === "all"
+                          ? "bg-ink text-paper"
+                          : "border border-border bg-card text-ink-soft hover:text-ink"
+                      }`}
+                    >
+                      All
+                    </button>
+                    {categories.map((c) => {
+                      const accent = noteAccent(c);
+                      const Icon = noteIcon(c);
+                      const isActive = active === c;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setActive(c)}
+                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
+                            isActive ? `${accent.dot} text-white` : accent.chip
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          {noteLabel(c)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8">
+          {ingestError && (
+            <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex-1">{ingestError}</span>
               <button
                 type="button"
-                onClick={() => {
-                  setQuery("");
-                  setSearchOpen(false);
-                }}
-                aria-label="Close search"
-                className={`shrink-0 ${ICON_BTN}`}
+                onClick={() => setIngestError(null)}
+                aria-label="Dismiss"
+                className="shrink-0 text-destructive/70 hover:text-destructive"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-          ) : (
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
-                  <Sparkles className="h-4 w-4" />
-                </span>
-                <span className="font-serif text-2xl text-ink">Clipnote</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setSearchOpen(true)}
-                  aria-label="Search notes"
-                  title="Search"
-                  className={ICON_BTN}
-                >
-                  <Search className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingUrl("");
-                    setShowAdd(true);
-                  }}
-                  aria-label="New note"
-                  title="New note"
-                  className={ICON_BTN}
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-                <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
-                  <Settings className="h-4 w-4" />
-                </Link>
-              </div>
+          )}
+
+          {feedError && (
+            <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex-1">
+                Couldn't load your notes. Check your connection and refresh.
+              </span>
             </div>
           )}
 
-          {(categories.length > 0 || sources.length > 1) && (
-            <div className="flex items-center gap-2">
-              {sources.length > 1 && (
-                <SourceFilter sources={sources} source={source} setSource={setSource} />
-              )}
-              <div className="min-w-0 flex-1">
-                {/* Edge fades via a mask on the scroller itself — fades the actual chips to
-                    transparent, so it's background-agnostic (no opaque-overlay seam against the
-                    translucent, blurred header) and only fades the side that actually overflows. */}
-                <div
-                  ref={catScrollRef}
-                  className="-mx-1 flex gap-1.5 overflow-x-auto px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                  style={{
-                    WebkitMaskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
-                    maskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setActive("all")}
-                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
-                      active === "all"
-                        ? "bg-ink text-paper"
-                        : "border border-border bg-card text-ink-soft hover:text-ink"
-                    }`}
-                  >
-                    All
-                  </button>
-                  {categories.map((c) => {
-                    const accent = noteAccent(c);
-                    const Icon = noteIcon(c);
-                    const isActive = active === c;
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setActive(c)}
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
-                          isActive ? `${accent.dot} text-white` : accent.chip
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0" />
-                        {noteLabel(c)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8">
-        {ingestError && (
-          <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="flex-1">{ingestError}</span>
-            <button
-              type="button"
-              onClick={() => setIngestError(null)}
-              aria-label="Dismiss"
-              className="shrink-0 text-destructive/70 hover:text-destructive"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
-        {feedError && (
-          <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="flex-1">
-              Couldn't load your notes. Check your connection and refresh.
-            </span>
-          </div>
-        )}
-
-        {notesReady && showGuide && (
-          <GettingStarted
-            notesCount={notes.length}
-            onAddLink={() => {
-              setPendingUrl("");
-              setShowAdd(true);
-            }}
-            onTrySample={() => handleCapture(SAMPLE_LINK)}
-            onDismiss={dismissGuide}
-          />
-        )}
-
-        {(!notesReady && !feedError) || (searchActive && searching && searchResults === null) ? (
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 8 }, (_, i) => (
-              <div
-                key={i}
-                className="h-48 animate-pulse rounded-2xl border border-border bg-card"
-              />
-            ))}
-          </section>
-        ) : displayNotes.length === 0 &&
-          pendingJobs.length === 0 &&
-          failedJobs.length === 0 &&
-          deferredJobs.length === 0 &&
-          queuedJobs.length === 0 ? (
-          showGuide && !searchActive ? null : (
-            <EmptyState
-              hasNotes={notes.length > 0 || active !== "all" || source !== "all" || searchActive}
+          {notesReady && showGuide && (
+            <GettingStarted
+              notesCount={notes.length}
+              onAddLink={() => {
+                setPendingUrl("");
+                setShowAdd(true);
+              }}
               onTrySample={() => handleCapture(SAMPLE_LINK)}
+              onDismiss={dismissGuide}
             />
-          )
-        ) : (
-          <div className="space-y-8">
-            {/* In-flight captures ("just now") sit above the dated groups. */}
-            {(failedJobs.length > 0 ||
-              queuedJobs.length > 0 ||
-              deferredJobs.length > 0 ||
-              pendingJobs.length > 0) &&
-              (layout === "condensed" ? (
-                <NoteRowList
-                  notes={[]}
-                  jobs={pendingJobs}
-                  queuedJobs={queuedJobs}
-                  deferredJobs={deferredJobs}
-                  failedJobs={failedJobs}
-                  onRetry={retryJob}
-                  onDismiss={dismissJob}
+          )}
+
+          {(!notesReady && !feedError) || (searchActive && searching && searchResults === null) ? (
+            <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div
+                  key={i}
+                  className="h-48 animate-pulse rounded-2xl border border-border bg-card"
                 />
-              ) : (
-                <section className={GRID_CLS}>
-                  {failedJobs.map((j) => (
-                    <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
-                  ))}
-                  {deferredJobs.map((j) => (
-                    <ProcessingCard key={j.id} job={j} label="Queued — high demand" />
-                  ))}
-                  {queuedJobs.map((j) => (
-                    <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
-                  ))}
-                  {pendingJobs.map((j) => (
-                    <ProcessingCard key={j.id} job={j} />
-                  ))}
-                </section>
               ))}
+            </section>
+          ) : displayNotes.length === 0 &&
+            pendingJobs.length === 0 &&
+            failedJobs.length === 0 &&
+            deferredJobs.length === 0 &&
+            queuedJobs.length === 0 ? (
+            showGuide && !searchActive ? null : (
+              <EmptyState
+                hasNotes={notes.length > 0 || active !== "all" || source !== "all" || searchActive}
+                onTrySample={() => handleCapture(SAMPLE_LINK)}
+              />
+            )
+          ) : (
+            <div className="space-y-8">
+              {/* In-flight captures ("just now") sit above the dated groups. */}
+              {(failedJobs.length > 0 ||
+                queuedJobs.length > 0 ||
+                deferredJobs.length > 0 ||
+                pendingJobs.length > 0) &&
+                (layout === "condensed" ? (
+                  <NoteRowList
+                    notes={[]}
+                    jobs={pendingJobs}
+                    queuedJobs={queuedJobs}
+                    deferredJobs={deferredJobs}
+                    failedJobs={failedJobs}
+                    onRetry={retryJob}
+                    onDismiss={dismissJob}
+                  />
+                ) : (
+                  <section className={GRID_CLS}>
+                    {failedJobs.map((j) => (
+                      <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
+                    ))}
+                    {deferredJobs.map((j) => (
+                      <ProcessingCard key={j.id} job={j} label="Queued — high demand" />
+                    ))}
+                    {queuedJobs.map((j) => (
+                      <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
+                    ))}
+                    {pendingJobs.map((j) => (
+                      <ProcessingCard key={j.id} job={j} />
+                    ))}
+                  </section>
+                ))}
 
-            {dateGroups ? (
-              dateGroups.map((g) => (
-                <div key={g.key}>
-                  <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">{g.label}</h2>
-                  {layout === "condensed" ? (
-                    <NoteRowList notes={g.notes} />
-                  ) : (
-                    <NoteGrid notes={g.notes} />
-                  )}
-                </div>
-              ))
-            ) : layout === "condensed" ? (
-              <NoteRowList notes={displayNotes} />
-            ) : (
-              <NoteGrid notes={displayNotes} />
-            )}
-          </div>
-        )}
+              {dateGroups ? (
+                dateGroups.map((g) => (
+                  <div key={g.key}>
+                    <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
+                      {g.label}
+                    </h2>
+                    {layout === "condensed" ? (
+                      <NoteRowList notes={g.notes} />
+                    ) : (
+                      <NoteGrid notes={g.notes} />
+                    )}
+                  </div>
+                ))
+              ) : layout === "condensed" ? (
+                <NoteRowList notes={displayNotes} />
+              ) : (
+                <NoteGrid notes={displayNotes} />
+              )}
+            </div>
+          )}
 
-        {notesReady && !searchActive && notes.length >= max && (
-          <div className="mt-6 flex justify-center">
-            <button
-              type="button"
-              onClick={() => setMax((m) => m + 50)}
-              className="rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-accent"
-            >
-              Load older notes
-            </button>
-          </div>
-        )}
-      </main>
+          {notesReady && !searchActive && notes.length >= max && (
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setMax((m) => m + 50)}
+                className="rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-accent"
+              >
+                Load older notes
+              </button>
+            </div>
+          )}
+        </main>
 
-      {/* The bottom-right FAB is now the global Ask-AI button (components/ask/AskFab.tsx);
+        {/* The bottom-right FAB is now the global Ask-AI button (components/ask/AskFab.tsx);
           search moved to the top bar. */}
 
-      {showAdd && (
-        <AddSheet
-          url={pendingUrl}
-          setUrl={setPendingUrl}
-          onCancel={() => setShowAdd(false)}
-          onSubmit={handleCapture}
-          onSubmitText={handleCaptureText}
-          onUploadFile={handleUploadFile}
-          onUploadVoice={handleUploadVoice}
-        />
-      )}
-    </AppShell>
+        {showAdd && (
+          <AddSheet
+            url={pendingUrl}
+            setUrl={setPendingUrl}
+            onCancel={() => setShowAdd(false)}
+            onSubmit={handleCapture}
+            onSubmitText={handleCaptureText}
+            onUploadFile={handleUploadFile}
+            onUploadVoice={handleUploadVoice}
+          />
+        )}
+      </AppShell>
+    </NoteMenuProvider>
   );
 }
 
@@ -750,14 +812,16 @@ function SourceLogo({ domain, className }: { domain: string; className?: string 
   );
 }
 
-// Source filter: a custom dropdown (native <select> can't render logos) showing
-// each platform's favicon beside its name, on a popover surface.
+// Source filter: a custom dropdown (native <select> can't render logos) showing each web
+// platform's favicon — or, for manual captures, a lucide icon — beside its name. Manual
+// notes (typed/voice/uploaded/Clip-AI) have no web source, so they'd otherwise collapse
+// into a single label-less "?" favicon; the synthetic groups give them real entries.
 function SourceFilter({
-  sources,
+  options,
   source,
   setSource,
 }: {
-  sources: string[];
+  options: SourceOption[];
   source: string;
   setSource: (v: string) => void;
 }) {
@@ -774,10 +838,21 @@ function SourceFilter({
     setPos({ top: r.bottom + 8, left: r.left });
   }, [open]);
 
-  const options = [
-    { id: "all", label: "All sources" },
-    ...sources.map((s) => ({ id: s, label: sourceLabel(s) })),
+  const allOptions: SourceOption[] = [
+    { id: "all", label: "All sources", icon: Layers },
+    ...options,
   ];
+  const selected = options.find((o) => o.id === source);
+
+  // The glyph for an option: its favicon if it's a web domain, otherwise its lucide icon.
+  const Glyph = ({ option, className }: { option: SourceOption; className?: string }) =>
+    option.domain ? (
+      <SourceLogo domain={option.domain} className={`${className} rounded`} />
+    ) : option.icon ? (
+      <option.icon className={className} />
+    ) : (
+      <Layers className={className} />
+    );
 
   return (
     <div className="shrink-0">
@@ -789,13 +864,13 @@ function SourceFilter({
         aria-haspopup="listbox"
         aria-expanded={open}
         className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-          source !== "all"
-            ? "border-ink bg-card"
+          selected
+            ? "border-ink bg-card text-ink"
             : "border-border bg-card text-ink-soft hover:text-ink"
         }`}
       >
-        {source !== "all" ? (
-          <SourceLogo domain={source} className="h-5 w-5 rounded" />
+        {selected ? (
+          <Glyph option={selected} className="h-5 w-5" />
         ) : (
           <Layers className="h-4 w-4" />
         )}
@@ -813,29 +888,27 @@ function SourceFilter({
               style={{ top: pos.top, left: pos.left }}
               className="fixed z-[61] max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-popover p-1.5 shadow-2xl"
             >
-              {options.map((o) => {
-                const selected = source === o.id;
+              {allOptions.map((o) => {
+                const isSelected = source === o.id;
                 return (
                   <button
                     key={o.id}
                     type="button"
                     role="option"
-                    aria-selected={selected}
+                    aria-selected={isSelected}
                     onClick={() => {
                       setSource(o.id);
                       setOpen(false);
                     }}
                     className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm capitalize transition-colors ${
-                      selected ? "bg-ink/5 text-ink" : "text-ink-soft hover:bg-ink/5 hover:text-ink"
+                      isSelected
+                        ? "bg-ink/5 text-ink"
+                        : "text-ink-soft hover:bg-ink/5 hover:text-ink"
                     }`}
                   >
-                    {o.id === "all" ? (
-                      <Layers className="h-5 w-5 shrink-0 text-ink-soft" />
-                    ) : (
-                      <SourceLogo domain={o.id} className="h-5 w-5 shrink-0 rounded" />
-                    )}
+                    <Glyph option={o} className="h-5 w-5 shrink-0 text-ink-soft" />
                     <span className="flex-1 truncate">{o.label}</span>
-                    {selected && <Check className="h-4 w-4 shrink-0 text-ink" />}
+                    {isSelected && <Check className="h-4 w-4 shrink-0 text-ink" />}
                   </button>
                 );
               })}
@@ -870,7 +943,7 @@ const CAPTURE_MODES = [
     icon: ImagePlus,
     tile: "bg-itinerary-soft text-itinerary",
     title: "Upload a file",
-    desc: "Image, video, PDF",
+    desc: "Image, video, audio, PDF, text",
   },
   {
     key: "voice",
@@ -894,8 +967,8 @@ function AddSheet({
   setUrl: (v: string) => void;
   onCancel: () => void;
   onSubmit: (u: string) => void;
-  onSubmitText: (text: string, title?: string) => void;
-  onUploadFile: (file: File, kind: "image" | "pdf") => Promise<void>;
+  onSubmitText: (text: string, title?: string, processAI?: boolean) => void;
+  onUploadFile: (file: File, kind: "image" | "pdf" | "video" | "voice") => Promise<void>;
   onUploadVoice: (blob: Blob) => Promise<void>;
 }) {
   // Menu-first: the sheet opens on the picker, never on an input — so no keyboard springs
@@ -903,19 +976,41 @@ function AddSheet({
   const [view, setView] = useState<"menu" | "link" | "text" | "voice">("menu");
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
+  // Whether a typed note is structured by Clip AI (default) or saved verbatim.
+  const [processAI, setProcessAI] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onFilePicked = async (file: File | undefined) => {
     if (!file) return;
-    const kind: "image" | "pdf" | null = file.type.startsWith("image/")
+    // Plain-text files have no bytes worth uploading — read them client-side and save
+    // through the typed-note path (which Clip AI then structures).
+    const isTextFile = file.type.startsWith("text/") || /\.(txt|md|markdown)$/i.test(file.name);
+    if (isTextFile) {
+      setFileError(null);
+      setUploading(true);
+      try {
+        const content = await file.text();
+        if (!content.trim()) throw new Error("That file is empty.");
+        onSubmitText(content, file.name.replace(/\.(txt|md|markdown)$/i, ""), true); // closes the sheet
+      } catch (e) {
+        setUploading(false);
+        setFileError(e instanceof Error ? e.message : "Couldn't read that file.");
+      }
+      return;
+    }
+    const kind: "image" | "pdf" | "video" | "voice" | null = file.type.startsWith("image/")
       ? "image"
       : file.type === "application/pdf"
         ? "pdf"
-        : null;
+        : file.type.startsWith("video/")
+          ? "video"
+          : file.type.startsWith("audio/")
+            ? "voice"
+            : null;
     if (!kind) {
-      setFileError("Pick an image or a PDF.");
+      setFileError("Pick an image, video, audio file, PDF, or text file.");
       return;
     }
     setFileError(null);
@@ -948,15 +1043,15 @@ function AddSheet({
   return (
     <div
       data-no-refresh
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
     >
-      <div className="w-full rounded-t-3xl border border-border bg-card p-5 shadow-2xl sm:max-w-md sm:rounded-3xl">
+      <div className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-3xl border border-border bg-card p-5 shadow-2xl">
         {/* Hidden file input lives at the top level so the "Upload a file" card can trigger it
             from the menu without a dedicated sub-view. */}
         <input
           ref={fileRef}
           type="file"
-          accept="image/*,application/pdf"
+          accept="image/*,application/pdf,video/*,audio/*,text/plain,text/markdown,.txt,.md,.markdown"
           className="hidden"
           onChange={(e) => onFilePicked(e.target.files?.[0])}
         />
@@ -1042,7 +1137,7 @@ function AddSheet({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (text.trim()) onSubmitText(text.trim(), title.trim() || undefined);
+                if (text.trim()) onSubmitText(text.trim(), title.trim() || undefined, processAI);
               }}
               className="mt-4 space-y-3"
             >
@@ -1057,15 +1152,45 @@ function AddSheet({
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Type or paste anything…"
-                rows={4}
-                className="w-full resize-none rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
+                rows={6}
+                className="min-h-[34vh] w-full resize-none rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink sm:min-h-[9rem]"
               />
+              {/* Default: Clip AI titles/tags/structures the note. Toggle off to keep the
+                  text exactly as written (still editable later). */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={processAI}
+                onClick={() => setProcessAI((v) => !v)}
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-paper px-4 py-3 text-left"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Sparkle className="h-4 w-4 shrink-0 text-product" />
+                  <span>
+                    <span className="block text-sm font-medium text-ink">
+                      Let Clip AI structure it
+                    </span>
+                    <span className="block text-xs text-ink-soft">
+                      {processAI
+                        ? "Titled, tagged & formatted for you"
+                        : "Saved exactly as written"}
+                    </span>
+                  </span>
+                </span>
+                <span
+                  className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${processAI ? "bg-ink" : "bg-border"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-paper shadow transition-transform ${processAI ? "translate-x-[1.125rem]" : "translate-x-0.5"}`}
+                  />
+                </span>
+              </button>
               <button
                 type="submit"
                 disabled={!text.trim()}
                 className="w-full rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
               >
-                Save note
+                {processAI ? "Save note" : "Save as is"}
               </button>
             </form>
           </>

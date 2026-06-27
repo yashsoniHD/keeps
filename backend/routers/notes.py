@@ -27,6 +27,8 @@ class NoteUpdate(BaseModel):
     user_note: str | None = None
     content_type: str | None = None
     title: str | None = Field(default=None, max_length=300)
+    ai_summary: str | None = Field(default=None, max_length=2000)
+    data: dict[str, Any] | None = None  # body/structured fields (e.g. {"body": "…"} on a typed note)
 
 
 class AugmentNoteIn(BaseModel):
@@ -130,17 +132,28 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
     db = get_db()
     ref = await _owned_note_ref(db, note_id, user_id)  # 404s if not owner
 
+    # Title / summary / body edits are applied together so a body edit that also refreshes
+    # the excerpt re-embeds only once.
+    updates: dict[str, Any] = {}
     if body.title is not None:
         title = body.title.strip()
         if not title:
             raise HTTPException(422, "Title cannot be empty.")
-        await ref.update({"title": title, "updated_at": datetime.now(timezone.utc)})
-        # The search vector is built from title + ai_summary, so a rename must refresh
-        # it or semantic search drifts out of sync. Best-effort — the note is already saved.
-        ai_summary = (((await ref.get()).to_dict()) or {}).get("ai_summary", "")
-        vec = await _note_embedding(title, ai_summary)
-        if vec is not None:
-            await ref.update({"embedding": vec})
+        updates["title"] = title
+    if body.ai_summary is not None:
+        updates["ai_summary"] = body.ai_summary.strip()
+    if body.data is not None:
+        updates["data"] = firestore_safe(body.data)
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc)
+        await ref.update(updates)
+        # The search vector is built from title + ai_summary, so a rename/summary edit must
+        # refresh it or semantic search drifts. Best-effort — the note is already saved.
+        if "title" in updates or "ai_summary" in updates:
+            cur = (await ref.get()).to_dict() or {}
+            vec = await _note_embedding(cur.get("title", ""), cur.get("ai_summary", ""))
+            if vec is not None:
+                await ref.update({"embedding": vec})
 
     if body.content_type is not None:
         # Normalise + collapse to an existing category so the list doesn't fragment

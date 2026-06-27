@@ -118,11 +118,16 @@ class Settings:
     # A per-input ceiling bounds both the GCS object and the Gemini token cost of a single
     # capture — the cheapest safe equivalent of a page cap for PDFs (we don't parse pages).
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
+    # Video is its own (larger) ceiling — a clip is far bigger than a screenshot, but the
+    # cap still bounds a single capture's Gemini token cost (analyzed at low media resolution).
+    MAX_VIDEO_UPLOAD_MB: int = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "100"))
     ALLOWED_UPLOAD_MIME: dict[str, set[str]] = {
         "image": {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/gif"},
         "pdf": {"application/pdf"},
         "voice": {"audio/mpeg", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
                   "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"},
+        "video": {"video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
+                  "video/x-msvideo", "video/mpeg", "video/3gpp"},
     }
 
     # Optional paid fallback for Instagram/TikTok when yt-dlp is IP-blocked from Cloud Run

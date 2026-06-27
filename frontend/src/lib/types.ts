@@ -11,7 +11,7 @@ export interface Note {
   source_url: string;
   source_domain: string;
   source: "web" | "shortcut" | "pwa" | "upload" | "ai";
-  input_type?: "url" | "text" | "image" | "pdf" | "voice"; // how it was captured (default url)
+  input_type?: "url" | "text" | "image" | "pdf" | "voice" | "video"; // how it was captured (default url)
   cover_image_url: string | null;
   data: Record<string, unknown>;
   acquisition?: string;

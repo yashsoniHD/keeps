@@ -24,7 +24,7 @@ from google.cloud.firestore_v1.vector import Vector
 from google.genai import errors as genai_errors
 
 from config import settings
-from models.note import ContentBundle
+from models.note import ContentBundle, NoteExtraction
 from services import note_retrieval as nr
 from services import sources
 from services.agent_tools import AgentContext, run_agent_collect
@@ -170,6 +170,20 @@ def _verify_oidc(request: Request) -> None:
     verify_oidc(request)
 
 
+def _raw_text_extraction(text: str, title: str | None) -> NoteExtraction:
+    """Build a note from a typed note saved verbatim (process_ai=False) — no Gemini.
+    The body keeps the user's text untouched; the title defaults to its first line and the
+    summary to a short excerpt (both shown on the feed card, both editable later)."""
+    body = text.strip()[:30000]
+    first_line = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    resolved_title = (title or "").strip() or first_line[:120] or "Note"
+    # Excerpt for the card preview — plain text, not an AI summary.
+    excerpt = " ".join(body.split())
+    summary = excerpt[:200] + ("…" if len(excerpt) > 200 else "")
+    return NoteExtraction(content_type="note", title=resolved_title, ai_summary=summary,
+                          cover_image_prompt="", data={"body": body})
+
+
 @router.post("/process/{job_id}")
 async def process_job(job_id: str, request: Request):
     _verify_oidc(request)
@@ -194,6 +208,7 @@ async def process_job(job_id: str, request: Request):
     media_cover_url: str | None = job.get("media_cover_url")
     source: str = job.get("source", "web")
     note_hint: str | None = job.get("note_hint")
+    process_ai: bool = job.get("process_ai", True) is not False
     now = datetime.now(timezone.utc)
     # This run's attempt number — read before the Increment so the ladder below can
     # compare against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
@@ -230,6 +245,14 @@ async def process_job(job_id: str, request: Request):
                                    media_mime=media_mime or "audio/webm",
                                    metadata={"title": title or "Voice note", "platform": source},
                                    strategy="voice_upload")
+        elif input_type == "video":
+            # An uploaded clip rides the same direct-video path as YouTube/social URLs:
+            # Gemini ingests it by gs:// FileData (visuals + speech), analyzed at low media
+            # resolution to keep token cost bounded.
+            bundle = ContentBundle(kind="video_uri", video_uri=media_uri,
+                                   media_mime=media_mime or "video/mp4",
+                                   metadata={"title": title or "Video", "platform": source},
+                                   strategy="video_upload")
         elif device_content:
             # Device-extracted text (PWA/shortcut) already bypassed any paywall/login.
             bundle = ContentBundle(kind="text", text=device_content[:30000],
@@ -238,31 +261,38 @@ async def process_job(job_id: str, request: Request):
         else:
             bundle = await sources.acquire(url)
 
-        # 2. Categorize against this user's own categories.
-        existing = await get_user_categories(user_id)
-        content_type = await gemini_service.assign_category(url, bundle, existing, note_hint)
+        if input_type == "text" and not process_ai:
+            # Save-as-is: skip Gemini entirely. The text is the note; the user titles and
+            # categorises it themselves (and can edit the body later). Still embedded below
+            # for search — that's not "AI structuring", just retrieval.
+            extracted = _raw_text_extraction(job.get("text") or "", title)
+            cover_image_url = None
+        else:
+            # 2. Categorize against this user's own categories.
+            existing = await get_user_categories(user_id)
+            content_type = await gemini_service.assign_category(url, bundle, existing, note_hint)
 
-        # 3. Type-focused extraction (structured data only — never HTML).
-        extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
+            # 3. Type-focused extraction (structured data only — never HTML).
+            extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
 
-        if not extracted.data or len(str(extracted.data)) < 40:
-            raise ValueError("Extraction produced empty or suspiciously short data")
+            if not extracted.data or len(str(extracted.data)) < 40:
+                raise ValueError("Extraction produced empty or suspiciously short data")
 
-        cover_image_url = bundle.images[0] if bundle.images else None
-        # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
-        # Skip frames we already extracted (those are covers-bucket URLs).
-        if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
-            cover_image_url = await persist_cover(cover_image_url) or cover_image_url
-        # Last resort: generate a cover with Imagen (gated, capped). Only when the note
-        # would otherwise be coverless — real source imagery always wins. A miss (off,
-        # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
-        if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
-            if await reserve_image_slot(user_id):
-                cover_image_url = await generate_cover(
-                    extracted.cover_image_prompt, extracted.content_type
-                )
-                if cover_image_url:
-                    await record_image_generated(user_id)
+            cover_image_url = bundle.images[0] if bundle.images else None
+            # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
+            # Skip frames we already extracted (those are covers-bucket URLs).
+            if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
+                cover_image_url = await persist_cover(cover_image_url) or cover_image_url
+            # Last resort: generate a cover with Imagen (gated, capped). Only when the note
+            # would otherwise be coverless — real source imagery always wins. A miss (off,
+            # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
+            if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
+                if await reserve_image_slot(user_id):
+                    cover_image_url = await generate_cover(
+                        extracted.cover_image_prompt, extracted.content_type
+                    )
+                    if cover_image_url:
+                        await record_image_generated(user_id)
         # source_url/domain only describe URL captures; a typed note or uploaded file has
         # no web source, so they stay "" (the same empty-source convention AI notes use) and
         # the UI omits the "View source" affordance.
