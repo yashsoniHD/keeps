@@ -13,11 +13,13 @@
   ],
   "share_target": {
     "action": "/share",
-    "method": "GET",
+    "method": "POST",
+    "enctype": "multipart/form-data",
     "params": {
       "url": "url",
       "text": "text",
-      "title": "title"
+      "title": "title",
+      "files": [{ "name": "files", "accept": ["image/*", "application/pdf"] }]
     }
   }
 }

@@ -114,6 +114,17 @@ class Settings:
     # Max size for downloaded social media files we upload to GCS for analysis.
     MAX_MEDIA_DOWNLOAD_MB: int = int(os.getenv("MAX_MEDIA_DOWNLOAD_MB", "100"))
 
+    # Direct user uploads (screenshot / image / PDF / voice via /api/ingest/upload).
+    # A per-input ceiling bounds both the GCS object and the Gemini token cost of a single
+    # capture — the cheapest safe equivalent of a page cap for PDFs (we don't parse pages).
+    MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
+    ALLOWED_UPLOAD_MIME: dict[str, set[str]] = {
+        "image": {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/gif"},
+        "pdf": {"application/pdf"},
+        "voice": {"audio/mpeg", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
+                  "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"},
+    }
+
     # Optional paid fallback for Instagram/TikTok when yt-dlp is IP-blocked from Cloud Run
     # (datacenter IPs hit a login/rate-limit wall cookie-less). Apify owns the proxies +
     # accounts; we pay per scrape. Dormant until APIFY_TOKEN is set — the og-caption
@@ -165,7 +176,10 @@ class Settings:
     # counts (immutable facts) and derive cost at read-time from these, so a price
     # change re-prices history correctly. Paid-tier Standard rates (confirmed against
     # the live pricing page, 2026-06-12); output includes thinking tokens. Lite input
-    # uses the text/image/video rate ($0.25; audio would be $0.50 — we send no audio).
+    # uses the text/image/video rate ($0.25).
+    # TODO(voice): voice notes now DO send audio to Gemini, which bills at the higher audio
+    # input rate (~2× text). The usage meter still prices all input at the text rate, so
+    # voice-note cost is under-reported — split the input rate by modality when metering.
     GEMINI_PRICE_IN: float = float(os.getenv("GEMINI_PRICE_IN", "1.50"))
     GEMINI_PRICE_OUT: float = float(os.getenv("GEMINI_PRICE_OUT", "9.00"))
     GEMINI_LITE_PRICE_IN: float = float(os.getenv("GEMINI_LITE_PRICE_IN", "0.25"))
