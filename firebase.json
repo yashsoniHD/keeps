@@ -22,7 +22,7 @@
           { "key": "X-Content-Type-Options", "value": "nosniff" },
           { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
           { "key": "X-Frame-Options", "value": "DENY" },
-          { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+          { "key": "Permissions-Policy", "value": "camera=(), microphone=(self), geolocation=()" },
           {
             "key": "Content-Security-Policy-Report-Only",
             "value": "default-src 'self'; script-src 'self' https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src 'self' https://*.googleapis.com https://*.google.com https://clip-note-api-674775099277.us-central1.run.app wss://*.firebaseio.com; frame-src https://*.firebaseapp.com https://accounts.google.com; base-uri 'self'; object-src 'none'"
