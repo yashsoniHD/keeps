@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, Clock, X } from "lucide-react";
+import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, Clock, X, Star, Pin } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
@@ -153,7 +153,9 @@ export function NoteCard({ note }: { note: Note }) {
               <span className="truncate">{noteLabel(note.content_type)}</span>
             </span>
           </div>
-          <span className="shrink-0 text-[11px] text-ink-soft">
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-soft">
+            {note.pinned_at && <Pin className="h-3 w-3 fill-ink/70 text-ink/70" />}
+            {note.is_favorite && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
             {formatDateShort(note.created_at)}
           </span>
         </div>

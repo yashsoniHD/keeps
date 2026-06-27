@@ -27,6 +27,8 @@ class NoteUpdate(BaseModel):
     user_note: str | None = None
     content_type: str | None = None
     title: str | None = Field(default=None, max_length=300)
+    is_favorite: bool | None = None   # star a note for quick access in the Library
+    pinned: bool | None = None        # float to the top of the feed (sets/clears pinned_at)
     ai_summary: str | None = Field(default=None, max_length=2000)
     data: dict[str, Any] | None = None  # body/structured fields (e.g. {"body": "…"} on a typed note)
 
@@ -144,6 +146,12 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
         updates["ai_summary"] = body.ai_summary.strip()
     if body.data is not None:
         updates["data"] = firestore_safe(body.data)
+    if body.is_favorite is not None:
+        updates["is_favorite"] = bool(body.is_favorite)
+    if body.pinned is not None:
+        # pinned_at doubles as the flag and the sort key (newest-pinned-first); clearing
+        # the pin nulls it so the feed/Library can treat absent-or-null as "not pinned".
+        updates["pinned_at"] = datetime.now(timezone.utc) if body.pinned else None
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc)
         await ref.update(updates)

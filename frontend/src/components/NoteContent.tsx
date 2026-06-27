@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { RotateCcw, Sparkles, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
-import type { Note } from "@/lib/types";
+import type { Note, Collection } from "@/lib/types";
 import { ingest } from "@/lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
@@ -275,6 +275,8 @@ function CoverFallback({ note, className = "" }: { note: Note; className?: strin
 
 export function NoteContent({
   note,
+  collections = [],
+  uid = null,
   onDelete,
   onPatch,
   variant = "owner",
@@ -283,6 +285,8 @@ export function NoteContent({
   isAuthed,
 }: {
   note: Note;
+  collections?: Collection[];
+  uid?: string | null;
   onDelete?: () => void;
   onPatch?: (patch: Partial<Note>) => void;
   variant?: "owner" | "public";
@@ -302,7 +306,13 @@ export function NoteContent({
       {isPublic ? (
         <PublicNoteHeader note={note} />
       ) : (
-        <NoteHeader note={note} onDelete={onDelete} onPatch={onPatch} />
+        <NoteHeader
+          note={note}
+          collections={collections}
+          uid={uid}
+          onDelete={onDelete}
+          onPatch={onPatch}
+        />
       )}
       {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}

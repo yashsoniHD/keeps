@@ -5,15 +5,21 @@ import {
   orderBy,
   limit,
   getDoc,
+  getDocs,
   setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
   doc,
+  documentId,
   arrayUnion,
+  arrayRemove,
   onSnapshot,
   serverTimestamp,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
-import type { Note, Job } from "@/lib/types";
+import type { Note, Job, Collection } from "@/lib/types";
 
 // Record signup attribution on the user's own doc (rules allow owner writes). Merge so it
 // never clobbers backend-written fields; called once, on first sign-in.
@@ -144,6 +150,117 @@ export async function addUserCategory(userId: string, label: string): Promise<st
 
 // Getting-started guide flag lives on the user doc (not localStorage) so dismissing
 // it once sticks across devices and reinstalls.
+// --- Favorites & collections (the Library's pull-side discoverability) ---
+
+// Starred notes, newest first. Backed by the (user_id, is_favorite, created_at) index.
+// Unlike the feed, this isn't windowed — a favorite always surfaces here however old it is.
+export function watchFavorites(
+  userId: string,
+  callback: (notes: Note[]) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const q = query(
+    collection(db, "notes"),
+    where("user_id", "==", userId),
+    where("is_favorite", "==", true),
+    orderBy("created_at", "desc"),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note)),
+    (err) => opts.onError?.(err),
+  );
+}
+
+// User-created folders, most-recently-touched first. Owner-writable client-side (see
+// firestore.rules) — collections hold only the user's own organisation, never note content.
+export function watchCollections(
+  userId: string,
+  callback: (cols: Collection[]) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const q = query(
+    collection(db, "collections"),
+    where("user_id", "==", userId),
+    orderBy("updated_at", "desc"),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Collection)),
+    (err) => opts.onError?.(err),
+  );
+}
+
+export async function getCollection(cid: string): Promise<Collection | null> {
+  const snap = await getDoc(doc(db, "collections", cid));
+  return snap.exists() ? ({ id: snap.id, ...snap.data() } as Collection) : null;
+}
+
+export async function createCollection(
+  userId: string,
+  name: string,
+  icon: string | null = null,
+  palette: number | null = null,
+): Promise<string> {
+  const ref = await addDoc(collection(db, "collections"), {
+    user_id: userId,
+    name: name.trim(),
+    icon,
+    palette,
+    note_ids: [],
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function updateCollectionMeta(
+  cid: string,
+  patch: { name?: string; icon?: string | null; palette?: number | null },
+): Promise<void> {
+  const clean: Record<string, unknown> = { updated_at: serverTimestamp() };
+  if (patch.name !== undefined) clean.name = patch.name.trim();
+  if (patch.icon !== undefined) clean.icon = patch.icon;
+  if (patch.palette !== undefined) clean.palette = patch.palette;
+  await updateDoc(doc(db, "collections", cid), clean);
+}
+
+export async function deleteCollection(cid: string): Promise<void> {
+  await deleteDoc(doc(db, "collections", cid));
+}
+
+export async function addNoteToCollection(cid: string, noteId: string): Promise<void> {
+  await updateDoc(doc(db, "collections", cid), {
+    note_ids: arrayUnion(noteId),
+    updated_at: serverTimestamp(),
+  });
+}
+
+export async function removeNoteFromCollection(cid: string, noteId: string): Promise<void> {
+  await updateDoc(doc(db, "collections", cid), {
+    note_ids: arrayRemove(noteId),
+    updated_at: serverTimestamp(),
+  });
+}
+
+// Fetch notes by id for a collection detail view. Firestore caps `in` queries at 10 ids, so
+// fan out in chunks. Returned in the caller's id order (Firestore won't preserve it). Missing
+// ids (a note since deleted) are simply skipped.
+export async function getNotesByIds(ids: string[]): Promise<Note[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
+  const byId = new Map<string, Note>();
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      const q = query(collection(db, "notes"), where(documentId(), "in", chunk));
+      const snap = await getDocs(q);
+      snap.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() } as Note));
+    }),
+  );
+  return ids.map((id) => byId.get(id)).filter((n): n is Note => !!n);
+}
+
 export async function getOnboardingDone(userId: string): Promise<boolean> {
   const snap = await getDoc(doc(db, "users", userId));
   return snap.exists() && snap.data().onboarding_done === true;

@@ -8,32 +8,55 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronRight, FolderInput, Loader2, Share2, Trash2 } from "lucide-react";
-import type { Note } from "@/lib/types";
+import {
+  Check,
+  ChevronRight,
+  FolderInput,
+  FolderPlus,
+  Loader2,
+  Pin,
+  PinOff,
+  Share2,
+  Star,
+  Trash2,
+} from "lucide-react";
+import type { Collection, Note } from "@/lib/types";
 import { deleteNote, shareNote, updateNote } from "@/lib/api";
 import { noteIcon, noteLabel } from "@/lib/note-meta";
+import { CollectionPicker } from "@/components/library/CollectionPicker";
 
-// The user's category slugs, provided once by the feed so every card's menu can offer
-// "Recategorise" without prop-drilling through NoteGrid/NoteRowList. Defaults to empty so
-// the menu is still safe (just no recategorise targets) outside a provider.
-const CategoriesContext = createContext<string[]>([]);
+// Per-card menu context: the user's category slugs (for "Recategorise") plus their
+// collections + uid (for "Add to collection"), provided once by the feed/Library so every
+// card's menu has them without prop-drilling. Safe defaults make the menu work outside a
+// provider (just no recategorise/collection targets).
+type MenuCtx = { categories: string[]; collections: Collection[]; uid: string | null };
+const MenuContext = createContext<MenuCtx>({ categories: [], collections: [], uid: null });
 
 export function NoteMenuProvider({
   categories,
+  collections = [],
+  uid = null,
   children,
 }: {
   categories: string[];
+  collections?: Collection[];
+  uid?: string | null;
   children: ReactNode;
 }) {
-  return <CategoriesContext.Provider value={categories}>{children}</CategoriesContext.Provider>;
+  return (
+    <MenuContext.Provider value={{ categories, collections, uid }}>
+      {children}
+    </MenuContext.Provider>
+  );
 }
 
 // Wraps a feed card and opens a context menu on right-click (desktop) or long-press (touch).
 // Uses `display: contents` so it adds no box of its own — the wrapped <Link> stays the grid
 // item / flex row, preserving equal-height cards and the row dividers.
 export function WithNoteMenu({ note, children }: { note: Note; children: ReactNode }) {
-  const categories = useContext(CategoriesContext);
+  const { categories, collections, uid } = useContext(MenuContext);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [picker, setPicker] = useState(false);
   const suppressClick = useRef(false);
   const longPress = useRef<number | null>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -89,7 +112,24 @@ export function WithNoteMenu({ note, children }: { note: Note; children: ReactNo
     >
       {children}
       {menu && (
-        <NoteMenu note={note} categories={categories} pos={menu} onClose={() => setMenu(null)} />
+        <NoteMenu
+          note={note}
+          categories={categories}
+          pos={menu}
+          onAddToCollection={() => {
+            setMenu(null);
+            setPicker(true);
+          }}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {picker && (
+        <CollectionPicker
+          note={note}
+          collections={collections}
+          uid={uid}
+          onClose={() => setPicker(false)}
+        />
       )}
     </div>
   );
@@ -127,11 +167,13 @@ function NoteMenu({
   note,
   categories,
   pos,
+  onAddToCollection,
   onClose,
 }: {
   note: Note;
   categories: string[];
   pos: { x: number; y: number };
+  onAddToCollection: () => void;
   onClose: () => void;
 }) {
   const [view, setView] = useState<"main" | "recat">("main");
@@ -168,6 +210,24 @@ function NoteMenu({
     onClose();
     try {
       await updateNote(note.id, { content_type: slug }); // feed onSnapshot reflects the change
+    } catch {
+      /* leave it; the user can retry */
+    }
+  };
+
+  const toggleFavorite = async () => {
+    onClose();
+    try {
+      await updateNote(note.id, { is_favorite: !note.is_favorite });
+    } catch {
+      /* leave it; the user can retry */
+    }
+  };
+
+  const togglePin = async () => {
+    onClose();
+    try {
+      await updateNote(note.id, { pinned: !note.pinned_at });
     } catch {
       /* leave it; the user can retry */
     }
@@ -231,6 +291,26 @@ function NoteMenu({
       >
         {view === "main" ? (
           <>
+            <MenuItem
+              icon={Star}
+              label={note.is_favorite ? "Unfavorite" : "Favorite"}
+              onClick={toggleFavorite}
+              trailing={
+                note.is_favorite ? (
+                  <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" />
+                ) : undefined
+              }
+            />
+            <MenuItem
+              icon={note.pinned_at ? PinOff : Pin}
+              label={note.pinned_at ? "Unpin" : "Pin to top"}
+              onClick={togglePin}
+            />
+            <MenuItem
+              icon={FolderPlus}
+              label="Add to collection"
+              onClick={onAddToCollection}
+            />
             {recatTargets.length > 0 && (
               <MenuItem
                 icon={FolderInput}

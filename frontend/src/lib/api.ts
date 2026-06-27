@@ -124,6 +124,8 @@ export async function updateNote(
     title?: string;
     ai_summary?: string;
     data?: Record<string, unknown>;
+    is_favorite?: boolean;
+    pinned?: boolean;
   },
 ): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}`, {

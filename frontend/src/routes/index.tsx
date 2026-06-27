@@ -17,6 +17,8 @@ import {
   ImagePlus,
   Mic,
   ArrowLeft,
+  Library,
+  Pin,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -25,6 +27,7 @@ import { useCategoryMeta } from "@/contexts/category-meta";
 import {
   watchNotes,
   watchPendingJobs,
+  watchCollections,
   getUserCategories,
   getUserSources,
   getOnboardingDone,
@@ -47,9 +50,15 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { AppShell } from "@/components/AppShell";
-import type { Note, Job } from "@/lib/types";
+import type { Note, Job, Collection } from "@/lib/types";
 
-export const Route = createFileRoute("/")({ component: Feed });
+// `?type=<slug>` deep-links the feed to a single category — the Library's category cards
+// open the feed pre-filtered through the existing server-side content_type query.
+export const Route = createFileRoute("/")({
+  validateSearch: (s: Record<string, unknown>): { type?: string } =>
+    typeof s.type === "string" && s.type ? { type: s.type } : {},
+  component: Feed,
+});
 
 type Layout = "standard" | "condensed";
 
@@ -135,14 +144,16 @@ function Feed() {
   const { user, loading } = useAuth();
   useCategoryMeta(); // re-render the feed when category icon/colour overrides load or change
   const navigate = useNavigate();
+  const { type: typeParam } = Route.useSearch();
   const { openChat } = useAsk();
   const [notes, setNotes] = useState<Note[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [notesReady, setNotesReady] = useState(false);
   const [feedError, setFeedError] = useState(false);
   const [max, setMax] = useState(50);
   const [userCategories, setUserCategories] = useState<string[]>([]);
   const [userSources, setUserSources] = useState<string[]>([]);
-  const [active, setActive] = useState<string>("all");
+  const [active, setActive] = useState<string>(typeParam ?? "all");
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -165,9 +176,8 @@ function Feed() {
   const [ingestError, setIngestError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Logged-out visitors land on the marketing page (the pitch + signup CTA),
-    // not the bare sign-in screen — that's where cold traffic converts.
-    if (!loading && !user) navigate({ to: "/landing" });
+    // Logged-out visitors go straight to sign-in.
+    if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
 
   // Real-time feed: new/updated notes stream in without a refetch. The active type
@@ -206,6 +216,18 @@ function Feed() {
     if (!user) return;
     return watchPendingJobs(user.uid, setJobs);
   }, [user]);
+
+  // The user's folders, kept live so every card's context menu offers an up-to-date
+  // "Add to collection" list without a per-open fetch.
+  useEffect(() => {
+    if (!user) return;
+    return watchCollections(user.uid, setCollections, { onError: () => {} });
+  }, [user]);
+
+  // Follow a `?type=` deep link from the Library (and clearing it) into the chip filter.
+  useEffect(() => {
+    setActive(typeParam ?? "all");
+  }, [typeParam]);
 
   // Offline-queued captures replay on mount and whenever the connection returns.
   // Server-rejected entries (4xx) are dropped with their error surfaced — they'd
@@ -433,10 +455,20 @@ function Feed() {
     });
   }, [searchActive, searchResults, filtered, active, source]);
 
-  // Date-bucketed feed (Today / Yesterday / This Week / …). Search results stay flat —
-  // grouping a relevance-ranked list by recency would be misleading.
+  // Pinned notes float into their own section above the dated groups (newest-pinned first),
+  // so a note the user marked "come back to this" stays at the top of the feed instead of
+  // sinking with age. Search results aren't pinned-grouped (relevance order wins there).
+  const pinnedNotes = useMemo(() => {
+    if (searchActive) return [];
+    return displayNotes
+      .filter((n) => n.pinned_at)
+      .sort((a, b) => (b.pinned_at?.toMillis() ?? 0) - (a.pinned_at?.toMillis() ?? 0));
+  }, [searchActive, displayNotes]);
+
+  // Date-bucketed feed (Today / Yesterday / This Week / …), excluding pinned notes (shown
+  // above). Search results stay flat — grouping a relevance-ranked list by recency misleads.
   const dateGroups = useMemo(
-    () => (searchActive ? null : groupNotesByDate(displayNotes)),
+    () => (searchActive ? null : groupNotesByDate(displayNotes.filter((n) => !n.pinned_at))),
     [searchActive, displayNotes],
   );
 
@@ -502,7 +534,7 @@ function Feed() {
   }
 
   return (
-    <NoteMenuProvider categories={categories}>
+    <NoteMenuProvider categories={categories} collections={collections} uid={user?.uid ?? null}>
       <AppShell>
         <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
           <div className="mx-auto max-w-7xl px-4 pt-4 pb-3 md:px-8">
@@ -582,6 +614,9 @@ function Feed() {
                   >
                     <Search className="h-4 w-4" />
                   </button>
+                  <Link to="/library" aria-label="Library" title="Library" className={ICON_BTN}>
+                    <Library className="h-4 w-4" />
+                  </Link>
                   <button
                     type="button"
                     onClick={() => {
@@ -744,6 +779,20 @@ function Feed() {
                     ))}
                   </section>
                 ))}
+
+              {pinnedNotes.length > 0 && (
+                <div>
+                  <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+                    <Pin className="h-3.5 w-3.5" />
+                    Pinned
+                  </h2>
+                  {layout === "condensed" ? (
+                    <NoteRowList notes={pinnedNotes} />
+                  ) : (
+                    <NoteGrid notes={pinnedNotes} />
+                  )}
+                </div>
+              )}
 
               {dateGroups ? (
                 dateGroups.map((g) => (

@@ -1,14 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
-import { getNote, getAnnotation } from "@/lib/firestore";
+import { getNote, getAnnotation, watchCollections } from "@/lib/firestore";
 import { deleteNote } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
-import type { Note } from "@/lib/types";
+import type { Note, Collection } from "@/lib/types";
 import { analytics } from "@/lib/analytics";
 
 export const Route = createFileRoute("/notes/$noteId")({ component: NoteDetail });
@@ -20,6 +20,7 @@ function NoteDetail() {
   const navigate = useNavigate();
   const { setFocalNote } = useAsk();
   const [note, setNote] = useState<Note | null>(null);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
@@ -48,6 +49,12 @@ function NoteDetail() {
         .catch(() => setLoadError(true));
     }
   }, [user, noteId]);
+
+  // The user's folders, live, so the header's "Add to collection" sheet stays current.
+  useEffect(() => {
+    if (!user) return;
+    return watchCollections(user.uid, setCollections, { onError: () => {} });
+  }, [user]);
 
   // Scope the global Ask-AI FAB to this note while it's open ("this note first, then all").
   useEffect(() => {
@@ -88,6 +95,8 @@ function NoteDetail() {
     <AppShell>
       <NoteContent
         note={note}
+        collections={collections}
+        uid={user?.uid ?? null}
         onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
         onDelete={async () => {
           await deleteNote(note.id);

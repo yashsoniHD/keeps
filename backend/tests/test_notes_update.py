@@ -65,6 +65,33 @@ async def test_new_category_kept_as_slug(fake_db, monkeypatch):
     assert fake_db.docs[("notes", "n1")]["content_type"] == "work-stuff"
 
 
+async def test_favorite_toggle_sets_flag(fake_db):
+    """Starring writes is_favorite directly on the note (read by the Library favorites query)."""
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "T"})
+    await notes_mod.update_note("n1", notes_mod.NoteUpdate(is_favorite=True), user_id="u")
+    assert fake_db.docs[("notes", "n1")]["is_favorite"] is True
+    await notes_mod.update_note("n1", notes_mod.NoteUpdate(is_favorite=False), user_id="u")
+    assert fake_db.docs[("notes", "n1")]["is_favorite"] is False
+
+
+async def test_pin_sets_and_clears_pinned_at(fake_db):
+    """Pinning stamps pinned_at (the feed's sort key); unpinning nulls it so the feed/Library
+    treat absent-or-null as "not pinned"."""
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "T"})
+    await notes_mod.update_note("n1", notes_mod.NoteUpdate(pinned=True), user_id="u")
+    assert fake_db.docs[("notes", "n1")]["pinned_at"] is not None
+    await notes_mod.update_note("n1", notes_mod.NoteUpdate(pinned=False), user_id="u")
+    assert fake_db.docs[("notes", "n1")]["pinned_at"] is None
+
+
+async def test_favorite_rejects_non_owner(fake_db):
+    fake_db.seed("notes", "n1", {"user_id": "owner"})
+    with pytest.raises(HTTPException) as exc:
+        await notes_mod.update_note("n1", notes_mod.NoteUpdate(is_favorite=True), user_id="intruder")
+    assert exc.value.status_code == 404
+    assert "is_favorite" not in fake_db.docs[("notes", "n1")]  # nothing written
+
+
 async def test_rejects_non_owner(fake_db):
     fake_db.seed("notes", "n1", {"user_id": "owner"})
     with pytest.raises(HTTPException) as exc:

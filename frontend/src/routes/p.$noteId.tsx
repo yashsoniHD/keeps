@@ -125,8 +125,7 @@ function PublicNote() {
               </p>
             </div>
             <Link
-              to="/landing"
-              search={{ ref: "shared-note" }}
+              to="/login"
               className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
             >
               <Sparkles className="h-4 w-4" />

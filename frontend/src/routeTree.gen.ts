@@ -12,12 +12,13 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as LandingRouteImport } from './routes/landing'
+import { Route as LibraryRouteImport } from './routes/library'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PNoteIdRouteImport } from './routes/p.$noteId'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
+import { Route as LibraryCollectionIdRouteImport } from './routes/library.$collectionId'
 
 const ShareRoute = ShareRouteImport.update({
   id: '/share',
@@ -34,9 +35,9 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LandingRoute = LandingRouteImport.update({
-  id: '/landing',
-  path: '/landing',
+const LibraryRoute = LibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AskRoute = AskRouteImport.update({
@@ -64,15 +65,21 @@ const NotesNoteIdRoute = NotesNoteIdRouteImport.update({
   path: '/notes/$noteId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LibraryCollectionIdRoute = LibraryCollectionIdRouteImport.update({
+  id: '/$collectionId',
+  path: '/$collectionId',
+  getParentRoute: () => LibraryRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
-  '/landing': typeof LandingRoute
+  '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
+  '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
 }
@@ -80,10 +87,11 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
-  '/landing': typeof LandingRoute
+  '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
+  '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
 }
@@ -92,10 +100,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
-  '/landing': typeof LandingRoute
+  '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
+  '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/p/$noteId': typeof PNoteIdRoute
 }
@@ -105,10 +114,11 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
-    | '/landing'
+    | '/library'
     | '/login'
     | '/settings'
     | '/share'
+    | '/library/$collectionId'
     | '/notes/$noteId'
     | '/p/$noteId'
   fileRoutesByTo: FileRoutesByTo
@@ -116,10 +126,11 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
-    | '/landing'
+    | '/library'
     | '/login'
     | '/settings'
     | '/share'
+    | '/library/$collectionId'
     | '/notes/$noteId'
     | '/p/$noteId'
   id:
@@ -127,10 +138,11 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
-    | '/landing'
+    | '/library'
     | '/login'
     | '/settings'
     | '/share'
+    | '/library/$collectionId'
     | '/notes/$noteId'
     | '/p/$noteId'
   fileRoutesById: FileRoutesById
@@ -139,7 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AskRoute: typeof AskRoute
-  LandingRoute: typeof LandingRoute
+  LibraryRoute: typeof LibraryRouteWithChildren
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   ShareRoute: typeof ShareRoute
@@ -170,11 +182,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/landing': {
-      id: '/landing'
-      path: '/landing'
-      fullPath: '/landing'
-      preLoaderRoute: typeof LandingRouteImport
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ask': {
@@ -212,14 +224,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotesNoteIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/library/$collectionId': {
+      id: '/library/$collectionId'
+      path: '/$collectionId'
+      fullPath: '/library/$collectionId'
+      preLoaderRoute: typeof LibraryCollectionIdRouteImport
+      parentRoute: typeof LibraryRoute
+    }
   }
 }
+
+interface LibraryRouteChildren {
+  LibraryCollectionIdRoute: typeof LibraryCollectionIdRoute
+}
+
+const LibraryRouteChildren: LibraryRouteChildren = {
+  LibraryCollectionIdRoute: LibraryCollectionIdRoute,
+}
+
+const LibraryRouteWithChildren =
+  LibraryRoute._addFileChildren(LibraryRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AskRoute: AskRoute,
-  LandingRoute: LandingRoute,
+  LibraryRoute: LibraryRouteWithChildren,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   ShareRoute: ShareRoute,

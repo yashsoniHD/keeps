@@ -17,7 +17,22 @@ export interface Note {
   acquisition?: string;
   is_fallback?: boolean; // salvage "bookmark" note — content couldn't be processed
   is_public?: boolean; // owner shared it — readable via /p/{id} without login
+  is_favorite?: boolean; // starred for quick access in the Library
+  pinned_at?: Timestamp | null; // set → floats to the top of the feed; doubles as the sort key
 
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+// A user-created folder. Owner-writable directly from the client (holds only the user's own
+// organisation — never note content), so membership lives here as a note_ids[] list.
+export interface Collection {
+  id: string;
+  user_id: string;
+  name: string;
+  icon: string | null;
+  palette: number | null;
+  note_ids: string[];
   created_at: Timestamp;
   updated_at: Timestamp;
 }
