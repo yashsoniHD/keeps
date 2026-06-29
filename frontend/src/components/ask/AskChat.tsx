@@ -11,7 +11,7 @@ import {
   NotebookText,
   Search,
   Trash2,
-  WandSparkles,
+  Sparkle,
   X,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -60,7 +60,11 @@ const SLOW_PHRASES = [
   "Almost there…",
 ];
 
-const EXAMPLES = ["Summarize today's notes", "Plan a trip from my notes", "Compare my saved products"];
+const EXAMPLES = [
+  "Summarize today's notes",
+  "Plan a trip from my notes",
+  "Compare my saved products",
+];
 
 function CitationChip({
   citation,
@@ -405,6 +409,7 @@ export function AskChat({
     const question = raw.trim();
     if (!question || sending) return;
     analytics.askSubmitted();
+    analytics.clipAiUsed(); // funnel: first time the user engages Clip AI (once per browser)
     const base = replaceLast ? messages.slice(0, -1) : messages;
     const history = base.map(({ role, text }) => ({ role, text })).slice(-10);
 
@@ -611,7 +616,11 @@ export function AskChat({
                           <button
                             type="button"
                             aria-label="Delete chat"
-                            onClick={(e) => { e.stopPropagation(); removeConversation(c.id, e); setSwipedId(null); }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeConversation(c.id, e);
+                              setSwipedId(null);
+                            }}
                             className="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 text-white"
                             style={{ width: SWIPE_REVEAL }}
                           >
@@ -624,23 +633,38 @@ export function AskChat({
                             tabIndex={0}
                             style={{
                               transform: `translateX(${tx}px)`,
-                              transition: drag?.id === c.id ? 'none' : 'transform 0.2s ease-out',
-                              touchAction: 'pan-y',
+                              transition: drag?.id === c.id ? "none" : "transform 0.2s ease-out",
+                              touchAction: "pan-y",
                             }}
-                            onClick={() => { if (isOpen) { setSwipedId(null); return; } resumeConversation(c.id); }}
+                            onClick={() => {
+                              if (isOpen) {
+                                setSwipedId(null);
+                                return;
+                              }
+                              resumeConversation(c.id);
+                            }}
                             onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
                             onTouchStart={(e) => {
                               if (swipedId && swipedId !== c.id) setSwipedId(null);
-                              swipeTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                              swipeTouchStart.current = {
+                                x: e.touches[0].clientX,
+                                y: e.touches[0].clientY,
+                              };
                               setDrag({ id: c.id, x: swipedId === c.id ? -SWIPE_REVEAL : 0 });
                             }}
                             onTouchMove={(e) => {
                               if (!swipeTouchStart.current || drag?.id !== c.id) return;
                               const dx = e.touches[0].clientX - swipeTouchStart.current.x;
                               const dy = e.touches[0].clientY - swipeTouchStart.current.y;
-                              if (Math.abs(dy) > Math.abs(dx) + 4) { setDrag(null); return; }
+                              if (Math.abs(dy) > Math.abs(dx) + 4) {
+                                setDrag(null);
+                                return;
+                              }
                               const base = swipedId === c.id ? -SWIPE_REVEAL : 0;
-                              setDrag({ id: c.id, x: Math.max(-SWIPE_REVEAL, Math.min(0, base + dx)) });
+                              setDrag({
+                                id: c.id,
+                                x: Math.max(-SWIPE_REVEAL, Math.min(0, base + dx)),
+                              });
                             }}
                             onTouchEnd={() => {
                               if (!drag || drag.id !== c.id) return;
@@ -691,7 +715,7 @@ export function AskChat({
         className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3"
       >
         <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-summary-soft text-summary">
-          <WandSparkles className="h-4 w-4" />
+          <Sparkle className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-semibold leading-tight text-ink">Clip AI</p>
@@ -734,7 +758,7 @@ export function AskChat({
         {!hasMessages ? (
           <div className="flex h-full flex-col items-center justify-center px-4 pb-10 text-center">
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-summary-soft text-summary">
-              <WandSparkles className="h-5 w-5" />
+              <Sparkle className="h-5 w-5" />
             </span>
             <h2 className="mt-4 text-xl font-semibold text-ink">
               {noteTitle ? "Ask about this note" : "What can I help with?"}

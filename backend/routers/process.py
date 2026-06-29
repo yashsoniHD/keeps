@@ -19,17 +19,16 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
-from google.auth.transport import requests as google_requests
 from google.cloud import firestore as fs
 from google.cloud.firestore_v1.vector import Vector
 from google.genai import errors as genai_errors
-from google.oauth2 import id_token
 
 from config import settings
-from models.note import ContentBundle
+from models.note import ContentBundle, NoteExtraction
 from services import note_retrieval as nr
 from services import sources
 from services.agent_tools import AgentContext, run_agent_collect
+from services.cloud_tasks import enqueue_process_job
 from services.covers import persist_cover
 from services.embeddings import embedding_service
 from services.firebase import (
@@ -41,10 +40,12 @@ from services.firebase import (
     get_user_categories,
     record_image_generated,
     reserve_image_slot,
+    touch_user_activity,
 )
 from services.gemini import gemini_service, is_entertainment, match_existing, normalize_slug
 from services.imagen import generate_cover
 from services.net_guard import BlockedURLError, guarded_async_client
+from services.oidc import verify_oidc
 from services.usage_meter import start_metering
 from services.watchlist import enrich_titles
 
@@ -107,44 +108,51 @@ async def _link_preview(url: str) -> dict:
     return preview
 
 
-async def _salvage_note(db, *, user_id: str, url: str, source: str,
-                        bundle: ContentBundle | None, now: datetime) -> str:
-    """Writes a minimal bookmark note so the capture is never lost.
+async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: str,
+                        user_title: str | None, bundle: ContentBundle | None,
+                        now: datetime) -> str:
+    """Writes a minimal note so the capture is never lost.
 
-    Title/cover tiers: acquired bundle metadata → lightweight og: fetch → bare domain.
-    Enrichment is best-effort; only the Firestore write may fail upward.
+    For URL captures: title/cover tiers are bundle metadata → lightweight og: fetch → domain.
+    For typed/uploaded captures there's no URL to preview — we fall back to the user's title
+    (and, for images, the uploaded image as the cover). Enrichment is best-effort.
     """
-    domain = _domain_of(url)
-    title: str | None = None
+    is_url = input_type == "url" and bool(url)
+    domain = _domain_of(url) if is_url else ""
+    title: str | None = user_title or None
     cover: str | None = None
     try:
         if bundle is not None:
             meta_title = (bundle.metadata or {}).get("title")
-            if meta_title and str(meta_title) not in (domain, url, "Untitled"):
+            if not title and meta_title and str(meta_title) not in (domain, url, "Untitled"):
                 title = str(meta_title)
             cover = bundle.images[0] if bundle.images else None
-        if not title:
+        if not title and is_url:
             preview = await _link_preview(url)
             title = preview.get("title") or None
             cover = cover or preview.get("image")
     except Exception as e:
-        log.warning("salvage enrichment failed, writing URL-only note: %s: %s",
+        log.warning("salvage enrichment failed, writing minimal note: %s: %s",
                     type(e).__name__, e, extra={"url": url, "user_id": user_id})
 
+    fallback_title = title or domain or "Saved item"
+    facts = [{"label": "Source", "value": domain}] if domain else []
     note_id = str(uuid.uuid4())
-    embedding = await _note_embedding(title or domain)
+    embedding = await _note_embedding(fallback_title)
     note_doc = {
         "user_id": user_id,
+        "input_type": input_type,
         "content_type": "bookmark",
         "template": "bookmark",  # generic-block data; renders via GenericNote
-        "title": title or domain,
-        "ai_summary": "Saved as a bookmark — this link couldn't be fully processed. "
-                      "Open the source to read it, or retry from the note.",
-        "source_url": url,
+        "title": fallback_title,
+        "ai_summary": ("Saved as a bookmark — this couldn't be fully processed. "
+                       + ("Open the source to read it, or retry from the note."
+                          if is_url else "Retry from the note.")),
+        "source_url": url if is_url else "",
         "source_domain": domain,
         "source": source,
         "cover_image_url": cover,
-        "data": {"facts": [{"label": "Source", "value": domain}], "sections": []},
+        "data": {"facts": facts, "sections": []},
         "acquisition": "salvage",
         "is_fallback": True,
         "created_at": now,
@@ -157,20 +165,24 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str,
 
 
 def _verify_oidc(request: Request) -> None:
-    """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email."""
-    auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(403, "Forbidden")
-    try:
-        claims = id_token.verify_oauth2_token(
-            auth_header.removeprefix("Bearer "),
-            google_requests.Request(),
-            audience=settings.CLOUD_TASKS_WORKER_URL,
-        )
-    except Exception:
-        raise HTTPException(403, "Forbidden")
-    if claims.get("email") != settings.CLOUD_TASKS_SA_EMAIL or not claims.get("email_verified"):
-        raise HTTPException(403, "Forbidden")
+    """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email.
+    Thin wrapper over the shared verifier (kept as a module-level name so existing tests can
+    patch process._verify_oidc)."""
+    verify_oidc(request)
+
+
+def _raw_text_extraction(text: str, title: str | None) -> NoteExtraction:
+    """Build a note from a typed note saved verbatim (process_ai=False) — no Gemini.
+    The body keeps the user's text untouched; the title defaults to its first line and the
+    summary to a short excerpt (both shown on the feed card, both editable later)."""
+    body = text.strip()[:30000]
+    first_line = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    resolved_title = (title or "").strip() or first_line[:120] or "Note"
+    # Excerpt for the card preview — plain text, not an AI summary.
+    excerpt = " ".join(body.split())
+    summary = excerpt[:200] + ("…" if len(excerpt) > 200 else "")
+    return NoteExtraction(content_type="note", title=resolved_title, ai_summary=summary,
+                          cover_image_prompt="", data={"body": body})
 
 
 @router.post("/process/{job_id}")
@@ -188,10 +200,16 @@ async def process_job(job_id: str, request: Request):
         return {"status": "completed", "note_id": job.get("note_id")}
 
     user_id: str = job["user_id"]
-    url: str = job["url"]
+    input_type: str = job.get("input_type") or "url"
+    url: str = job.get("url") or ""
     device_content: str | None = job.get("content")
+    title: str | None = job.get("title")
+    media_uri: str | None = job.get("media_gcs_uri")
+    media_mime: str | None = job.get("media_mime")
+    media_cover_url: str | None = job.get("media_cover_url")
     source: str = job.get("source", "web")
     note_hint: str | None = job.get("note_hint")
+    process_ai: bool = job.get("process_ai", True) is not False
     now = datetime.now(timezone.utc)
     # This run's attempt number — read before the Increment so the ladder below can
     # compare against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
@@ -203,46 +221,91 @@ async def process_job(job_id: str, request: Request):
     meter = start_metering()
     bundle: ContentBundle | None = None
     try:
-        # 1. Acquire content via the source-aware resolver (or trust device-extracted text,
-        #    which already bypassed any paywall/login on the user's phone).
-        if device_content:
+        # 1. Acquire content per input_type. URLs go through the source-aware resolver;
+        #    everything else is already in hand (typed text, or a file uploaded to GCS that
+        #    Gemini reads by gs:// URI — mirroring the video path, no byte round-trip here).
+        if input_type == "text":
+            bundle = ContentBundle(kind="text", text=(job.get("text") or "")[:30000],
+                                   metadata={"title": title or "Note", "platform": source},
+                                   strategy="text_input")
+        elif input_type == "image":
+            bundle = ContentBundle(kind="image", media_uri=media_uri,
+                                   media_mime=media_mime or "image/jpeg",
+                                   images=[media_cover_url] if media_cover_url else [],
+                                   metadata={"title": title or "Saved image", "platform": source},
+                                   strategy="image_upload")
+        elif input_type == "pdf":
+            bundle = ContentBundle(kind="document", media_uri=media_uri,
+                                   media_mime=media_mime or "application/pdf",
+                                   metadata={"title": title or "Document", "platform": source},
+                                   strategy="pdf_upload")
+        elif input_type == "voice":
+            # Audio reads through the same gs:// FileData path as images/PDFs; gemini.py
+            # branches on the audio/* mime and instructs the model to transcribe + structure it.
+            bundle = ContentBundle(kind="document", media_uri=media_uri,
+                                   media_mime=media_mime or "audio/webm",
+                                   metadata={"title": title or "Voice note", "platform": source},
+                                   strategy="voice_upload")
+        elif input_type == "video":
+            # An uploaded clip rides the same direct-video path as YouTube/social URLs:
+            # Gemini ingests it by gs:// FileData (visuals + speech), analyzed at low media
+            # resolution to keep token cost bounded.
+            bundle = ContentBundle(kind="video_uri", video_uri=media_uri,
+                                   media_mime=media_mime or "video/mp4",
+                                   metadata={"title": title or "Video", "platform": source},
+                                   strategy="video_upload")
+        elif device_content:
+            # Device-extracted text (PWA/shortcut) already bypassed any paywall/login.
             bundle = ContentBundle(kind="text", text=device_content[:30000],
                                    metadata={"title": url, "platform": source},
                                    strategy="device_content")
         else:
             bundle = await sources.acquire(url)
 
-        # 2. Categorize against this user's own categories.
-        existing = await get_user_categories(user_id)
-        content_type = await gemini_service.assign_category(url, bundle, existing, note_hint)
+        if input_type == "text" and not process_ai:
+            # Save-as-is: skip Gemini entirely. The text is the note; the user titles and
+            # categorises it themselves (and can edit the body later). Still embedded below
+            # for search — that's not "AI structuring", just retrieval.
+            extracted = _raw_text_extraction(job.get("text") or "", title)
+            cover_image_url = None
+        else:
+            # 2. Categorize against this user's own categories.
+            existing = await get_user_categories(user_id)
+            content_type = await gemini_service.assign_category(url, bundle, existing, note_hint)
 
-        # 3. Type-focused extraction (structured data only — never HTML).
-        extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
+            # 3. Type-focused extraction (structured data only — never HTML).
+            extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
 
-        if not extracted.data or len(str(extracted.data)) < 40:
-            raise ValueError("Extraction produced empty or suspiciously short data")
+            if not extracted.data or len(str(extracted.data)) < 40:
+                raise ValueError("Extraction produced empty or suspiciously short data")
 
-        cover_image_url = bundle.images[0] if bundle.images else None
-        # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
-        # Skip frames we already extracted (those are covers-bucket URLs).
-        if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
-            cover_image_url = await persist_cover(cover_image_url) or cover_image_url
-        # Last resort: generate a cover with Imagen (gated, capped). Only when the note
-        # would otherwise be coverless — real source imagery always wins. A miss (off,
-        # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
-        if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
-            if await reserve_image_slot(user_id):
-                cover_image_url = await generate_cover(
-                    extracted.cover_image_prompt, extracted.content_type
-                )
-                if cover_image_url:
-                    await record_image_generated(user_id)
-        source_domain = url.split("/")[2].replace("www.", "") if "://" in url else url
+            cover_image_url = bundle.images[0] if bundle.images else None
+            # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
+            # Skip frames we already extracted (those are covers-bucket URLs).
+            if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
+                cover_image_url = await persist_cover(cover_image_url) or cover_image_url
+            # Last resort: generate a cover with Imagen (gated, capped). Only when the note
+            # would otherwise be coverless — real source imagery always wins. A miss (off,
+            # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
+            if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
+                if await reserve_image_slot(user_id):
+                    cover_image_url = await generate_cover(
+                        extracted.cover_image_prompt, extracted.content_type
+                    )
+                    if cover_image_url:
+                        await record_image_generated(user_id)
+        # source_url/domain only describe URL captures; a typed note or uploaded file has
+        # no web source, so they stay "" (the same empty-source convention AI notes use) and
+        # the UI omits the "View source" affordance.
+        source_url = url if input_type == "url" else ""
+        source_domain = (url.split("/")[2].replace("www.", "")
+                         if input_type == "url" and "://" in url else "")
 
         note_id = str(uuid.uuid4())
         embedding = await _note_embedding(extracted.title, extracted.ai_summary)
         note_doc = {
             "user_id": user_id,
+            "input_type": input_type,
             "content_type": extracted.content_type,
             # `template` is the immutable structural schema the `data` map was built for.
             # `content_type` is the *editable* category (icon/colour/filter) and may be
@@ -251,7 +314,7 @@ async def process_job(job_id: str, request: Request):
             "template": extracted.content_type,
             "title": extracted.title,
             "ai_summary": extracted.ai_summary,
-            "source_url": url,
+            "source_url": source_url,
             "source_domain": source_domain,
             "source": source,
             "cover_image_url": cover_image_url,
@@ -278,9 +341,11 @@ async def process_job(job_id: str, request: Request):
                 log.warning("watchlist enrichment failed: %s: %s", type(e).__name__, e,
                             extra={"job_id": job_id, "user_id": user_id, "url": url})
         await add_user_category(user_id, extracted.content_type)
-        await add_user_source(user_id, source_domain)
+        if source_domain:
+            await add_user_source(user_id, source_domain)
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "updated_at": datetime.now(timezone.utc)})
+        await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
         log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
                  extra={"job_id": job_id, "user_id": user_id, "url": url, "strategy": bundle.strategy})
         return {"status": "completed", "note_id": note_id}
@@ -311,15 +376,18 @@ async def process_job(job_id: str, request: Request):
                   extra={"job_id": job_id, "user_id": user_id, "url": url}, exc_info=True)
         try:
             note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
+                                          input_type=input_type, user_title=title,
                                           bundle=bundle, now=datetime.now(timezone.utc))
             try:
                 await add_user_category(user_id, "bookmark")
-                await add_user_source(user_id, _domain_of(url))
+                if input_type == "url" and url:
+                    await add_user_source(user_id, _domain_of(url))
             except Exception:
                 pass  # category/source chips are cosmetic — never fail the salvage over it
             await job_ref.update({"status": "completed", "note_id": note_id,
                                   "error": f"salvaged: {type(e).__name__}: {e}"[:500],
                                   "updated_at": datetime.now(timezone.utc)})
+            await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
             return {"status": "completed", "note_id": note_id, "salvaged": True}
         except Exception as salvage_exc:
             # Even the URL-only Firestore write failed — the one path left is "failed".
@@ -332,6 +400,36 @@ async def process_job(job_id: str, request: Request):
     finally:
         # Attribute token spend even when the job re-raised for a Cloud Tasks retry.
         await flush_usage(user_id, meter)
+
+
+@router.post("/process/drain-deferred")
+async def drain_deferred(request: Request):
+    """Re-enqueue captures parked by the global daily cap (status "deferred"), up to the
+    budget that has freed up — e.g. after the daily counter rolls over. Triggered by Cloud
+    Scheduler (OIDC-authed with the same SA as Cloud Tasks). The batch is bounded by the
+    remaining global budget, so draining can never itself bust the kill-switch."""
+    _verify_oidc(request)
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    global_ref = db.collection("system").document(f"usage-{today}")
+    snap = await global_ref.get()
+    used = (snap.to_dict() or {}).get("note_count", 0)
+    budget = settings.DAILY_GLOBAL_NOTE_CAP - used
+    if budget <= 0:
+        return {"drained": 0, "reason": "no budget today"}
+
+    now = datetime.now(timezone.utc)
+    drained = 0
+    q = db.collection("jobs").where("status", "==", "deferred").limit(budget)
+    async for doc in q.stream():
+        await doc.reference.update({"status": "pending", "updated_at": now})
+        enqueue_process_job(doc.id)
+        drained += 1
+    if drained:
+        # Atomic so concurrent live ingests can't double-spend the same budget slot.
+        await global_ref.set({"date": today, "note_count": fs.Increment(drained)}, merge=True)
+    log.info("drained %d deferred captures (budget was %d)", drained, budget)
+    return {"drained": drained}
 
 
 @router.post("/process-agent/{job_id}")

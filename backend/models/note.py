@@ -3,9 +3,23 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class IngestRequest(BaseModel):
-    url: str
+    # The capture's origin shape. "url" is the historic default; the rest let the user
+    # save things that aren't a clean link (a typed thought, a screenshot, a PDF, a voice
+    # memo). Binary inputs (image/pdf/voice) arrive pre-uploaded to GCS via /ingest/upload,
+    # so the request only carries a reference (media_gcs_uri), never the bytes.
+    input_type: Literal["url", "text", "image", "pdf", "voice", "video"] = "url"
+    url: str = ""                      # required only when input_type == "url"
+    text: str | None = None            # the note body when input_type == "text"
+    # Typed notes only: when False the note is saved verbatim (no Gemini extraction) — the
+    # raw text becomes the body, the user titles/tags it themselves. Default True keeps the
+    # AI-structured behaviour for every other path.
+    process_ai: bool = True
+    title: str | None = Field(default=None, max_length=300)  # user-supplied title (non-url inputs)
+    media_gcs_uri: str | None = None   # gs:// URI of the uploaded file (image/pdf/voice/video)
+    media_mime: str | None = None      # MIME of the uploaded file (Vertex needs it on FileData)
+    media_cover_url: str | None = None # public https cover (images double as their own cover)
     content: str | None = None         # pre-extracted text (paywall/auth bypass via PWA/shortcut)
-    source: str = "web"                # "web" | "shortcut" | "pwa" | "ai_chat"
+    source: str = "web"                # "web" | "shortcut" | "pwa" | "ai_chat" | "upload"
     note_hint: str | None = Field(default=None, max_length=500)  # user instructions for Gemini
 
     @field_validator("url")
@@ -28,14 +42,21 @@ class ContentBundle(BaseModel):
 
     kind:
       video_uri  — Gemini analyzes the video directly (YouTube URL or gs:// URI)
-      text       — scraped/extracted text (articles, reddit threads, captions)
+      text       — scraped/extracted text (articles, reddit threads, captions, typed notes)
       structured — JSON-LD found on the page; passed to Gemini verbatim as ground truth
+      image      — a user-saved image/screenshot, ingested by gs:// URI (media_uri)
+      document   — a user-saved PDF (or audio), ingested by gs:// URI (media_uri)
     A bundle may carry several of these at once (e.g. text + structured); `kind` records the
     primary acquisition path for reporting.
     """
-    kind: Literal["video_uri", "text", "structured", "metadata_only"]
+    kind: Literal["video_uri", "text", "structured", "metadata_only", "image", "document"]
     text: str | None = None
     video_uri: str | None = None
+    # Any non-video media (image / PDF / audio) Gemini ingests by gs:// URI, mirroring the
+    # video_uri path. Vertex requires an explicit mimeType on FileData (image/jpeg,
+    # application/pdf, audio/mp4, …) — set media_mime accordingly.
+    media_uri: str | None = None
+    media_mime: str | None = None
     structured: dict[str, Any] | None = None
     images: list[str] = Field(default_factory=list)
     # Image bytes to hand Gemini as vision input — e.g. every slide of an Instagram

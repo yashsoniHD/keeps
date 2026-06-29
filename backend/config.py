@@ -35,6 +35,15 @@ class Settings:
     # OIDC, not a shared secret: tasks are signed by this SA; the worker validates the token.
     CLOUD_TASKS_SA_EMAIL: str = os.getenv("CLOUD_TASKS_SA_EMAIL", "")
 
+    # Weekly digest email (Resend). The /digest/run worker is OIDC-authed (same SA as
+    # Cloud Tasks) and triggered by Cloud Scheduler. Sends are no-ops until the key + sender
+    # are set, so the endpoint is safe to deploy before the provider is wired.
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    DIGEST_FROM_EMAIL: str = os.getenv("DIGEST_FROM_EMAIL", "")  # e.g. "Clipnote <digest@clipnote.app>"
+    # Signs unsubscribe links so they work without login but can't be forged.
+    DIGEST_UNSUB_SECRET: str = os.getenv("DIGEST_UNSUB_SECRET", "")
+    APP_BASE_URL: str = os.getenv("APP_BASE_URL", "https://clipnote.web.app")
+
     CLOUD_STORAGE_BUCKET: str = os.getenv("CLOUD_STORAGE_BUCKET", "")
     # Public-read bucket for note cover images. Kept separate from the media bucket
     # (which holds private video downloads) so covers can be served to the browser by
@@ -52,6 +61,9 @@ class Settings:
     DAILY_GLOBAL_NOTE_CAP: int = int(os.getenv("DAILY_GLOBAL_NOTE_CAP", "1000"))
     MAX_ASKS_PER_USER_PER_DAY: int = int(os.getenv("MAX_ASKS_PER_USER_PER_DAY", "30"))
     DAILY_GLOBAL_ASK_CAP: int = int(os.getenv("DAILY_GLOBAL_ASK_CAP", "300"))
+    # Per-IP flood guard on the expensive POST endpoints (ingest/ask). In-memory, per Cloud
+    # Run instance — abuse protection layered in front of the authoritative cost caps above.
+    RATE_LIMIT_PER_MIN: int = int(os.getenv("RATE_LIMIT_PER_MIN", "30"))
     # How many full notes get sent to the answering model per ask.
     ASK_MAX_GROUNDED_NOTES: int = int(os.getenv("ASK_MAX_GROUNDED_NOTES", "12"))
     # Candidate notes the vector shortlist hands the lite planner per ask (hybrid
@@ -101,6 +113,22 @@ class Settings:
 
     # Max size for downloaded social media files we upload to GCS for analysis.
     MAX_MEDIA_DOWNLOAD_MB: int = int(os.getenv("MAX_MEDIA_DOWNLOAD_MB", "100"))
+
+    # Direct user uploads (screenshot / image / PDF / voice via /api/ingest/upload).
+    # A per-input ceiling bounds both the GCS object and the Gemini token cost of a single
+    # capture — the cheapest safe equivalent of a page cap for PDFs (we don't parse pages).
+    MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
+    # Video is its own (larger) ceiling — a clip is far bigger than a screenshot, but the
+    # cap still bounds a single capture's Gemini token cost (analyzed at low media resolution).
+    MAX_VIDEO_UPLOAD_MB: int = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "100"))
+    ALLOWED_UPLOAD_MIME: dict[str, set[str]] = {
+        "image": {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/gif"},
+        "pdf": {"application/pdf"},
+        "voice": {"audio/mpeg", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
+                  "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"},
+        "video": {"video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
+                  "video/x-msvideo", "video/mpeg", "video/3gpp"},
+    }
 
     # Optional paid fallback for Instagram/TikTok when yt-dlp is IP-blocked from Cloud Run
     # (datacenter IPs hit a login/rate-limit wall cookie-less). Apify owns the proxies +
@@ -165,7 +193,10 @@ class Settings:
     # counts (immutable facts) and derive cost at read-time from these, so a price
     # change re-prices history correctly. Paid-tier Standard rates (confirmed against
     # the live pricing page, 2026-06-12); output includes thinking tokens. Lite input
-    # uses the text/image/video rate ($0.25; audio would be $0.50 — we send no audio).
+    # uses the text/image/video rate ($0.25).
+    # TODO(voice): voice notes now DO send audio to Gemini, which bills at the higher audio
+    # input rate (~2× text). The usage meter still prices all input at the text rate, so
+    # voice-note cost is under-reported — split the input rate by modality when metering.
     GEMINI_PRICE_IN: float = float(os.getenv("GEMINI_PRICE_IN", "1.50"))
     GEMINI_PRICE_OUT: float = float(os.getenv("GEMINI_PRICE_OUT", "9.00"))
     GEMINI_LITE_PRICE_IN: float = float(os.getenv("GEMINI_LITE_PRICE_IN", "0.25"))

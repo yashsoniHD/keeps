@@ -442,10 +442,26 @@ class GeminiService:
             + (f"User instruction: {note_hint}\n" if note_hint else "")
             + "Choose the content_type."
         )
+        # An uploaded image/PDF often has no useful preview text — classify from the file
+        # itself (the lite model is multimodal). Video is left out: it's the expensive path
+        # and its title/description text is enough for categorization.
+        if bundle.media_uri or bundle.image_parts:
+            cat_parts: list = []
+            if bundle.media_uri:
+                cat_parts.append(types.Part(file_data=types.FileData(
+                    file_uri=bundle.media_uri,
+                    mime_type=bundle.media_mime or "application/octet-stream")))
+            for img in bundle.image_parts:
+                cat_parts.append(types.Part.from_bytes(
+                    data=img["data"], mime_type=img.get("mime_type", "image/jpeg")))
+            cat_parts.append(types.Part(text=prompt))
+            contents = [types.Content(role="user", parts=cat_parts)]
+        else:
+            contents = [prompt]
         response = await asyncio.to_thread(
             self.client.models.generate_content,
             model=settings.GEMINI_LITE_MODEL,
-            contents=[prompt],
+            contents=contents,
             # No tight max_output_tokens: Gemini 3.x models think by default and a small
             # cap gets consumed by thoughts, returning text=None (measured at Phase 0).
             config=types.GenerateContentConfig(
@@ -500,7 +516,12 @@ class GeminiService:
             # the video directly (visuals + audio). Never inline bytes. Vertex requires
             # an explicit mimeType even for YouTube URLs (400 without it).
             parts.append(types.Part(file_data=types.FileData(file_uri=bundle.video_uri,
-                                                             mime_type="video/mp4")))
+                                                             mime_type=bundle.media_mime or "video/mp4")))
+        if bundle.media_uri:
+            # A user-saved image / PDF (and later audio), read straight from gs:// — same
+            # FileData mechanism as video. Vertex requires the explicit mimeType.
+            parts.append(types.Part(file_data=types.FileData(
+                file_uri=bundle.media_uri, mime_type=bundle.media_mime or "application/octet-stream")))
         # Inline image bytes (e.g. every slide of an Instagram carousel) so the model reads
         # the actual post imagery, not just the caption. Small per-image, well under the
         # ~20 MB inline ceiling at this slide count.
@@ -537,6 +558,17 @@ class GeminiService:
                 "in EVERY slide of the carousel and synthesize them together; do not stop at "
                 "the first slide." if n > 1
                 else "An image from the post is attached — read its text and visuals."
+            )
+        if bundle.media_uri:
+            mime = bundle.media_mime or ""
+            text_prompt.append(
+                "A PDF document is attached — read all of its text and any figures/tables, "
+                "and extract the structured information." if mime == "application/pdf"
+                else "An audio recording is attached — transcribe it and extract the key content."
+                if mime.startswith("audio/")
+                else "An image the user saved is attached — read all of its text and visuals "
+                "(it may be a screenshot of a recipe, product, post, or note) and extract "
+                "the structured information."
             )
         if note_hint:
             text_prompt.append(f"User instruction for this note: {note_hint}")

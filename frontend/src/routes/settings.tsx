@@ -177,8 +177,6 @@ function Settings() {
   );
 }
 
-// Theme control. A manual toggle commits an explicit light/dark choice (dropping the
-// "follow system" default); the resolved value drives both the icon and the switch state.
 // Common "where to watch" regions for the Watchlist. ISO-3166-1 alpha-2; the backend uses
 // this when looking up streaming-provider availability for saved movies/shows.
 const WATCH_REGIONS: { code: string; label: string }[] = [

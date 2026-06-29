@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { RotateCcw, Sparkles, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
-import type { Note } from "@/lib/types";
+import type { Note, Collection } from "@/lib/types";
 import { ingest } from "@/lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
@@ -15,6 +15,8 @@ import { ItineraryNote } from "./note/templates/ItineraryNote";
 import { ProductNote } from "./note/templates/ProductNote";
 import { SummaryNote } from "./note/templates/SummaryNote";
 import { WorkoutNote } from "./note/templates/WorkoutNote";
+import { PlaceNote } from "./note/templates/PlaceNote";
+import { BookNote } from "./note/templates/BookNote";
 import { GenericNote } from "./note/templates/GenericNote";
 
 // Which bespoke template a note's `data` map was built for. This is a STRUCTURAL fact
@@ -31,10 +33,12 @@ function resolveTemplate(note: Note): string {
   if (data.specs || data.pros || data.cons || data.buyUrl || (data.price && data.brand))
     return "product";
   if (data.tldr || Array.isArray(data.keyPoints)) return "summary";
+  if (Array.isArray(data.highlights) && (data.location || data.timings)) return "place";
+  if (data.premise || data.whoShouldRead || Array.isArray(data.keyIdeas)) return "book";
   return ""; // generic blocks (facts/sections/steps/table/checklist/quotes)
 }
 
-function NoteBody({ note }: { note: Note }) {
+function NoteBody({ note, onPatch }: { note: Note; onPatch?: (patch: Partial<Note>) => void }) {
   switch (resolveTemplate(note)) {
     case "recipe":
       return <RecipeNote note={note} />;
@@ -46,8 +50,14 @@ function NoteBody({ note }: { note: Note }) {
       return <SummaryNote note={note} />;
     case "workout":
       return <WorkoutNote note={note} />;
+    case "place":
+      return <PlaceNote note={note} />;
+    case "book":
+      return <BookNote note={note} />;
     default:
-      return <GenericNote note={note} />; // any AI-invented type
+      // Any AI-invented type — plus save-as-is typed notes, whose editable `body` block
+      // GenericNote renders when onPatch is wired (owner view only).
+      return <GenericNote note={note} onPatch={onPatch} />;
   }
 }
 
@@ -56,11 +66,18 @@ function NoteBody({ note }: { note: Note }) {
 function PlainBody({ note }: { note: Note }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 text-sm text-ink-soft">
-      This note's details couldn't be displayed;{" "}
-      <a href={note.source_url} target="_blank" rel="noreferrer" className="underline">
-        open the original
-      </a>{" "}
-      instead.
+      This note's details couldn't be displayed
+      {note.source_url ? (
+        <>
+          ;{" "}
+          <a href={note.source_url} target="_blank" rel="noreferrer" className="underline">
+            open the original
+          </a>{" "}
+          instead.
+        </>
+      ) : (
+        "."
+      )}
     </div>
   );
 }
@@ -68,7 +85,7 @@ function PlainBody({ note }: { note: Note }) {
 // AI-shaped data hitting typed templates is the riskiest render path in the app. The
 // ladder degrades per-note instead of white-screening: typed template → GenericNote
 // (renders any block shape) → plain card. Each rung reports to /api/client-errors.
-function SafeNoteBody({ note }: { note: Note }) {
+function SafeNoteBody({ note, onPatch }: { note: Note; onPatch?: (patch: Partial<Note>) => void }) {
   return (
     <ErrorBoundary
       label={`template:${note.content_type}`}
@@ -78,7 +95,7 @@ function SafeNoteBody({ note }: { note: Note }) {
         </ErrorBoundary>
       }
     >
-      <NoteBody note={note} />
+      <NoteBody note={note} onPatch={onPatch} />
     </ErrorBoundary>
   );
 }
@@ -99,16 +116,19 @@ function FallbackBanner({ note }: { note: Note }) {
   };
   return (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/50 px-4 py-3 text-sm text-ink-soft">
-      <span>Limited preview. We saved the link, but couldn't process the content.</span>
-      <button
-        type="button"
-        onClick={retry}
-        disabled={retrying}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
-      >
-        <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />
-        {retrying ? "Retrying…" : "Retry"}
-      </button>
+      <span>Limited preview — we couldn't fully process this capture.</span>
+      {/* Retry re-ingests the original URL; a typed/uploaded capture has none, so it's hidden. */}
+      {note.source_url && (
+        <button
+          type="button"
+          onClick={retry}
+          disabled={retrying}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
+        >
+          <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />
+          {retrying ? "Retrying…" : "Retry"}
+        </button>
+      )}
     </div>
   );
 }
@@ -156,7 +176,11 @@ function PublicSaveBar({ onSave, saving, isAuthed }: PublicSaveProps) {
         disabled={saving}
         className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
       >
-        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}
+        {saving ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <BookmarkPlus className="h-4 w-4" />
+        )}
         {saving ? "Saving…" : isAuthed ? "Save" : "Save to Clipnote"}
       </button>
     </div>
@@ -184,7 +208,11 @@ function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
           disabled={saving}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
         >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <BookmarkPlus className="h-4 w-4" />
+          )}
           {saving ? "Saving…" : isAuthed ? "Save to my notes" : "Sign up to save"}
         </button>
       ) : (
@@ -247,6 +275,8 @@ function CoverFallback({ note, className = "" }: { note: Note; className?: strin
 
 export function NoteContent({
   note,
+  collections = [],
+  uid = null,
   onDelete,
   onPatch,
   variant = "owner",
@@ -255,6 +285,8 @@ export function NoteContent({
   isAuthed,
 }: {
   note: Note;
+  collections?: Collection[];
+  uid?: string | null;
   onDelete?: () => void;
   onPatch?: (patch: Partial<Note>) => void;
   variant?: "owner" | "public";
@@ -274,7 +306,13 @@ export function NoteContent({
       {isPublic ? (
         <PublicNoteHeader note={note} />
       ) : (
-        <NoteHeader note={note} onDelete={onDelete} onPatch={onPatch} />
+        <NoteHeader
+          note={note}
+          collections={collections}
+          uid={uid}
+          onDelete={onDelete}
+          onPatch={onPatch}
+        />
       )}
       {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
@@ -304,7 +342,9 @@ export function NoteContent({
         </>
       )}
       <div className="mt-8">
-        <SafeNoteBody note={note} />
+        {/* onPatch is owner-only (undefined on the public view), so the editable body block
+            inside GenericNote stays read-only for shared notes. */}
+        <SafeNoteBody note={note} onPatch={isPublic ? undefined : onPatch} />
       </div>
       {/* Private annotation — owner view only, at the very bottom of the note. */}
       {!isPublic && (

@@ -60,6 +60,9 @@ class FakeCollection:
     def select(self, _fields):
         return self  # projection is irrelevant to the in-memory store
 
+    def count(self):
+        return FakeAggregation(self)
+
     def order_by(self, field, direction="ASCENDING"):
         self._order = field
         self._desc = str(direction).upper().endswith("DESCENDING") or direction == "DESCENDING"
@@ -81,6 +84,25 @@ class FakeCollection:
             items = items[: self._limit]
         for doc_id, data in items:
             yield FakeSnap(data, FakeDocRef(self._db, self._name, doc_id))
+
+
+class _FakeAggResult:
+    def __init__(self, value):
+        self.value = value
+
+
+class FakeAggregation:
+    """Mirrors collection.where(...).count().get() → agg[0][0].value."""
+    def __init__(self, coll):
+        self._coll = coll
+
+    async def get(self):
+        n = sum(
+            1 for k, v in self._coll._db.docs.items()
+            if k[0] == self._coll._name
+            and all(v.get(f) == val for f, op, val in self._coll._filters)
+        )
+        return [[_FakeAggResult(n)]]
 
 
 class FakeDb:

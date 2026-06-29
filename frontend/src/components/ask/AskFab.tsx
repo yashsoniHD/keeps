@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { WandSparkles, X } from "lucide-react";
+import { Sparkle, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { AskChat } from "./AskChat";
@@ -202,13 +202,13 @@ export function AskFab() {
             style={{
               // Drag offset + keyboard re-pin (offsetTop) compose into one translateY; when the
               // keyboard is open we also clamp the sheet's height to the visual viewport.
-              transform:
-                dragY || kb.open ? `translateY(${dragY + kb.top}px)` : undefined,
+              transform: dragY || kb.open ? `translateY(${dragY + kb.top}px)` : undefined,
               height: kb.open ? `${kb.height}px` : undefined,
               // Snap (no transition) while dragging or while the keyboard is driving the geometry —
               // animating the transform against rapid visualViewport events is what glitches. Keep
               // the easing only for the spring-back after a released drag.
-              transition: dragging || kb.open ? "none" : "transform 0.24s cubic-bezier(0.32,0.72,0,1)",
+              transition:
+                dragging || kb.open ? "none" : "transform 0.24s cubic-bezier(0.32,0.72,0,1)",
             }}
             className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)+0.5rem)] z-50 flex flex-col overflow-hidden rounded-t-3xl border-t border-border bg-card shadow-2xl duration-300 animate-in fade-in-0 slide-in-from-bottom-8 sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[440px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:slide-in-from-right-4 sm:slide-in-from-bottom-0"
           >
@@ -234,7 +234,7 @@ export function AskFab() {
           isOpen ? "hidden" : ""
         }`}
       >
-        {isOpen ? <X className="h-6 w-6" /> : <WandSparkles className="h-6 w-6" />}
+        {isOpen ? <X className="h-6 w-6" /> : <Sparkle className="h-6 w-6" />}
       </button>
     </>
   );

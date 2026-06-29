@@ -22,6 +22,16 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow create, update: if false;
     }
+    // Collections (user-created folders). Owner-only, and — unlike notes — written directly
+    // by the client (they hold only the user's own organisation: name, style, and a note_ids[]
+    // membership list, never note content). Mirrors the owner-writable users/{uid} doc.
+    // create checks the INCOMING doc's user_id (no resource yet); other ops check the stored one.
+    match /collections/{cid} {
+      allow read, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
+      allow create:       if request.auth != null && request.auth.uid == request.resource.data.user_id;
+      allow update:       if request.auth != null && request.auth.uid == resource.data.user_id
+                          && request.resource.data.user_id == resource.data.user_id;
+    }
     // Private per-note annotations (owner's "your thoughts"). Kept OUT of the note doc
     // so a publicly shared note never exposes them. Owner reads; backend admin SDK writes.
     match /annotations/{noteId} {

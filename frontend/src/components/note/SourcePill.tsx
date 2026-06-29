@@ -2,6 +2,9 @@ import { ExternalLink } from "lucide-react";
 import { sourceLabel } from "@/lib/note-meta";
 
 export function SourcePill({ domain, url }: { domain: string; url: string }) {
+  // Typed-note / uploaded captures have no web source — render nothing rather than a
+  // dead "open original" link to an empty URL.
+  if (!url || !domain) return null;
   return (
     <a
       href={url}
@@ -11,7 +14,9 @@ export function SourcePill({ domain, url }: { domain: string; url: string }) {
     >
       <img
         src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-        onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
+        onError={(e) => {
+          e.currentTarget.style.visibility = "hidden";
+        }}
         alt=""
         className="h-3.5 w-3.5 rounded-sm"
       />

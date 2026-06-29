@@ -27,7 +27,7 @@ from services.agent_tools import AgentContext, run_agent
 from services.auth_dep import require_user
 from services.cloud_tasks import enqueue_process_job
 from services.conversations import persist_exchange
-from services.firebase import flush_usage, get_db, get_user_categories
+from services.firebase import flush_usage, get_db, get_user_categories, touch_user_activity
 from services.gemini import gemini_service
 from services.net_guard import BlockedURLError, assert_public_url_async
 from routers.ingest import _enforce_cost_caps
@@ -163,6 +163,7 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
     pool = await nr.candidate_pool(db, user_id, body.question)
 
     await _enforce_ask_caps(db, user_id)
+    await touch_user_activity(user_id)  # retention signal (best-effort)
     meter = start_metering()  # both Gemini stages; flushed once when the request ends
     try:
         index = nr.dated_index(pool, body.tz_offset_minutes)
@@ -318,6 +319,7 @@ async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
 
     # Enforce caps before opening the stream so a limit returns a normal 429, not mid-SSE.
     await _enforce_ask_caps(db, user_id)
+    await touch_user_activity(user_id)  # retention signal (best-effort)
 
     ctx = AgentContext(
         db=db, user_id=user_id, question=body.question, history=history, pool=pool,
@@ -432,6 +434,7 @@ async def ask_deep(body: AskRequest, user_id: str = Depends(require_user)):
     and writes the result note, which the frontend surfaces via the existing job-watch."""
     db = get_db()
     await _enforce_deep_caps(db, user_id)
+    await touch_user_activity(user_id)  # retention signal (best-effort)
 
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)

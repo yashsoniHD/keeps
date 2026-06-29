@@ -4,10 +4,13 @@ import {
   onAuthStateChanged,
   signInWithPopup,
   GoogleAuthProvider,
+  getAdditionalUserInfo,
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { auth } from "@/integrations/firebase/client";
-import { ensureUserRegion } from "@/lib/firestore";
+import { analytics } from "@/lib/analytics";
+import { ensureUserRegion, recordSignup } from "@/lib/firestore";
+import { readSignupRef, clearSignupRef } from "@/lib/attribution";
 
 interface AuthCtx {
   user: User | null;
@@ -37,7 +40,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, new GoogleAuthProvider());
+    const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+    try {
+      if (getAdditionalUserInfo(cred)?.isNewUser) {
+        const ref = readSignupRef();
+        analytics.signUp("google", ref ?? undefined);
+        // Persist the acquisition source for the dashboard's signup-source breakdown.
+        recordSignup(cred.user.uid, ref).catch(() => {});
+        clearSignupRef();
+      }
+    } catch {
+      /* analytics/attribution are non-critical — never let them break sign-in */
+    }
   };
 
   const signOut = async () => {

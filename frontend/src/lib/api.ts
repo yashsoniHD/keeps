@@ -46,12 +46,87 @@ export async function ingest(url: string): Promise<{ job_id: string; status: str
   return res.json();
 }
 
+// Save a typed thought / pasted passage as a note (no URL). Same job pipeline as ingest().
+// processAI=false saves the text verbatim (no Gemini structuring) — the user titles/tags it.
+export async function ingestText(
+  text: string,
+  title?: string,
+  processAI = true,
+): Promise<{ job_id: string; status: string }> {
+  const res = await apiFetch("/api/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      input_type: "text",
+      text,
+      title: title || undefined,
+      process_ai: processAI,
+    }),
+  });
+  if (!res.ok) {
+    throw new ApiError(
+      await errorDetail(res, "Couldn't save the note. Please try again."),
+      res.status,
+    );
+  }
+  return res.json();
+}
+
+// Save a screenshot/image or PDF. Multipart so the bytes go straight to GCS; the backend
+// returns a job_id the same way the URL path does. Do NOT set Content-Type — the browser
+// adds the multipart boundary itself.
+export async function ingestMedia(
+  file: File,
+  inputType: "image" | "pdf" | "voice" | "video",
+  title?: string,
+): Promise<{ job_id: string; status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("input_type", inputType);
+  form.append("source", "upload");
+  if (title) form.append("title", title);
+  const res = await apiFetch("/api/ingest/upload", { method: "POST", body: form });
+  if (!res.ok) {
+    throw new ApiError(
+      await errorDetail(res, "Couldn't add that file. Please try again."),
+      res.status,
+    );
+  }
+  return res.json();
+}
+
+// Save a voice memo: the recorder hands us an audio Blob, which we wrap as a File and push
+// through the same multipart upload path as images/PDFs. The worker transcribes it with
+// Gemini and structures the result into a note.
+export async function ingestVoice(
+  blob: Blob,
+  title?: string,
+): Promise<{ job_id: string; status: string }> {
+  const ext = blob.type.includes("mp4")
+    ? "m4a"
+    : blob.type.includes("ogg")
+      ? "ogg"
+      : blob.type.includes("wav")
+        ? "wav"
+        : "webm";
+  const file = new File([blob], `voice.${ext}`, { type: blob.type || "audio/webm" });
+  return ingestMedia(file, "voice", title);
+}
+
 // Owner edits to a note: a private annotation (user_note) and/or recategorisation
 // (content_type). Writes route through the backend (Firestore forbids client writes);
 // the feed's onSnapshot listener reflects the change live.
 export async function updateNote(
   id: string,
-  updates: { user_note?: string; content_type?: string; title?: string },
+  updates: {
+    user_note?: string;
+    content_type?: string;
+    title?: string;
+    ai_summary?: string;
+    data?: Record<string, unknown>;
+    is_favorite?: boolean;
+    pinned?: boolean;
+  },
 ): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}`, {
     method: "PATCH",
@@ -199,7 +274,7 @@ export interface ChatMessage {
   citations?: AskCitation[];
   coverage?: string | null;
   artifact?: AskArtifact | null;
-  saved_note_id?: string | null;  // present when Clip AI saved a link on the user's behalf
+  saved_note_id?: string | null; // present when Clip AI saved a link on the user's behalf
   pending?: boolean;
   jobId?: string;
   resultNoteId?: string | null;
@@ -539,17 +614,24 @@ export interface AdminStats {
     notes: number;
     active_7d: number;
     active_30d: number;
+    activated: number;
+    activation_rate: number;
+    new_users_7d: number;
+    new_users_30d: number;
+    retained_7d: number;
     tokens: number;
     images: number;
     cost_usd: number;
     cost_inr: number;
     cost_per_note_usd: number;
+    cost_per_active_user_usd: number;
     jobs: number;
     jobs_failed: number;
     notes_today: number;
     asks_today: number;
     images_today: number;
   };
+  signups_by_source: Record<string, number>;
   pricing_note: string;
   daily_trend: DailyTrend[];
   users: AdminUserRow[];

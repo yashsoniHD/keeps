@@ -79,9 +79,12 @@ async def admin_stats(_: str = Depends(require_admin)):
 
     per_user = []
     total_cost = total_tokens = total_images = 0
+    signups_by_source: dict[str, int] = {}  # acquisition channel → signups (P1.3 attribution)
     for u in auth_users:
         uid = u["uid"]
         prof = user_docs.get(uid, {})
+        src = prof.get("signup_ref") or "unknown"
+        signups_by_source[src] = signups_by_source.get(src, 0) + 1
         ti_main = prof.get("lifetime_tokens_in_main", 0)
         to_main = prof.get("lifetime_tokens_out_main", 0)
         ti_lite = prof.get("lifetime_tokens_in_lite", 0)
@@ -157,24 +160,44 @@ async def admin_stats(_: str = Depends(require_admin)):
     sys_today = trend_docs.get(today, {})
     cost_per_note = total_cost / total_notes if total_notes > 0 else 0
 
+    # --- Funding metrics: activation, retention, acquisition (the pitch-deck data) ---
+    now_ms = now.timestamp() * 1000
+    day_ms = 86_400_000
+    users_n = len(auth_users)
+    activated = sum(1 for r in per_user if r["notes"] > 0)  # signup → at least one note
+    new_7d = sum(1 for r in per_user if (r["created_at"] or 0) >= now_ms - 7 * day_ms)
+    new_30d = sum(1 for r in per_user if (r["created_at"] or 0) >= now_ms - 30 * day_ms)
+    # Retention proxy: of accounts old enough to return (signed up >7d ago), the share that
+    # were active in the last 7d. Not a true signup-day cohort, but an honest "are users
+    # sticking around" signal computable from the data we have.
+    eligible_7d = [r for r in per_user if (r["created_at"] or 0) <= now_ms - 7 * day_ms]
+    retained_7d = sum(1 for r in eligible_7d if r["active_7d"])
+
     return {
         "generated_at": now.isoformat(),
         "totals": {
-            "users": len(auth_users),
+            "users": users_n,
             "notes": total_notes,
             "active_7d": len(active7),
             "active_30d": len(active30),
+            "activated": activated,
+            "activation_rate": round(activated / users_n, 3) if users_n else 0,
+            "new_users_7d": new_7d,
+            "new_users_30d": new_30d,
+            "retained_7d": round(retained_7d / len(eligible_7d), 3) if eligible_7d else 0,
             "tokens": total_tokens,
             "images": total_images,
             "cost_usd": round(total_cost, 2),
             "cost_inr": round(total_cost * settings.USD_TO_INR, 2),
             "cost_per_note_usd": round(cost_per_note, 4),
+            "cost_per_active_user_usd": round(total_cost / len(active30), 4) if active30 else 0,
             "jobs": jobs_total,
             "jobs_failed": jobs_failed,
             "notes_today": sys_today.get("note_count", 0),
             "asks_today": sys_today.get("ask_count", 0),
             "images_today": sys_today.get("image_count", 0),
         },
+        "signups_by_source": signups_by_source,
         "pricing_note": "Cost uses configured Gemini + Imagen prices — verify GEMINI_PRICE_* and IMAGEN_PRICE_PER_IMAGE against live Vertex pricing.",
         "daily_trend": daily_trend,
         "users": per_user,

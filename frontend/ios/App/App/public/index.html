@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover lets content (and existing env(safe-area-inset-*) padding) extend
+         under the iOS notch / home indicator in the native shell. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- Set the theme class before first paint so a dark-mode user never sees a light flash. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("clipnote-theme");
+          var dark =
+            t === "dark" ||
+            ((!t || t === "system") &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+    <title>Clipnote: your AI notes from anywhere on the web</title>
+    <meta
+      name="description"
+      content="Paste any link, reel, video, article, or product. Clipnote turns it into a structured note you'll actually re-read."
+    />
+    <meta property="og:title" content="Clipnote: AI notes from anywhere" />
+    <meta
+      property="og:description"
+      content="A commonplace book for the modern web. Paste a link, get a structured note."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#141414" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script type="module" crossorigin src="/assets/index-gHy2_zDq.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BkbRFLLr.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
