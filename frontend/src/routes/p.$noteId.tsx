@@ -89,7 +89,7 @@ function PublicNote() {
   if (status === "unavailable" || !note) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-        <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-ink text-paper">
+        <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand text-brand-foreground">
           <Sparkles className="h-6 w-6" />
         </span>
         <p className="text-ink-soft">This note isn't available. It may be private or removed.</p>

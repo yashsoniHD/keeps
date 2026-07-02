@@ -56,6 +56,7 @@ export interface NoteAccent {
   ring: string;
   text: string;
   soft: string;
+  border: string;
 }
 
 const PALETTES: NoteAccent[] = [
@@ -65,6 +66,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-recipe/30",
     text: "text-recipe",
     soft: "bg-recipe-soft/40",
+    border: "border-recipe",
   },
   {
     dot: "bg-itinerary",
@@ -72,6 +74,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-itinerary/30",
     text: "text-itinerary",
     soft: "bg-itinerary-soft/40",
+    border: "border-itinerary",
   },
   {
     dot: "bg-product",
@@ -79,6 +82,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-product/30",
     text: "text-product",
     soft: "bg-product-soft/40",
+    border: "border-product",
   },
   {
     dot: "bg-summary",
@@ -86,6 +90,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-summary/30",
     text: "text-summary",
     soft: "bg-summary-soft/60",
+    border: "border-summary",
   },
   {
     dot: "bg-media",
@@ -93,6 +98,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-media/30",
     text: "text-media",
     soft: "bg-media-soft/40",
+    border: "border-media",
   },
   {
     dot: "bg-tech",
@@ -100,6 +106,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-tech/30",
     text: "text-tech",
     soft: "bg-tech-soft/40",
+    border: "border-tech",
   },
   {
     dot: "bg-business",
@@ -107,6 +114,7 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-business/30",
     text: "text-business",
     soft: "bg-business-soft/40",
+    border: "border-business",
   },
   {
     dot: "bg-health",
@@ -114,6 +122,15 @@ const PALETTES: NoteAccent[] = [
     ring: "group-hover:ring-health/30",
     text: "text-health",
     soft: "bg-health-soft/40",
+    border: "border-health",
+  },
+  {
+    dot: "bg-trip",
+    chip: "bg-trip-soft text-trip",
+    ring: "group-hover:ring-trip/30",
+    text: "text-trip",
+    soft: "bg-trip-soft/40",
+    border: "border-trip",
   },
 ];
 
@@ -123,7 +140,11 @@ const KNOWN: Record<string, { icon: LucideIcon; palette: number; label?: string 
   bookmark: { icon: Bookmark, palette: 3 }, // salvage notes from the backend
   note: { icon: FileText, palette: 3, label: "Note" }, // save-as-is typed notes (no AI)
   recipe: { icon: ChefHat, palette: 0 },
-  itinerary: { icon: MapPin, palette: 1 },
+  // Trips mini-app: itinerary notes ARE trips — Plane + sky-blue (palette 8), distinct from the
+  // Places app which keeps the sage/map identity (the `place` slug below stays on palette 1).
+  itinerary: { icon: Plane, palette: 8, label: "Trips" },
+  trip: { icon: Plane, palette: 8, label: "Trips" },
+  travel: { icon: Plane, palette: 8, label: "Travel" },
   product: { icon: ShoppingBag, palette: 2 },
   summary: { icon: FileText, palette: 3 },
   workout: { icon: Dumbbell, palette: 7 },

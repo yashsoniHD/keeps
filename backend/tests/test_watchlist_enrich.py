@@ -40,27 +40,27 @@ async def test_list_fans_out_into_one_item_per_title(fake_db):
         {"title": "Arrival", "mediaType": "movie"},
         {"title": "Fargo", "mediaType": "tv"},
     ]
-    poster = await wl.enrich_titles("u", "note-1", titles, region="IN")
+    item_ids = await wl.enrich_titles("u", "note-1", titles, region="IN")
 
     assert (COL, "m_1") in fake_db.docs
     assert (COL, "m_2") in fake_db.docs
     assert (COL, "t_3") in fake_db.docs  # tv keys on the "t_" prefix
     item = fake_db.docs[(COL, "m_1")]
-    assert item["watch_status"] == "to_watch"
+    assert item["watch_status"] == "saved"  # note-extracted titles start in the Saved inbox
     assert item["rating"] is None
     assert item["media_type"] == "movie"
     assert item["providers"][0]["name"] == "Netflix"
     assert item["created_at"] is not None
-    assert poster == "https://img/1.jpg"  # first matched title's poster (for a coverless note)
+    assert item_ids == ["m_1", "m_2", "t_3"]  # produced item ids, for destination routing
 
 
 async def test_unmatched_title_still_creates_a_raw_item(fake_db):
-    poster = await wl.enrich_titles("u", "note-1",
-                                    [{"title": "Some Indie Film", "year": "2021"}], region="IN")
-    # No TMDB match → keyed on a raw title|year id, with the raw title preserved, no poster.
+    item_ids = await wl.enrich_titles("u", "note-1",
+                                      [{"title": "Some Indie Film", "year": "2021"}], region="IN")
+    # No TMDB match → keyed on a raw title|year id, with the raw title preserved.
     raw = [k for k in fake_db.docs if k[0] == COL and k[1].startswith("raw_")]
     assert raw, "an unmatched title should still produce a trackable item"
-    assert poster is None
+    assert item_ids == [raw[0][1]]
 
 
 async def test_resave_does_not_clobber_user_state(fake_db):
@@ -79,8 +79,44 @@ async def test_resave_does_not_clobber_user_state(fake_db):
 
 
 async def test_empty_titles_is_noop(fake_db):
-    assert await wl.enrich_titles("u", "note-1", [], region="IN") is None
+    assert await wl.enrich_titles("u", "note-1", [], region="IN") == []
     assert not any(k[0] == COL for k in fake_db.docs)
+
+
+async def test_add_by_tmdb_creates_enriched_item(fake_db, monkeypatch):
+    async def fake_details(tmdb_id, media_type):
+        return {"title": "Inception", "year": "2010", "poster_url": "https://img/1.jpg",
+                "backdrop_url": "https://img/b.jpg", "overview": "o", "genres": ["Sci-Fi"]}
+    monkeypatch.setattr(tmdb, "details", fake_details)
+
+    doc_id = await wl.add_by_tmdb("u", 27205, "movie", region="IN")
+    assert doc_id == "m_27205"
+    item = fake_db.docs[(COL, "m_27205")]
+    assert item["title"] == "Inception"
+    assert item["tmdb_id"] == 27205
+    assert item["added_manually"] is True
+    assert item["watch_status"] == "to_watch"  # manual adds skip the inbox, land on the watchlist
+    assert item["providers"][0]["name"] == "Netflix"
+
+
+async def test_add_by_tmdb_does_not_clobber_existing_state(fake_db, monkeypatch):
+    fake_db.seed(COL, "m_27205", {"user_id": "u", "watch_status": "watched", "rating": 4})
+    async def fake_details(tmdb_id, media_type):
+        return {"title": "Inception", "year": "2010", "poster_url": "https://img/1.jpg"}
+    monkeypatch.setattr(tmdb, "details", fake_details)
+
+    await wl.add_by_tmdb("u", 27205, "movie", region="IN")
+    item = fake_db.docs[(COL, "m_27205")]
+    assert item["watch_status"] == "watched"  # preserved
+    assert item["rating"] == 4                # preserved
+
+
+async def test_add_by_tmdb_raises_on_tmdb_miss(fake_db, monkeypatch):
+    async def fake_details(tmdb_id, media_type):
+        return None
+    monkeypatch.setattr(tmdb, "details", fake_details)
+    with pytest.raises(ValueError):
+        await wl.add_by_tmdb("u", 999, "movie", region="IN")
 
 
 async def test_get_user_region_default_and_override(fake_db, monkeypatch):

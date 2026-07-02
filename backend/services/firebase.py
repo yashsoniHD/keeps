@@ -57,6 +57,18 @@ async def get_user_categories(uid: str) -> list[str]:
     return sorted(snap.to_dict().get("categories", []))
 
 
+async def get_user_collections(uid: str) -> list[dict]:
+    """The user's smart buckets from collections/{cid} — [{id, name, description}] — fed to the
+    classifier so it can file a new note into one at ingest. One indexed query, not a note scan."""
+    query = get_db().collection("collections").where("user_id", "==", uid)
+    out: list[dict] = []
+    async for doc in query.stream():
+        d = doc.to_dict() or {}
+        out.append({"id": doc.id, "name": d.get("name", ""),
+                    "description": d.get("description") or ""})
+    return out
+
+
 def firestore_safe(value):
     """Makes an arbitrary Gemini-built structure storable in Firestore.
 

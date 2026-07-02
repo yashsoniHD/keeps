@@ -16,6 +16,7 @@ from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 from google.cloud.firestore_v1.vector import Vector
 
 from config import settings
+from services import search_index
 from services.auth_dep import require_user
 from services.embeddings import embedding_service
 from services.firebase import get_db
@@ -30,6 +31,7 @@ RESULT_FIELDS = ("id", "content_type", "title", "ai_summary", "source_domain", "
 
 
 def _project(doc_id: str, d: dict) -> dict:
+    """Project a plain note. app=None + ref_id=id → the UI routes it to /notes/$id."""
     return {
         "id": doc_id,
         "content_type": d.get("content_type", ""),
@@ -37,6 +39,25 @@ def _project(doc_id: str, d: dict) -> dict:
         "ai_summary": d.get("ai_summary", ""),
         "source_domain": d.get("source_domain", ""),
         "cover_image_url": d.get("cover_image_url"),
+        "app": None,
+        "ref_id": doc_id,
+    }
+
+
+def _project_index(d: dict) -> dict:
+    """Project a search_index hit (note OR mini-app item). For items, `app` + `ref_id` let the UI
+    route to /<app>/$itemId; notes carry app=None. `id` is the underlying doc id (ref_id)."""
+    ref_id = d.get("ref_id", "")
+    app = d.get("app")  # None for notes
+    return {
+        "id": ref_id,
+        "content_type": d.get("kind") if app else "",
+        "title": d.get("title", ""),
+        "ai_summary": d.get("summary", ""),
+        "source_domain": "",
+        "cover_image_url": d.get("cover_image_url"),
+        "app": app,
+        "ref_id": ref_id,
     }
 
 
@@ -86,15 +107,18 @@ async def search(
         log.error("query embedding failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
         query_vec = None
     if query_vec:
-        vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
+        # Search the unified index so results span notes AND mini-app items (recipes, movies,
+        # products, places, trips) that no longer create note docs.
+        vector_query = db.collection(search_index.COLLECTION).where(
+            "user_id", "==", user_id).find_nearest(
             vector_field="embedding",
             query_vector=Vector(query_vec),
             distance_measure=DistanceMeasure.COSINE,
             limit=settings.SEARCH_LIMIT,
         )
-        vector_hits = [_project(doc.id, doc.to_dict() or {}) async for doc in vector_query.stream()]
+        vector_hits = [_project_index(doc.to_dict() or {}) async for doc in vector_query.stream()]
 
-    # Source matches first (exact intent), then semantic, deduped and capped.
+    # Source matches first (exact intent), then semantic, deduped by underlying doc id and capped.
     seen, results = set(), []
     for d in (*source_hits, *vector_hits):
         if d["id"] in seen:

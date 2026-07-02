@@ -253,9 +253,9 @@ def capture_pipeline(fake_db, monkeypatch):
     async def no_embed(*a, **k):
         return None
 
-    async def fake_assign(url, bundle, existing, note_hint=None):
+    async def fake_classify(url, bundle, existing, collections=None, note_hint=None):
         captured["assign_bundle"] = bundle
-        return "summary"
+        return "summary", None
 
     async def fake_extract(url, bundle, content_type, note_hint=None):
         captured["bundle"] = bundle
@@ -266,11 +266,15 @@ def capture_pipeline(fake_db, monkeypatch):
             data={"sections": [{"heading": "H", "items": ["a sufficiently long item of content"]}]},
         )
 
+    async def no_collections(uid):
+        return []
+
     monkeypatch.setattr(process, "get_user_categories", no_categories)
+    monkeypatch.setattr(process, "get_user_collections", no_collections)
     monkeypatch.setattr(process, "add_user_category", no_op)
     monkeypatch.setattr(process, "add_user_source", no_op)
     monkeypatch.setattr(process, "_note_embedding", no_embed)
-    monkeypatch.setattr(process.gemini_service, "assign_category", fake_assign)
+    monkeypatch.setattr(process.gemini_service, "classify", fake_classify)
     monkeypatch.setattr(process.gemini_service, "extract_async", fake_extract)
     return captured
 

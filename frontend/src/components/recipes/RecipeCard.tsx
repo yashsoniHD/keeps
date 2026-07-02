@@ -1,0 +1,114 @@
+import { useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { ChefHat, Clock, Star, Check } from "lucide-react";
+import { paletteAccent } from "@/lib/note-meta";
+import { FOCUS_RING } from "@/lib/ui";
+import type { RecipeItem } from "@/lib/types";
+
+const RECIPE_ACCENT = paletteAccent(0); // the "recipe" palette, shared with recipe notes
+
+// Food photos look good cropped, so (unlike products) the image is cover-filled at a landscape
+// ratio rather than contained.
+function RecipeImage({ item }: { item: RecipeItem }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div
+      className={`relative aspect-[4/3] w-full overflow-hidden rounded-xl ${RECIPE_ACCENT.soft}`}
+    >
+      <div className="absolute inset-0 flex items-center justify-center">
+        <ChefHat className={`h-1/4 w-1/4 opacity-50 ${RECIPE_ACCENT.text}`} />
+      </div>
+      {item.image_url && !failed && (
+        <img
+          src={item.image_url}
+          alt={item.title}
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
+}
+
+// One recipe card. Tapping the image opens the recipe-detail page; in grocery mode the card becomes
+// a selection toggle (for building a combined shopping list) instead of a link. The ⭐ toggle writes
+// through the backend (optimistic — handled by the parent).
+export function RecipeCard({
+  item,
+  selecting,
+  selected,
+  onToggleSelect,
+  onToggleFavorite,
+}: {
+  item: RecipeItem;
+  selecting: boolean;
+  selected: boolean;
+  onToggleSelect: (item: RecipeItem) => void;
+  onToggleFavorite: (item: RecipeItem) => void;
+}) {
+  const favorite = !!item.favorite;
+
+  return (
+    <div className="group relative flex min-w-0 flex-col gap-2">
+      <div className="relative">
+        {selecting ? (
+          <button
+            type="button"
+            onClick={() => onToggleSelect(item)}
+            aria-pressed={selected}
+            className={`block w-full rounded-xl ${FOCUS_RING} ${
+              selected ? "ring-2 ring-recipe ring-offset-2 ring-offset-background" : ""
+            }`}
+          >
+            <RecipeImage item={item} />
+            <span
+              className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${
+                selected
+                  ? "border-transparent bg-recipe text-white"
+                  : "border-border bg-background/80 text-ink-soft"
+              }`}
+            >
+              {selected && <Check className="h-4 w-4" />}
+            </span>
+          </button>
+        ) : (
+          <>
+            <Link to="/recipes/$itemId" params={{ itemId: item.id }} className="block">
+              <RecipeImage item={item} />
+            </Link>
+            <button
+              type="button"
+              aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+              title={favorite ? "Favorite" : "Add to favorites"}
+              onClick={() => onToggleFavorite(item)}
+              className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+                favorite
+                  ? "border-transparent bg-amber-400 text-white"
+                  : "border-border bg-background/80 text-ink-soft hover:text-ink"
+              }`}
+            >
+              <Star className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-ink" title={item.title}>
+          {item.title}
+        </p>
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-soft">
+          {item.cuisine && <span className="truncate">{item.cuisine}</span>}
+          {item.cuisine && item.total_time && <span className="opacity-40">·</span>}
+          {item.total_time && (
+            <span className="inline-flex items-center gap-0.5">
+              <Clock className="h-3 w-3" />
+              {item.total_time}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

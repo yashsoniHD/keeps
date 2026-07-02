@@ -1,7 +1,6 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 
-// Pathless layout for /library and /library/$collectionId. Previously this file held the
-// Library screen *and* was the parent route of the detail page — but with no <Outlet/> the
-// detail route had nowhere to render, so collection folders never opened. The list now lives
-// in library.index.tsx; this just hosts the child routes.
+// Pathless layout for /library and /library/$collectionId — just hosts the child routes via
+// <Outlet/>. The Library list itself lives on the home screen (routes/index.tsx); bare /library
+// redirects home (library.index.tsx), and /library/$collectionId renders a collection.
 export const Route = createFileRoute("/library")({ component: () => <Outlet /> });

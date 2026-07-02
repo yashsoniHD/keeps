@@ -271,16 +271,63 @@ system/usage-{date}   date, note_count, ask_count,             # global daily ki
 shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used_at  # Phase 2 (PAT)
 users/{uid}/watch_items/{id}  source_note_ids[], title, year, media_type, tmdb_id?,  # Watchlist mini-app
                       poster_url?, providers?[{name,logo_url,type}], providers_region?,
-                      watch_status (to_watch|watched), watched_at?, rating? (1-5)
+                      watch_status (saved|to_watch|watched), watched_at?, rating? (1-5)
                       # owner-READ only; backend writes enrichment + /api/watch-items toggles
 tmdb_cache/{key}      cached TMDB details/providers (24h TTL); backend-only
+users/{uid}/wish_items/{id}  source_note_ids[], title, brand?, image_url?, buy_url?, domain?,  # Wishlist mini-app
+                      price_raw?, price_amount?, currency?, rating? (0-5 review), specs[], pros[],
+                      cons[], verdict?, wish_status (saved|to_buy|purchased), target_price?,
+                      price_when_added?, purchased_at?
+                      # owner-READ only; backend writes enrichment + /api/wish-items toggles
+users/{uid}/trip_items/{id}  source_note_ids[], title, destination?, duration?, budget?,  # Trips mini-app
+                      best_season?, image_url?, source_url?, domain?,
+                      days[{day,title?,stops[{time?,place,note?,lat?,lng?}]}], tips[],
+                      favorite (no status buckets)
+                      # owner-READ only; backend writes enrichment + /api/trip-items toggle/delete
 ```
 
 **Watchlist mini-app:** entertainment notes (slug matched by `is_entertainment`, `gemini.py`) extract a
 structured `data.titles[]` via the `entertainment` `TYPE_PROMPT`; the worker (`process.py`) fans each
 title out into `users/{uid}/watch_items` (TMDB-enriched, deduped by tmdb id, never clobbering user
-state) and adopts the primary poster as the note cover when coverless. Frontend `/watchlist` route
-(`components/watchlist/`) is a read-only poster wall; region lives on `users/{uid}.region`.
+state) and adopts the primary poster as the note cover when coverless. Note fan-out seeds the
+**`saved`** inbox; the user promotes items to **`to_watch`** (manual TMDB adds skip the inbox and
+start there), then **`watched`**. The three are mutually-exclusive buckets surfaced as the Saved /
+Watchlist / Watched tabs. Frontend `/watchlist` route (`components/watchlist/`) is a poster wall with
+a "+ Watchlist" promote action; region lives on `users/{uid}.region`.
+
+**Wishlist mini-app (shopping counterpart, Phase A — 2026-06-29):** product notes (slug matched by
+`is_shopping`, `gemini.py`) fan out **1:1** into `users/{uid}/wish_items` via `enrich_wish_item`
+(`services/wishlist.py`). Unlike the watchlist there is **no external enrichment API** — a product
+note arrives already structured (the `product` TYPE_PROMPT puts price/specs/pros/cons in `data`; the
+product *name* is the note `title`, its *image* is the note `cover_image_url`), so fan-out is a pure
+copy with no TMDB-equivalent. Deduped by **canonical buy URL** (tracking params stripped) → brand+title
+fallback; `_parse_price` splits "₹2,499" into amount+currency for sorting. Buckets mirror the watchlist:
+**`saved`** inbox → **`to_buy`** (promote) → **`purchased`**. "Manual add" is just pasting a product URL
+through the normal `/api/ingest` flow (no catalog search/add-by-id/details endpoints — all data lives on
+the item doc); `/api/wish-items` only does PATCH (status + `target_price`) / DELETE / backfill. Frontend
+`/wishlist` route (`components/wishlist/`, product palette idx 2). **Phase B (deferred):** scheduled
+price re-check (re-scrape `buy_url` via the existing product resolver) + price-drop notifications — the
+hard/fragile/costly part, since there's no free price API. `target_price` + `price_when_added` are stored
+now and surface a "below target" badge; the alert loop lands with Phase 3 notification infra.
+
+**Trips mini-app (travel counterpart, 2026-06-30):** itinerary notes (slug matched by `is_itinerary`,
+`gemini.py` — the classifier deliberately separates `itinerary`/day-by-day trip plans from `place`/
+venues) fan out **1:1** into `users/{uid}/trip_items` via `enrich_trip_item` (`services/itineraries.py`).
+The `itinerary` `TYPE_PROMPT` already emits the structured `data` (destination/duration/budget/
+bestSeason/days[].stops[]/tips), so fan-out is a near-pure copy — the one enrichment is **geocoding each
+stop by name** via the existing `google_places.search_place` (cached; no-op when `ENABLE_PLACES` off;
+capped at `TRIP_MAX_GEOCODED_STOPS`) so the detail map can plot stops (`stops[].lat/lng`). Deduped by
+**canonical trip URL** (tracking params stripped) → destination/title slug. Like the recipes app there
+are **no status buckets** — a flat, filterable wall (destination / length / season) + favorite ⭐.
+Frontend `/trips` route (`components/trips/`, **Plane** icon, **sky-blue** trip palette idx 8 — the
+`itinerary` note slug repoints here too, while `place` keeps the sage palette). Detail adds a
+**stops map** (`TripMap`, reuses the Places `@vis.gl/react-google-maps` setup) and a client-side
+**packing checklist** (`PackingList`, localStorage). "Manual add" is just pasting an itinerary URL
+through `/api/ingest`; `/api/trip-items` only does PATCH (favorite) / DELETE / backfill. The
+**backfill re-extracts** day plans from older travel notes that predate the app (classified
+`travel`/`travel-destination-guide` etc. → generic composer, no `days`) via
+`gemini.extract_days_from_note` (mirrors the Places `extract_venues_from_note` pass) — it returns
+`{days:[]}` for single spots / venue roundups so only genuine day-by-day trips fan out.
 
 `users/{uid}.categories` is the source of truth for a user's note types (kept current with
 `ArrayUnion` on each new slug) — read it instead of scanning `notes`. `notes` docs store **structured

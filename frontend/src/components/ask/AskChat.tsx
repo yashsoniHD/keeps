@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { goToHit } from "@/lib/nav";
 import {
   AlertCircle,
   ArrowUp,
@@ -73,14 +74,18 @@ function CitationChip({
   citation: AskCitation;
   onNavigate?: () => void;
 }) {
+  const navigate = useNavigate();
   const accent = noteAccent(citation.content_type);
   const Icon = noteIcon(citation.content_type);
+  // A citation is either a plain note or a mini-app item (app + ref_id) → route accordingly.
   return (
-    <Link
-      to="/notes/$noteId"
-      params={{ noteId: citation.id }}
-      onClick={onNavigate}
-      className="flex max-w-[220px] shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 transition-colors hover:bg-accent"
+    <button
+      type="button"
+      onClick={() => {
+        onNavigate?.();
+        goToHit(navigate, citation.app, citation.ref_id || citation.id);
+      }}
+      className="flex max-w-[220px] shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent"
     >
       <span
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${accent.chip}`}
@@ -91,7 +96,7 @@ function CitationChip({
         <span className="block truncate text-xs font-medium text-ink">{citation.title}</span>
         <span className="block text-[11px] text-ink-soft">{noteLabel(citation.content_type)}</span>
       </span>
-    </Link>
+    </button>
   );
 }
 
@@ -503,6 +508,7 @@ export function AskChat({
 
   const startNewChat = () => {
     resetChat(); // clears messages + conversation id + reference scope (owned by the context)
+    watchedJobs.current.clear(); // drop deep-task subscriptions from the old conversation
     setError(null);
     setHistoryOpen(false);
     inputRef.current?.focus();
@@ -930,7 +936,7 @@ export function AskChat({
                 >
                   <span
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      on ? "border-ink bg-ink text-paper" : "border-border"
+                      on ? "border-brand bg-brand text-brand-foreground" : "border-border"
                     }`}
                   >
                     {on && <Check className="h-3 w-3" />}
@@ -1010,7 +1016,7 @@ export function AskChat({
             type="submit"
             disabled={!input.trim() || sending}
             aria-label="Send"
-            className="mb-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform active:scale-95 disabled:opacity-40"
+            className="mb-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground transition-transform active:scale-95 disabled:opacity-40"
           >
             <ArrowUp className="h-4 w-4" />
           </button>

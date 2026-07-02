@@ -118,14 +118,14 @@ function SharePage() {
           else if (search.text?.trim())
             await ingestText(search.text.trim(), search.title || undefined);
         }
-        navigate({ to: "/" }); // success → into the feed, where the processing card takes over
+        navigate({ to: "/notes" }); // → the Notes feed, where the processing card gives feedback
       } catch (e) {
         // A link share that couldn't reach the backend is parked in the replay queue; a
         // file/text share can't be replayed, so surface it and stay on this screen.
         const link = urlFrom(search.url, search.text, search.title);
         if (link && isQueueableError(e)) {
           enqueueCapture(link);
-          navigate({ to: "/" });
+          navigate({ to: "/notes" });
         } else {
           setError(e instanceof Error ? e.message : "Couldn't save that. Please try again.");
         }

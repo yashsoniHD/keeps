@@ -10,17 +10,17 @@ function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="font-serif text-7xl text-ink">404</h1>
-        <h2 className="mt-4 font-serif text-2xl text-ink">Note not found</h2>
+        <h1 className="font-display text-7xl text-ink">404</h1>
+        <h2 className="mt-4 font-display text-2xl text-ink">Nothing here</h2>
         <p className="mt-2 text-sm text-ink-soft">
-          That link doesn't lead anywhere in your notebook.
+          That link doesn't lead anywhere in your library.
         </p>
         <div className="mt-6">
           <Link
             to="/"
-            className="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+            className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition-opacity hover:opacity-90"
           >
-            Back to notes
+            Back to your library
           </Link>
         </div>
       </div>
@@ -33,7 +33,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="font-serif text-2xl text-ink">Something went sideways</h1>
+        <h1 className="font-display text-2xl text-ink">Something went sideways</h1>
         <p className="mt-2 text-sm text-ink-soft">
           We couldn't load this page. Try again or head home.
         </p>
@@ -43,7 +43,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
               router.invalidate();
               reset();
             }}
-            className="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+            className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition-opacity hover:opacity-90"
           >
             Try again
           </button>

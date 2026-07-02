@@ -33,6 +33,7 @@ function resolveTemplate(note: Note): string {
   if (data.specs || data.pros || data.cons || data.buyUrl || (data.price && data.brand))
     return "product";
   if (data.tldr || Array.isArray(data.keyPoints)) return "summary";
+  if (Array.isArray(data.venues)) return "place";
   if (Array.isArray(data.highlights) && (data.location || data.timings)) return "place";
   if (data.premise || data.whoShouldRead || Array.isArray(data.keyIdeas)) return "book";
   return ""; // generic blocks (facts/sections/steps/table/checklist/quotes)
@@ -139,7 +140,7 @@ function PublicNoteHeader({ note }: { note: Note }) {
   return (
     <header className="mb-8 flex flex-col gap-5">
       <Link to="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-brand text-brand-foreground">
           <Sparkles className="h-3.5 w-3.5" />
         </span>
         Clipnote

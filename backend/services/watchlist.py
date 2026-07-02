@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from google.cloud.firestore_v1 import ArrayUnion
 
 from config import settings
-from services import tmdb
+from services import search_index, tmdb
 from services.firebase import get_db
 from services.gemini import gemini_service, is_entertainment
 
@@ -43,17 +43,77 @@ def _doc_id(hit: tmdb.TmdbHit | None, title: str, year: str | None) -> str:
     return f"raw_{_slug(title)}_{year or 'na'}"
 
 
-async def enrich_titles(uid: str, note_id: str, titles: list[dict],
-                        region: str | None = None) -> str | None:
+def _seed_user_state(enrichment: dict, now: datetime, status: str = "saved") -> None:
+    """First time a title is seen, seed the owner-editable state. Kept in one place so the
+    note-enrichment and manual-add paths stay in sync and never reset existing state.
+
+    `status` is the bucket the item starts in: note-extracted titles land in the `saved` inbox
+    (the default) and the user promotes them to `to_watch`; a manual TMDB add skips the inbox
+    (searching for a title is intent) and starts on the watchlist."""
+    enrichment["watch_status"] = status
+    enrichment["rating"] = None
+    enrichment["watched_at"] = None
+    enrichment["favorite"] = False
+    enrichment["created_at"] = now
+
+
+async def add_by_tmdb(uid: str, tmdb_id: int, media_type: str,
+                      region: str | None = None) -> str:
+    """Manually add a title the user picked from TMDB search. Upserts the same doc shape as
+    note-enrichment (keyed by tmdb id so a later note-mention dedupes to one doc) and seeds user
+    state only when new. Returns the doc id. Requires the TMDB token (raises if unavailable)."""
+    if media_type not in ("movie", "tv"):
+        raise ValueError("media_type must be 'movie' or 'tv'")
+    region = region or await get_user_region(uid)
+    det = await tmdb.details(tmdb_id, media_type)
+    if not det:
+        raise ValueError("Title not found on TMDB.")
+    providers = await tmdb.watch_providers(tmdb_id, media_type, region)
+
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    prefix = "t" if media_type == "tv" else "m"
+    doc_id = f"{prefix}_{tmdb_id}"
+    ref = db.collection("users").document(uid).collection("watch_items").document(doc_id)
+    existing = await ref.get()
+
+    enrichment = {
+        "user_id": uid,
+        "title": det.get("title"),
+        "year": det.get("year"),
+        "media_type": media_type,
+        "tmdb_id": tmdb_id,
+        "poster_url": det.get("poster_url"),
+        "backdrop_url": det.get("backdrop_url"),
+        "overview": det.get("overview"),
+        "genres": det.get("genres") or [],
+        "providers": providers,
+        "providers_region": region,
+        "added_manually": True,
+        "updated_at": now,
+    }
+    if not existing.exists:
+        _seed_user_state(enrichment, now, status="to_watch")
+    await ref.set(enrichment, merge=True)
+    await search_index.upsert(
+        db, user_id=uid, kind="watch", ref_id=doc_id, title=det.get("title") or "",
+        summary=det.get("overview") or "", cover_image_url=det.get("poster_url"),
+    )
+    return doc_id
+
+
+async def enrich_titles(uid: str, source_id: str, titles: list[dict],
+                        region: str | None = None) -> list[str]:
     """Match each extracted title to TMDB and upsert a watch_item. Best-effort and non-fatal:
-    any failure logs and is swallowed so ingest never fails because of TMDB. Returns the first
-    matched title's poster URL (so a coverless note can adopt it as its cover)."""
+    any failure logs and is swallowed so ingest never fails because of TMDB. Returns the list of
+    produced watch_item ids (for capture-destination routing). `source_id` is the note id when a
+    note exists, else the job id (mini-app captures no longer create a note)."""
     if not titles:
-        return None
+        return []
     region = region or await get_user_region(uid)
     db = get_db()
     now = datetime.now(timezone.utc)
-    primary_poster: str | None = None
+    item_ids: list[str] = []
 
     for t in titles:
         title = (t.get("title") or "").strip()
@@ -78,7 +138,7 @@ async def enrich_titles(uid: str, note_id: str, titles: list[dict],
                 "year": (hit.year if hit else year) or None,
                 "media_type": hit.media_type if hit else (media_hint or "unknown"),
                 "why": t.get("why") or None,
-                "source_note_ids": ArrayUnion([note_id]),
+                "source_note_ids": ArrayUnion([source_id]),
                 "updated_at": now,
             }
             if hit:
@@ -91,22 +151,23 @@ async def enrich_titles(uid: str, note_id: str, titles: list[dict],
                     "providers": providers,
                     "providers_region": region,
                 })
-                if hit.poster_url and primary_poster is None:
-                    primary_poster = hit.poster_url
 
             if not existing.exists:
-                # First time we see this title — seed user state.
-                enrichment["watch_status"] = "to_watch"
-                enrichment["rating"] = None
-                enrichment["watched_at"] = None
-                enrichment["created_at"] = now
+                _seed_user_state(enrichment, now)
 
             await ref.set(enrichment, merge=True)
+            await search_index.upsert(
+                db, user_id=uid, kind="watch", ref_id=doc_id,
+                title=enrichment["title"] or title,
+                summary=(hit.overview if hit else None) or t.get("why") or "",
+                cover_image_url=hit.poster_url if hit else None,
+            )
+            item_ids.append(doc_id)
         except Exception as e:  # noqa: BLE001 — one title's failure must not sink the rest.
             log.warning("watch_item enrichment failed for %r: %s: %s",
                         title, type(e).__name__, e)
 
-    return primary_poster
+    return item_ids
 
 
 async def backfill_user(uid: str, limit: int = 100) -> dict:

@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Sparkles, X, Link2, AlertCircle } from "lucide-react";
 import { ingest } from "@/lib/api";
 import { watchJob } from "@/lib/firestore";
+import { goToDestination } from "@/lib/nav";
 
 const stages = [
   "Fetching the content…",
@@ -28,13 +29,11 @@ export function CaptureModal({ url, onClose }: { url: string; onClose: () => voi
     ingest(url)
       .then(({ job_id }) => {
         unsubRef.current = watchJob(job_id, (job) => {
-          if (job.status === "completed" && job.note_id) {
+          // A mini-app capture has no note_id — it lands in its app via `destination`.
+          if (job.status === "completed" && (job.destination || job.note_id)) {
             unsubRef.current?.();
             setDone(true);
-            setTimeout(
-              () => navigate({ to: "/notes/$noteId", params: { noteId: job.note_id! } }),
-              600,
-            );
+            setTimeout(() => goToDestination(navigate, job.destination, job.note_id), 600);
           } else if (job.status === "failed") {
             unsubRef.current?.();
             setError(job.error ?? "Processing failed. Please try again.");
@@ -107,7 +106,7 @@ export function CaptureModal({ url, onClose }: { url: string; onClose: () => voi
                     <span
                       className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
                         complete
-                          ? "bg-ink text-paper"
+                          ? "bg-brand text-brand-foreground"
                           : active
                             ? "bg-summary-soft text-summary"
                             : "bg-muted text-ink-soft"

@@ -125,6 +125,53 @@ def _hit_from_result(r: dict, genre_names: dict[int, str] | None = None) -> Tmdb
     )
 
 
+def _search_result(r: dict) -> dict:
+    """Map one /search/multi result to a lean candidate for the manual-add picker."""
+    return {
+        "tmdb_id": int(r["id"]),
+        "media_type": r.get("media_type", "movie"),
+        "title": _result_title(r),
+        "year": _result_year(r),
+        "poster_url": image_url(r.get("poster_path"), "w185"),
+        "overview": r.get("overview") or None,
+    }
+
+
+def _parse_details(raw: dict, media_type: str) -> dict:
+    """Flatten a TMDB /movie/{id} or /tv/{id} (with append_to_response=credits) into a
+    frontend-ready details map. Pure — unit-tested offline."""
+    date = raw.get("release_date") or raw.get("first_air_date") or ""
+    runtimes = raw.get("episode_run_time") or []
+    cast = [
+        {
+            "name": c.get("name"),
+            "character": c.get("character") or None,
+            "profile_url": image_url(c.get("profile_path"), "w185"),
+        }
+        for c in (raw.get("credits", {}).get("cast") or [])[:10]
+        if c.get("name")
+    ]
+    return {
+        "tmdb_id": int(raw["id"]),
+        "media_type": media_type,
+        "title": raw.get("title") or raw.get("name") or "",
+        "year": date[:4] if len(date) >= 4 else None,
+        "tagline": raw.get("tagline") or None,
+        "overview": raw.get("overview") or None,
+        "poster_url": image_url(raw.get("poster_path"), "w500"),
+        "backdrop_url": image_url(raw.get("backdrop_path"), "w1280"),
+        "genres": [g["name"] for g in (raw.get("genres") or []) if g.get("name")],
+        "runtime": raw.get("runtime") or None,  # minutes (movie)
+        "number_of_seasons": raw.get("number_of_seasons") or None,  # tv
+        "number_of_episodes": raw.get("number_of_episodes") or None,  # tv
+        "episode_run_time": (runtimes[0] if runtimes else None),  # minutes/ep (tv)
+        "status": raw.get("status") or None,  # "Released", "Returning Series", ...
+        "vote_average": round(float(raw.get("vote_average") or 0.0), 1) or None,
+        "vote_count": raw.get("vote_count") or None,
+        "cast": cast,
+    }
+
+
 def _parse_providers(provider_data: dict, region: str) -> list[dict]:
     """Flatten TMDB watch/providers `results[region]` into a flat, frontend-ready list.
     flatrate (subscription) first, then rent, then buy; dedup by provider name."""
@@ -214,6 +261,39 @@ async def search_title(title: str, year: str | None = None,
         return None
     genre_names = await _genre_names(best.get("media_type", "movie"))
     return _hit_from_result(best, genre_names)
+
+
+async def search(query: str, limit: int = 12) -> list[dict]:
+    """Free-text search for the manual-add picker. Returns lean movie/tv candidates ordered by
+    popularity. No-op ([]) when disabled or the query is blank."""
+    if not enabled() or not (query or "").strip():
+        return []
+    data = await _http_get("/search/multi", {"query": query, "include_adult": "false"})
+    if not data:
+        return []
+    results = [
+        r for r in data.get("results", [])
+        if r.get("media_type") in ("movie", "tv") and r.get("id")
+    ]
+    results.sort(key=lambda r: float(r.get("popularity") or 0.0), reverse=True)
+    return [_search_result(r) for r in results[:limit]]
+
+
+async def details(tmdb_id: int, media_type: str) -> dict | None:
+    """Full title details (cast/runtime/seasons/rating) for the detail page. Cached per id for
+    TMDB_DETAIL_CACHE_HOURS. Returns None when disabled, on a miss, or on error."""
+    if not enabled() or media_type not in ("movie", "tv"):
+        return None
+    cache_key = f"detail_{media_type}_{tmdb_id}"
+    cached = await _cache_get(cache_key, settings.TMDB_DETAIL_CACHE_HOURS * 3600)
+    if cached is not None:
+        return cached
+    data = await _http_get(f"/{media_type}/{tmdb_id}", {"append_to_response": "credits"})
+    if not data or not data.get("id"):
+        return None
+    parsed = _parse_details(data, media_type)
+    await _cache_set(cache_key, parsed)
+    return parsed
 
 
 async def watch_providers(tmdb_id: int, media_type: str, region: str) -> list[dict]:

@@ -74,6 +74,40 @@ async def test_favorite_toggle_sets_flag(fake_db):
     assert fake_db.docs[("notes", "n1")]["is_favorite"] is False
 
 
+async def test_move_to_collection_validates_and_reindexes(fake_db, monkeypatch):
+    """PATCH collection_id moves a note to a bucket (owner-owned) and re-syncs search_index."""
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "T", "ai_summary": ""})
+    fake_db.seed("collections", "c1", {"user_id": "u", "name": "Software"})
+
+    async def cols(uid):
+        return [{"id": "c1", "name": "Software", "description": ""}]
+
+    monkeypatch.setattr(notes_mod, "get_user_collections", cols)
+
+    await notes_mod.update_note("n1", notes_mod.NoteUpdate(collection_id="c1"), user_id="u")
+    assert fake_db.docs[("notes", "n1")]["collection_id"] == "c1"
+    assert fake_db.docs[("search_index", "note-n1")]["collection_id"] == "c1"
+
+
+async def test_move_to_unknown_collection_404s(fake_db, monkeypatch):
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "T"})
+
+    async def cols(uid):
+        return []
+
+    monkeypatch.setattr(notes_mod, "get_user_collections", cols)
+    with pytest.raises(HTTPException) as e:
+        await notes_mod.update_note("n1", notes_mod.NoteUpdate(collection_id="ghost"), user_id="u")
+    assert e.value.status_code == 404
+
+
+async def test_clear_collection_sends_null(fake_db, monkeypatch):
+    """Sending collection_id=None moves the note back to the catch-all (distinguished from omit)."""
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "T", "collection_id": "c1"})
+    await notes_mod.update_note("n1", notes_mod.NoteUpdate(collection_id=None), user_id="u")
+    assert fake_db.docs[("notes", "n1")]["collection_id"] is None
+
+
 async def test_pin_sets_and_clears_pinned_at(fake_db):
     """Pinning stamps pinned_at (the feed's sort key); unpinning nulls it so the feed/Library
     treat absent-or-null as "not pinned"."""

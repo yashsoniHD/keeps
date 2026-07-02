@@ -21,6 +21,10 @@ class FakeDocRef:
         self._db = db
         self._key = (collection, doc_id)
 
+    @property
+    def path(self) -> str:
+        return f"{self._key[0]}/{self._key[1]}"
+
     async def get(self, transaction=None):
         return FakeSnap(self._db.docs.get(self._key), self)
 
@@ -47,6 +51,7 @@ class FakeCollection:
         self._order = None
         self._desc = False
         self._limit = None
+        self._require_embedding = False
         self._filters: list[tuple[str, str, object]] = []
 
     def document(self, doc_id):
@@ -72,10 +77,21 @@ class FakeCollection:
         self._limit = n
         return self
 
+    def find_nearest(self, vector_field=None, query_vector=None,
+                     distance_measure=None, limit=None, **kwargs):
+        # Vector search double: ignore the vector (no real ANN), just return matching docs that
+        # HAVE the embedding field, honouring the existing where-filters and the limit. Enough to
+        # exercise the shortlist/candidate-pool wiring; ranking is out of scope for these tests.
+        self._require_embedding = True
+        if limit is not None:
+            self._limit = limit
+        return self
+
     async def stream(self):
         items = [
             (k[1], v) for k, v in self._db.docs.items()
             if k[0] == self._name and all(v.get(f) == val for f, op, val in self._filters)
+            and (not self._require_embedding or v.get("embedding") is not None)
         ]
         if self._order:
             items.sort(key=lambda kv: (kv[1].get(self._order) is None, kv[1].get(self._order)),
@@ -105,6 +121,21 @@ class FakeAggregation:
         return [[_FakeAggResult(n)]]
 
 
+class FakeCollectionGroup:
+    """Minimal collection-group query: streams every doc whose collection path's leaf equals the
+    group name (top-level or nested under users/{uid}/…). Enough for the migration scripts."""
+
+    def __init__(self, db, name):
+        self._db = db
+        self._name = name
+
+    async def stream(self):
+        for (coll, doc_id), data in list(self._db.docs.items()):
+            leaf = coll.rsplit("/", 1)[-1]
+            if leaf == self._name:
+                yield FakeSnap(data, FakeDocRef(self._db, coll, doc_id))
+
+
 class FakeDb:
     def __init__(self):
         self.docs: dict[tuple[str, str], dict] = {}
@@ -113,6 +144,11 @@ class FakeDb:
     def collection(self, name):
         return FakeCollection(self, name)
 
+    def collection_group(self, name):
+        # Matches every subcollection whose leaf name is `name` (keys like
+        # "users/{uid}/watch_items") as well as a top-level collection of that name.
+        return FakeCollectionGroup(self, name)
+
     def seed(self, collection, doc_id, data):
         self.docs[(collection, doc_id)] = data
 
@@ -120,3 +156,18 @@ class FakeDb:
 @pytest.fixture
 def fake_db():
     return FakeDb()
+
+
+@pytest.fixture(autouse=True)
+def _stub_embeddings(monkeypatch):
+    """No test should make a real Vertex embedding call. search_index (wired into every ingest /
+    note write) embeds via the shared singleton, so stub it globally with a deterministic vector.
+    Tests that assert on embedding wiring stub their own router-local `_note_embedding` on top."""
+    async def fake_embed(text, *a, **k):
+        return [0.0] * 8
+    try:
+        from services.embeddings import embedding_service
+        monkeypatch.setattr(embedding_service, "embed_document", fake_embed)
+        monkeypatch.setattr(embedding_service, "embed_query", fake_embed)
+    except Exception:  # pragma: no cover — embeddings deps absent in a minimal env
+        pass

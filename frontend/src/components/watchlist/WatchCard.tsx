@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Clapperboard, Tv, Eye, CheckCircle2, Star } from "lucide-react";
+import { Clapperboard, Tv, Eye, CheckCircle2, PlayCircle, Star, Plus } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import type { WatchItem } from "@/lib/types";
+// Rating is edited on the detail page; cards show it read-only (a compact star + number) so the
+// poster wall stays uncluttered.
 
 const MEDIA_ACCENT = paletteAccent(4); // the "media" palette, shared with entertainment notes
 
@@ -28,49 +30,71 @@ function PosterImage({ item }: { item: WatchItem }) {
   );
 }
 
-// One poster card. Tapping the poster opens the note it came from; the watched toggle and
-// star rating sit on top and write through the backend (optimistic — handled by the parent).
+// One poster card. Tapping the poster opens the movie-detail page; the watched toggle and the
+// "+ Watchlist" promote action (Saved items only) write through the backend (optimistic — handled
+// by the parent). Rating is set on the detail page and shown here read-only.
 export function WatchCard({
   item,
   onToggleWatched,
-  onRate,
+  onAddToWatchlist,
+  onStartWatching,
+  onToggleFavorite,
 }: {
   item: WatchItem;
   onToggleWatched: (item: WatchItem) => void;
-  onRate: (item: WatchItem, rating: number) => void;
+  onAddToWatchlist: (item: WatchItem) => void;
+  onStartWatching: (item: WatchItem) => void;
+  onToggleFavorite: (item: WatchItem) => void;
 }) {
   const watched = item.watch_status === "watched";
-  const noteId = item.source_note_ids?.[0];
+  const saved = item.watch_status === "saved";
+  const toWatch = item.watch_status === "to_watch";
+  const favorite = !!item.favorite;
   const flatrate = (item.providers ?? []).filter((p) => p.type === "flatrate");
 
-  const poster = noteId ? (
-    <Link to="/notes/$noteId" params={{ noteId }} className="block">
+  const poster = (
+    <Link to="/watchlist/$itemId" params={{ itemId: item.id }} className="block">
       <PosterImage item={item} />
     </Link>
-  ) : (
-    <PosterImage item={item} />
   );
 
   return (
     <div className="group relative flex min-w-0 flex-col gap-2">
       <div className="relative">
         {poster}
-        {/* Watched toggle overlay */}
-        <button
-          type="button"
-          aria-label={watched ? "Mark as to watch" : "Mark as watched"}
-          title={watched ? "Watched" : "Mark watched"}
-          onClick={() => onToggleWatched(item)}
-          className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
-            watched
-              ? "border-transparent bg-media text-white"
-              : "border-border bg-background/80 text-ink-soft hover:text-ink"
-          }`}
-        >
-          {watched ? <CheckCircle2 className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
+        {/* Overlay actions (top-right): watched toggle + favorite star */}
+        <div className="absolute right-1.5 top-1.5 flex flex-col gap-1.5">
+          <button
+            type="button"
+            aria-label={watched ? "Mark as to watch" : "Mark as watched"}
+            title={watched ? "Watched" : "Mark watched"}
+            onClick={() => onToggleWatched(item)}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+              watched
+                ? "border-transparent bg-media text-white"
+                : "border-border bg-background/80 text-ink-soft hover:text-ink"
+            }`}
+          >
+            {watched ? <CheckCircle2 className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
+            aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+            title={favorite ? "Favorite" : "Add to favorites"}
+            onClick={() => onToggleFavorite(item)}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+              favorite
+                ? "border-transparent bg-amber-400 text-white"
+                : "border-border bg-background/80 text-ink-soft hover:text-ink"
+            }`}
+          >
+            <Star className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
+          </button>
+        </div>
         {/* Media-type chip */}
-        <span className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${MEDIA_ACCENT.chip}`}>
+        <span
+          className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${MEDIA_ACCENT.chip}`}
+        >
           {item.media_type === "tv" ? "TV" : item.media_type === "movie" ? "Film" : "—"}
         </span>
       </div>
@@ -81,6 +105,30 @@ export function WatchCard({
         </p>
         {item.year && <p className="text-xs text-ink-soft">{item.year}</p>}
       </div>
+
+      {/* Promote a Saved (inbox) item onto the watchlist */}
+      {saved && (
+        <button
+          type="button"
+          onClick={() => onAddToWatchlist(item)}
+          className={`inline-flex w-full items-center justify-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-xs font-medium text-ink transition-colors hover:bg-media-soft ${FOCUS_RING}`}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Watchlist
+        </button>
+      )}
+
+      {/* Start watching — moves a queued title into the in-progress bucket (handy for TV) */}
+      {toWatch && (
+        <button
+          type="button"
+          onClick={() => onStartWatching(item)}
+          className={`inline-flex w-full items-center justify-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-xs font-medium text-ink transition-colors hover:bg-media-soft ${FOCUS_RING}`}
+        >
+          <PlayCircle className="h-3.5 w-3.5" />
+          {item.media_type === "tv" ? "Start watching" : "Watching"}
+        </button>
+      )}
 
       {/* Where to watch (flatrate first) */}
       {flatrate.length > 0 && (
@@ -104,26 +152,13 @@ export function WatchCard({
         </div>
       )}
 
-      {/* Rating — only on watched items */}
-      {watched && (
-        <div className="flex items-center gap-0.5">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              type="button"
-              aria-label={`Rate ${n} of 5`}
-              onClick={() => onRate(item, n)}
-              className={`${FOCUS_RING} rounded p-0.5`}
-            >
-              <Star
-                className={`h-3.5 w-3.5 ${
-                  (item.rating ?? 0) >= n ? "fill-amber-400 text-amber-400" : "text-ink-soft/40"
-                }`}
-              />
-            </button>
-          ))}
+      {/* Rating — read-only badge on watched items the user has rated */}
+      {watched && item.rating ? (
+        <div className="flex items-center gap-1 text-xs text-ink-soft">
+          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+          <span>{item.rating}/5</span>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

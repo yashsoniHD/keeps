@@ -34,6 +34,9 @@ def patch_worker(fake_db, monkeypatch):
     async def no_categories(user_id):
         return []
 
+    async def no_collections(user_id):
+        return []
+
     async def no_op_add(user_id, slug):
         return None
 
@@ -41,6 +44,7 @@ def patch_worker(fake_db, monkeypatch):
         return {}  # salvage must not hit the network in tests
 
     monkeypatch.setattr(process, "get_user_categories", no_categories)
+    monkeypatch.setattr(process, "get_user_collections", no_collections)
     monkeypatch.setattr(process, "add_user_category", no_op_add)
     monkeypatch.setattr(process, "_link_preview", no_preview)
 
@@ -62,15 +66,15 @@ def patch_pipeline(monkeypatch, *, acquire_exc=None, extract_exc=None, extractio
 
     monkeypatch.setattr(process.sources, "acquire", fake_acquire)
 
-    async def fake_assign(url, bundle, existing, note_hint=None):
-        return "summary"
+    async def fake_classify(url, bundle, existing, collections=None, note_hint=None):
+        return "summary", None
 
     async def fake_extract(url, bundle, content_type, note_hint=None):
         if extract_exc:
             raise extract_exc
         return extraction
 
-    monkeypatch.setattr(process.gemini_service, "assign_category", fake_assign)
+    monkeypatch.setattr(process.gemini_service, "classify", fake_classify)
     monkeypatch.setattr(process.gemini_service, "extract_async", fake_extract)
 
 

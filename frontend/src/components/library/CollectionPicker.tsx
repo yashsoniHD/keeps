@@ -2,18 +2,14 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, FolderPlus, Loader2, Plus, X } from "lucide-react";
 import type { Collection, Note } from "@/lib/types";
-import {
-  addNoteToCollection,
-  createCollection,
-  removeNoteFromCollection,
-} from "@/lib/firestore";
+import { createCollection } from "@/lib/firestore";
+import { moveNoteToCollection } from "@/lib/api";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
-// "Add to collection" sheet — shared by the feed card menu and the note detail header.
-// Collections are owner-writable client docs, so toggling membership writes directly; the
-// caller passes a LIVE `collections` list (a watchCollections subscription), so the
-// checkmarks reflect each toggle without local optimistic state.
+// "Move to collection" sheet — shared by the feed card menu and the note detail header.
+// Membership is single-home (a note lives in at most one collection) and backend-written, so
+// picking a bucket PATCHes the note's collection_id; local state reflects the choice instantly.
 export function CollectionPicker({
   note,
   collections,
@@ -27,16 +23,18 @@ export function CollectionPicker({
 }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [currentCid, setCurrentCid] = useState<string | null>(note.collection_id ?? null);
 
-  const isIn = (c: Collection) => (c.note_ids ?? []).includes(note.id);
+  const isIn = (c: Collection) => currentCid === c.id;
 
   const toggle = async (c: Collection) => {
-    // Fire-and-forget; the live collections subscription reconciles the checkmark.
+    // Single-home: picking the current bucket clears it (→ Notes catch-all); else move it here.
+    const next = isIn(c) ? null : c.id;
+    setCurrentCid(next);
     try {
-      if (isIn(c)) await removeNoteFromCollection(c.id, note.id);
-      else await addNoteToCollection(c.id, note.id);
+      await moveNoteToCollection(note.id, next);
     } catch {
-      /* leave it; the user can retry */
+      setCurrentCid(note.collection_id ?? null); // revert on failure
     }
   };
 
@@ -45,8 +43,9 @@ export function CollectionPicker({
     if (!n || !uid || busy) return;
     setBusy(true);
     try {
-      const cid = await createCollection(uid, n);
-      await addNoteToCollection(cid, note.id);
+      const cid = await createCollection(uid, n, { description: n });
+      await moveNoteToCollection(note.id, cid);
+      setCurrentCid(cid);
       setName("");
     } catch {
       /* leave it; the user can retry */
@@ -67,7 +66,7 @@ export function CollectionPicker({
         className="relative z-[81] w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-2xl sm:rounded-3xl"
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-serif text-xl text-ink">Add to collection</h2>
+          <h2 className="font-serif text-xl text-ink">Move to collection</h2>
           <button
             type="button"
             onClick={onClose}
@@ -96,7 +95,7 @@ export function CollectionPicker({
                 type="button"
                 onClick={create}
                 aria-label="Create collection"
-                className={`-my-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper active:scale-95 ${FOCUS_RING}`}
+                className={`-my-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground active:scale-95 ${FOCUS_RING}`}
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               </button>
@@ -129,10 +128,9 @@ export function CollectionPicker({
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="flex-1 truncate text-ink">{c.name}</span>
-                  <span className="shrink-0 text-xs text-ink-soft">{(c.note_ids ?? []).length}</span>
                   <span
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                      checked ? "border-ink bg-ink text-paper" : "border-border"
+                      checked ? "border-brand bg-brand text-brand-foreground" : "border-border"
                     }`}
                   >
                     {checked && <Check className="h-3 w-3" />}

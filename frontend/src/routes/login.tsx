@@ -40,7 +40,7 @@ function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm text-center">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-ink text-paper">
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand text-brand-foreground">
           <Sparkles className="h-8 w-8" />
         </div>
         <h1 className="font-serif text-4xl text-ink">Clipnote</h1>

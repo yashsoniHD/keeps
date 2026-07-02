@@ -17,13 +17,12 @@ import {
   watchCollections,
   watchFavorites,
   watchNotes,
-  getNotesByIds,
+  watchNotesInCollection,
   updateCollectionMeta,
   deleteCollection,
-  removeNoteFromCollection,
   getUserCategories,
 } from "@/lib/firestore";
-import { updateNote } from "@/lib/api";
+import { updateNote, moveNoteToCollection } from "@/lib/api";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import { NoteCard } from "@/components/NoteCard";
@@ -73,7 +72,7 @@ function FolderShell({
         <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 md:px-8">
             <Link
-              to="/library"
+              to="/"
               className="inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -207,14 +206,11 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
     );
   }, [uid, collectionId]);
 
-  // Re-fetch the member notes whenever the membership list changes (add/remove).
-  const noteIdsKey = (collection?.note_ids ?? []).join(",");
+  // Membership is a live query on each note's collection_id (backend-written by the AI
+  // classifier), not a stored note_ids list — so a newly-classified note appears here live.
   useEffect(() => {
-    if (!collection) return;
-    getNotesByIds(collection.note_ids ?? [])
-      .then(setNotes)
-      .catch(() => setNotes([]));
-  }, [noteIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    return watchNotesInCollection(uid, collectionId, setNotes, { onError: () => setNotes([]) });
+  }, [uid, collectionId]);
 
   useEffect(() => {
     if (collection && !editingName) setName(collection.name);
@@ -236,9 +232,10 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
     await updateCollectionMeta(collection.id, { name: next }).catch(() => {});
   };
 
+  // Removing a note from a collection moves it back to the Notes catch-all (collection_id=null),
+  // written through the backend (notes are backend-write-only). The live query drops it here.
   const remove = async (noteId: string) => {
-    if (!collection) return;
-    await removeNoteFromCollection(collection.id, noteId).catch(() => {});
+    await moveNoteToCollection(noteId, null).catch(() => {});
   };
 
   const del = async () => {
@@ -249,7 +246,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
     }
     if (!collection) return;
     await deleteCollection(collection.id).catch(() => {});
-    navigate({ to: "/library" });
+    navigate({ to: "/" });
   };
 
   if (!resolved) return <Loader />;
@@ -259,7 +256,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-ink-soft">
         <span>Collection not found.</span>
         <Link
-          to="/library"
+          to="/"
           className="rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink"
         >
           Back to Library
@@ -324,7 +321,8 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
       )}
       empty={
         <p className="rounded-2xl border border-dashed border-border bg-card/50 px-4 py-10 text-center text-sm text-ink-soft">
-          No notes yet. Open a note and use “Add to collection”, or long-press a card in the feed.
+          No notes here yet. New saves that match this collection are filed here automatically — or
+          move a note in from its menu.
         </p>
       }
     />

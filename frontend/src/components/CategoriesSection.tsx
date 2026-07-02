@@ -75,7 +75,7 @@ function StylePanel({
             aria-label={name}
             aria-pressed={icon === name}
             className={`inline-flex aspect-square items-center justify-center rounded-lg transition-colors ${
-              icon === name ? "bg-ink text-paper" : "text-ink-soft hover:bg-accent"
+              icon === name ? "bg-brand text-brand-foreground" : "text-ink-soft hover:bg-accent"
             }`}
           >
             <Icon className="h-4 w-4" />
@@ -236,7 +236,7 @@ function CategoryManager({
               onClick={submitAdd}
               disabled={adding || !newName.trim()}
               aria-label="Add category"
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
             </button>
@@ -352,7 +352,7 @@ function CategoryRow({ category: c, onChanged }: { category: Category; onChanged
             onClick={submitEdit}
             disabled={busy}
             aria-label="Save"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
           </button>

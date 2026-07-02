@@ -223,9 +223,10 @@ function WatchRegionSection({ uid }: { uid: string }) {
       </h2>
       <label className="mt-4 flex items-center justify-between gap-3">
         <span>
-          <span className="block text-sm font-medium text-ink">Where to watch region</span>
+          <span className="block text-sm font-medium text-ink">Region</span>
           <span className="block text-xs text-ink-soft">
-            Streaming availability in your Watchlist is shown for this country.
+            Sets your Watchlist streaming availability and your Places reservation/delivery links
+            for this country.
             {saved && <span className="ml-1 text-media">Saved</span>}
           </span>
         </span>

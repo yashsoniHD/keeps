@@ -1,5 +1,6 @@
 import { Target, Gauge, Clock, Repeat, Dumbbell, Lightbulb } from "lucide-react";
 import type { Note } from "@/lib/types";
+import { noteAccent, type NoteAccent } from "@/lib/note-meta";
 
 interface Exercise {
   name: string;
@@ -23,6 +24,7 @@ interface WorkoutData {
 
 export function WorkoutNote({ note }: { note: Note }) {
   const data = note.data as WorkoutData;
+  const accent = noteAccent(note.content_type);
   const stats = [
     { icon: Target, label: "Goal", value: data.goal },
     { icon: Gauge, label: "Level", value: data.level },
@@ -34,12 +36,12 @@ export function WorkoutNote({ note }: { note: Note }) {
     <div>
       {stats.length > 0 && (
         <div
-          className="grid gap-3 rounded-2xl border border-border bg-recipe-soft/40 p-4"
+          className={`grid gap-3 rounded-2xl border border-border p-4 ${accent.soft}`}
           style={{ gridTemplateColumns: `repeat(${Math.min(stats.length, 4)}, 1fr)` }}
         >
           {stats.map((s, i) => (
             <div key={i} className="flex flex-col items-center gap-1 text-center">
-              <s.icon className="h-4 w-4 text-recipe" />
+              <s.icon className={`h-4 w-4 ${accent.text}`} />
               <div className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</div>
               <div className="font-serif text-base text-ink capitalize">{s.value}</div>
             </div>
@@ -49,7 +51,7 @@ export function WorkoutNote({ note }: { note: Note }) {
 
       {data.equipment && data.equipment.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Dumbbell className="h-4 w-4 text-ink-soft" />
+          <Dumbbell className={`h-4 w-4 ${accent.text}`} />
           {data.equipment.map((eq, i) => (
             <span
               key={i}
@@ -67,7 +69,7 @@ export function WorkoutNote({ note }: { note: Note }) {
           <ul className="mt-3 space-y-2">
             {(block.items ?? []).map((item, j) => (
               <li key={j} className="flex items-start gap-3 text-ink">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-recipe" />
+                <span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${accent.dot}`} />
                 <span>{item}</span>
               </li>
             ))}
@@ -83,16 +85,18 @@ export function WorkoutNote({ note }: { note: Note }) {
               <li key={i} className="rounded-2xl border border-border bg-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="flex items-baseline gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-recipe text-xs font-medium text-primary-foreground">
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium text-paper ${accent.dot}`}
+                    >
                       {i + 1}
                     </span>
                     <h3 className="font-serif text-xl text-ink">{ex.name}</h3>
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs">
-                    {ex.sets && <Pill label="Sets" value={ex.sets} />}
-                    {ex.reps && <Pill label="Reps" value={ex.reps} />}
-                    {ex.duration && <Pill label="Time" value={ex.duration} />}
-                    {ex.rest && <Pill label="Rest" value={ex.rest} />}
+                    {ex.sets && <Pill label="Sets" value={ex.sets} accent={accent} />}
+                    {ex.reps && <Pill label="Reps" value={ex.reps} accent={accent} />}
+                    {ex.duration && <Pill label="Time" value={ex.duration} accent={accent} />}
+                    {ex.rest && <Pill label="Rest" value={ex.rest} accent={accent} />}
                   </div>
                 </div>
                 {ex.formCues && <p className="mt-2 pl-10 text-sm text-ink-soft">{ex.formCues}</p>}
@@ -105,12 +109,12 @@ export function WorkoutNote({ note }: { note: Note }) {
       {data.tips && data.tips.length > 0 && (
         <section className="mt-10 rounded-2xl border border-border bg-card p-5">
           <h2 className="inline-flex items-center gap-2 font-serif text-xl text-ink">
-            <Lightbulb className="h-4 w-4 text-recipe" /> Tips
+            <Lightbulb className={`h-4 w-4 ${accent.text}`} /> Tips
           </h2>
           <ul className="mt-3 space-y-2">
             {data.tips.map((tip, i) => (
               <li key={i} className="flex items-start gap-3 text-ink">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-recipe" />
+                <span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${accent.dot}`} />
                 <span>{tip}</span>
               </li>
             ))}
@@ -121,9 +125,9 @@ export function WorkoutNote({ note }: { note: Note }) {
   );
 }
 
-function Pill({ label, value }: { label: string; value: string }) {
+function Pill({ label, value, accent }: { label: string; value: string; accent: NoteAccent }) {
   return (
-    <span className="rounded-full bg-recipe-soft px-2.5 py-1 text-recipe">
+    <span className={`rounded-full px-2.5 py-1 ${accent.chip}`}>
       <span className="opacity-70">{label}</span> <strong>{value}</strong>
     </span>
   );

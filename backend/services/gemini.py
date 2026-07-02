@@ -52,6 +52,79 @@ def is_entertainment(content_type: str) -> bool:
     return any(kw in slug for kw in ENTERTAINMENT_KEYWORDS)
 
 
+# The Wishlist mini-app's content family — the shopping counterpart of ENTERTAINMENT_KEYWORDS.
+# Product slugs are AI-invented and open (`product`, `gadget`, `gift-guide`, `buying-guide`, …),
+# so the family is a keyword matcher. Used only to GATE the wishlist fan-out in the worker; it
+# does NOT reroute extraction (a roundup keeps its rich note rendering), and the fan-out itself
+# guards on a usable price/buy URL, so a composer note that merely matches a keyword is skipped.
+# Keep this list in sync with the frontend family matcher.
+SHOPPING_KEYWORDS = (
+    "product", "shopping", "gadget", "deal", "wishlist", "gift", "buying",
+)
+
+
+def is_shopping(content_type: str) -> bool:
+    """True when a content_type slug belongs to the products/shopping family."""
+    slug = normalize_slug(content_type)
+    return any(kw in slug for kw in SHOPPING_KEYWORDS)
+
+
+# The Places mini-app's content family — the dining/going-out counterpart of the other families.
+# Place slugs are AI-invented and open (`place`, `restaurant`, `cafe`, `food-spots`, …), so the
+# family is a keyword matcher. Used to (a) route extraction through the `place` venues[] schema and
+# (b) gate the Google-Places fan-out in the worker. Keep this list in sync with the frontend family
+# matcher.
+PLACES_KEYWORDS = (
+    "place", "restaurant", "cafe", "bar", "dining", "eatery", "bakery", "dessert",
+    "brewery", "pub", "venue", "attraction", "viewpoint", "hotel", "stay", "things-to-do",
+)
+
+
+def is_places(content_type: str) -> bool:
+    """True when a content_type slug belongs to the places/dining family. Matches on whole
+    hyphen-tokens (with simple plural folding) rather than raw substrings, so short keywords like
+    'bar'/'pub' don't false-match 'barbell-workout' or 'public-speaking'."""
+    slug = normalize_slug(content_type)
+    tokens = set(slug.split("-"))
+    for kw in PLACES_KEYWORDS:
+        if "-" in kw:
+            if kw in slug:  # multi-word keyword, e.g. "things-to-do"
+                return True
+        elif kw in tokens or (kw + "s") in tokens or any(t.rstrip("s") == kw for t in tokens):
+            return True
+    return False
+
+
+# The Recipes mini-app's content family — the cooking counterpart of the other families. The
+# `recipe` TYPE_PROMPT already produces structured ingredients/steps, so (like the wishlist) this
+# only GATES the fan-out in the worker; it does not reroute extraction. The fan-out itself guards
+# on a usable `data.ingredients`, so a slug that merely matches a keyword without cookable data is
+# skipped. "food"/"dessert" are deliberately excluded — they overlap with the Places family. Keep
+# this list in sync with the frontend family matcher.
+RECIPE_KEYWORDS = ("recipe", "cooking", "baking", "bake", "dish", "meal-prep")
+
+
+def is_recipe(content_type: str) -> bool:
+    """True when a content_type slug belongs to the cooking/recipe family."""
+    slug = normalize_slug(content_type)
+    return any(kw in slug for kw in RECIPE_KEYWORDS)
+
+
+# The Trips mini-app's content family — the travel counterpart of the other families. The classifier
+# deliberately separates `itinerary` (a day-by-day trip plan) from `place` (venues → Places app), and
+# the `itinerary` TYPE_PROMPT already produces structured days[].stops[], so (like the recipes/
+# wishlist) this only GATES the fan-out in the worker; it does not reroute extraction. The fan-out
+# itself guards on a usable `data.days`, so a vague travel slug without a day plan is skipped. Keep
+# this list in sync with the frontend family matcher.
+ITINERARY_KEYWORDS = ("itinerary", "trip", "travel", "tour", "road-trip", "vacation", "getaway")
+
+
+def is_itinerary(content_type: str) -> bool:
+    """True when a content_type slug belongs to the travel/itinerary family."""
+    slug = normalize_slug(content_type)
+    return any(kw in slug for kw in ITINERARY_KEYWORDS)
+
+
 def match_existing(slug: str, existing: list[str]) -> str:
     """Collapse to an existing category if it's effectively the same (case/space/plural)."""
     norm = normalize_slug(slug)
@@ -79,14 +152,15 @@ Rules, in priority order:
    - "workout" — a gym/exercise routine.
    - "product" — a product page or product review.
    - "itinerary" — a MULTI-stop or multi-day trip plan across a destination.
-   - "place" — a SINGLE venue worth visiting: a restaurant, cafe, bar, dessert/
-     ice-cream shop, bakery, food stall, attraction, viewpoint, or hotel. A reel
-     recommending one spot is "place", NOT "itinerary".
+   - "place" — venues worth visiting: restaurants, cafes, bars, dessert/ice-cream
+     shops, bakeries, food stalls, attractions, viewpoints, or hotels. ONE spot OR a
+     roundup of several spots ("5 best cafes in Bandra") are both "place" — the schema
+     lists each venue. A reel recommending spots is "place", NOT "itinerary".
    - "book" — a book recommendation/review.
    - "summary" — see rule 4.
-3. Single venue vs trip: one restaurant/cafe/shop/attraction = "place"; a route or
-   day-by-day plan covering several stops = "itinerary". Never use a vague "travel"
-   slug for a single venue — use "place".
+3. Places vs trip: one venue OR a list of independent venues = "place"; only a route or
+   day-by-day plan that sequences several stops into a journey = "itinerary". Never use a
+   vague "travel" slug for venues — use "place".
 4. "summary" is ONLY for genuinely prose content with no actionable structure:
    essays, news articles, opinion pieces, talks. NEVER use "summary" for anything
    with steps, items, specs, exercises, or places.
@@ -100,6 +174,18 @@ Rules, in priority order:
    recipe/workout/itinerary when the source actually CONTAINS that artifact."""
 
 
+# Appended to CATEGORY_SYSTEM only when the user has smart collections, so the same lite call
+# that assigns content_type also files the note into (at most) one user bucket. Kept separate so
+# the base prompt is untouched for users with no collections.
+COLLECTION_RULE = """
+
+You are ALSO given the user's named COLLECTIONS (buckets they created to organise notes).
+If the content clearly belongs in exactly ONE of them, set "collection_id" to that collection's
+id. If none clearly fits, set "collection_id" to null. Assign to AT MOST ONE, and only ever use
+an id from the provided list.
+Return JSON: {"content_type":"slug","collection_id":"<id>" or null}."""
+
+
 TITLES_FROM_NOTE_SYSTEM = """You extract the movie and TV show titles named in a saved note.
 Return ONLY valid JSON:
 {"titles":[{"title":str,"year"?:str,"mediaType":"movie|tv|unknown","why"?:"one short line"}]}
@@ -111,6 +197,34 @@ Rules:
 - `year` only if stated; `mediaType` is your best guess (tv = series/show/anime/miniseries)."""
 
 
+VENUES_FROM_NOTE_SYSTEM = """You extract the places/venues named in a saved note.
+Return ONLY valid JSON:
+{"venues":[{"name":str,"location"?:str,"city"?:str,"category"?:str,"why"?:"one short line"}]}
+
+Rules:
+- List EVERY distinct venue named (a roundup "5 cafes" yields one entry per venue).
+- A note about a single venue yields one entry — use the venue's real name, NOT the note's headline.
+- NEVER invent a venue that isn't in the note. If none are identifiable, return {"venues":[]}.
+- `location`/`city`/`category` only if stated or clearly implied."""
+
+
+DAYS_FROM_NOTE_SYSTEM = """You turn a saved travel note into a structured day-by-day itinerary.
+Return ONLY valid JSON:
+{"destination"?:str,"duration"?:str,"budget"?:str,"bestSeason"?:str,
+ "days":[{"day":1,"title"?:str,"stops":[{"time"?:str,"place":str,"note"?:str}]}],
+ "tips"?:[str]}
+
+Rules:
+- ONLY produce days if the note describes an actual multi-stop or day-by-day trip/route across a
+  destination. If it is a single spot, a venue roundup ("best cafes in X"), or generic travel tips
+  with no sequence of stops, return {"days":[]} — it is NOT a trip.
+- Build days/stops ONLY from places and details actually named in the note. NEVER invent stops,
+  times, or places. If the note isn't already day-structured but IS a real trip, organize its named
+  stops into sensible days yourself.
+- `place` is required on every stop; `time`/`note` only when stated or clearly implied.
+- This is a faithful re-structuring of the note, not new travel advice."""
+
+
 _SHARED_RULES = """You are a note extraction engine. The user saves links and never wants to
 open the source again — your note must be MORE useful than the source.
 
@@ -118,7 +232,7 @@ Output is STRUCTURED JSON ONLY — no HTML, no markdown, no styling. Shape:
 {
   "content_type": "<echo the slug you were given — do not change it>",
   "title": "concise, specific note title in SENTENCE CASE (capitalize only the first word and proper nouns/brand names/acronyms, e.g. 'Easy weeknight paneer butter masala', 'A weekend in Lisbon', 'Sony WH-1000XM5 review')",
-  "ai_summary": "2 conversational, specific sentences about THIS content (mention actual details)",
+  "ai_summary": "ONE concise, specific sentence (~15-25 words) capturing the single most useful takeaway from THIS content (mention an actual detail)",
   "cover_image_prompt": "a vivid visual scene for a cover image",
   "data": { ...per the schema below... }
 }
@@ -199,14 +313,36 @@ Watch the demonstration: capture sets/reps/tempo even if only shown on screen te
 
     "place": _SHARED_RULES + """
 
-`data` schema for place (restaurant, cafe, attraction, hotel):
+This is a place recommendation — a single venue OR a list (a "5 cafes to try" reel, a thread, a
+best-of article). Extract EVERY distinct venue mentioned as its own entry so each becomes a
+trackable place to try. NEVER merge two different venues into one entry, and NEVER invent a venue
+that is not named in the source.
+
+`data` schema for place (restaurant, cafe, bar, attraction, hotel):
 {
-  "name": str, "location": "area, city", "category": "e.g. cafe, viewpoint",
-  "priceRange"?: str, "rating"?: str, "timings"?: str,
-  "facts": [{"label": str, "value": str}],
-  "highlights": ["what it's known for; what to order/see", ...],
-  "tips"?: ["best time, booking, how to reach", ...]
-}""",
+  "venues": [{
+    "name": "the venue's name exactly as stated",
+    "location": "area, city (whatever is given)",
+    "city"?: "just the city, if identifiable — used to group places",
+    "category": "e.g. cafe, fine-dining, rooftop bar, viewpoint, hotel",
+    "cuisine"?: "for restaurants/cafes, e.g. 'South Indian', 'Italian'",
+    "priceForTwo"?: "approx cost for two, with currency, if stated",
+    "mustTry"?: ["specific signature dishes/drinks to order", ...],
+    "goodFor"?: ["e.g. 'date night', 'groups', 'work', 'solo', 'family'"],
+    "bestTime"?: "best time to go, if mentioned",
+    "reservationNeeded"?: true,
+    "highlights": ["what it's known for; the experience; what to order/see", ...],
+    "tips"?: ["booking, how to reach, what to avoid", ...],
+    "why"?: "one short line on why it's recommended, from the source",
+    "website"?: "the venue's own site, ONLY if the source gives it",
+    "instagram"?: "the venue's instagram handle/URL, ONLY if the source gives it",
+    "bookingUrl"?: "a direct reservation/booking link, ONLY if the source gives it",
+    "phone"?: "phone number, ONLY if stated"
+  }],
+  "listTheme"?: "the theme if it's a themed roundup, e.g. 'best brunch in Bandra'"
+}
+A single-venue post yields a one-element `venues` array; a listicle yields one entry per venue.
+The note's own `title`/`ai_summary` should describe the reel/list as a whole.""",
 
     "book": _SHARED_RULES + """
 
@@ -341,7 +477,7 @@ their saved notes into ONE structured artifact. Build it using ONLY the provided
 
 Return ONLY valid JSON:
 {"answer_markdown": "one short lead-in sentence introducing the artifact",
- "artifact": {"title": str, "ai_summary": "1-2 sentence overview",
+ "artifact": {"title": str, "ai_summary": "one concise sentence overview",
               "content_type": "<short slug for the artifact>",
               "data": { ...blocks below... }},
  "cited_note_ids": [ids of notes you used]}
@@ -377,7 +513,7 @@ this conversation and your own knowledge. Author a genuinely useful, well-struct
 
 Return ONLY valid JSON:
 {"title": "concise note title in sentence case",
- "ai_summary": "1-2 sentence overview",
+ "ai_summary": "one concise sentence overview",
  "content_type": "<short category slug>",
  "data": { ...blocks below... }}
 
@@ -430,18 +566,35 @@ class GeminiService:
 
     # ---------- Step 1: categorization (lite model, ~50 output tokens) ----------
 
-    async def assign_category(self, url: str, bundle: ContentBundle,
-                              existing_categories: list[str],
-                              note_hint: str | None = None) -> str:
+    async def classify(self, url: str, bundle: ContentBundle,
+                       existing_categories: list[str],
+                       collections: list[dict] | None = None,
+                       note_hint: str | None = None) -> tuple[str, str | None]:
+        """One lite call that assigns the content_type AND (when the user has smart collections)
+        files the note into at most one of them. Returns (content_type, collection_id|None).
+        collection_id is ignored by the worker for mini-app content (those don't become notes)."""
+        collections = collections or []
+        valid_ids = {c["id"] for c in collections}
         categories_str = ", ".join(existing_categories) if existing_categories else "none yet"
         prompt = (
             f"URL: {url}\n"
             f"Platform: {bundle.metadata.get('platform', 'web')}\n"
             f"Content preview: {bundle.preview[:600]}\n"
             f"User's existing categories: {categories_str}\n"
-            + (f"User instruction: {note_hint}\n" if note_hint else "")
-            + "Choose the content_type."
         )
+        if collections:
+            lines = "\n".join(
+                f"- id={c['id']} name={c['name']}"
+                + (f" — {c['description']}" if c.get("description") else "")
+                for c in collections
+            )
+            prompt += f"User's collections:\n{lines}\n"
+        prompt += (
+            (f"User instruction: {note_hint}\n" if note_hint else "")
+            + "Choose the content_type"
+            + (" and collection_id." if collections else ".")
+        )
+        system = CATEGORY_SYSTEM + (COLLECTION_RULE if collections else "")
         # An uploaded image/PDF often has no useful preview text — classify from the file
         # itself (the lite model is multimodal). Video is left out: it's the expensive path
         # and its title/description text is enough for categorization.
@@ -466,15 +619,28 @@ class GeminiService:
             # cap gets consumed by thoughts, returning text=None (measured at Phase 0).
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                system_instruction=CATEGORY_SYSTEM,
+                system_instruction=system,
             ),
         )
         record_usage(settings.GEMINI_LITE_MODEL, response)
+        collection_id: str | None = None
         try:
-            slug = json.loads(_strip_code_fences(response.text)).get("content_type", "summary")
+            parsed = json.loads(_strip_code_fences(response.text))
+            slug = parsed.get("content_type", "summary")
+            raw_cid = parsed.get("collection_id")
+            if isinstance(raw_cid, str) and raw_cid in valid_ids:
+                collection_id = raw_cid
         except (json.JSONDecodeError, AttributeError):
             slug = "summary"
-        return match_existing(slug, existing_categories)
+        return match_existing(slug, existing_categories), collection_id
+
+    async def assign_category(self, url: str, bundle: ContentBundle,
+                              existing_categories: list[str],
+                              note_hint: str | None = None) -> str:
+        """Back-compat wrapper — content_type only (no collection routing)."""
+        content_type, _ = await self.classify(url, bundle, existing_categories,
+                                              collections=None, note_hint=note_hint)
+        return content_type
 
     # ---------- Backfill: pull titles out of an already-saved note ----------
 
@@ -505,6 +671,67 @@ class GeminiService:
         except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
             log.warning("title backfill extract failed: %s: %s", type(e).__name__, e)
             return []
+
+    async def extract_venues_from_note(self, title: str, ai_summary: str,
+                                       data: dict | None) -> list[dict]:
+        """For the Places backfill: extract the venue names from a note that was already saved
+        (so its `data` predates the venues[] schema). Works off the STORED text only — no
+        re-scraping. Lite model, JSON mode."""
+        blob = (
+            f"Note title: {title}\n"
+            f"Summary: {ai_summary}\n"
+            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
+        )
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=settings.GEMINI_LITE_MODEL,
+                contents=[blob],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    system_instruction=VENUES_FROM_NOTE_SYSTEM,
+                ),
+            )
+            record_usage(settings.GEMINI_LITE_MODEL, response)
+            out = json.loads(_strip_code_fences(response.text))
+            venues = out.get("venues", []) if isinstance(out, dict) else []
+            return [v for v in venues if isinstance(v, dict) and v.get("name")]
+        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
+            log.warning("venue backfill extract failed: %s: %s", type(e).__name__, e)
+            return []
+
+    async def extract_days_from_note(self, title: str, ai_summary: str,
+                                     data: dict | None) -> dict:
+        """For the Trips backfill: derive a day-by-day itinerary from a travel note saved before the
+        Trips app existed (so its `data` went through the generic composer, not the itinerary
+        schema, and carries no days[]). Works off the STORED text only — no re-scraping. Returns the
+        itinerary `data` shape (destination/duration/.../days[]/tips); {"days":[]} when the note
+        isn't actually a trip. Lite model, JSON mode."""
+        blob = (
+            f"Note title: {title}\n"
+            f"Summary: {ai_summary}\n"
+            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
+        )
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=settings.GEMINI_LITE_MODEL,
+                contents=[blob],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    system_instruction=DAYS_FROM_NOTE_SYSTEM,
+                ),
+            )
+            record_usage(settings.GEMINI_LITE_MODEL, response)
+            out = json.loads(_strip_code_fences(response.text))
+            if not isinstance(out, dict):
+                return {"days": []}
+            days = out.get("days")
+            out["days"] = [d for d in days if isinstance(d, dict) and d.get("stops")] if isinstance(days, list) else []
+            return out
+        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
+            log.warning("days backfill extract failed: %s: %s", type(e).__name__, e)
+            return {"days": []}
 
     # ---------- Step 2: type-focused extraction (main model) ----------
 
@@ -577,12 +804,14 @@ class GeminiService:
 
     def extract(self, url: str, bundle: ContentBundle, content_type: str,
                 note_hint: str | None = None) -> NoteExtraction:
-        # Exact known type → its schema; else an entertainment-family slug → the
-        # entertainment schema (structured titles); else the open composer.
+        # Exact known type → its schema; else a family slug → that family's schema
+        # (entertainment titles / place venues); else the open composer.
         if content_type in TYPE_PROMPTS:
             system = TYPE_PROMPTS[content_type]
         elif is_entertainment(content_type):
             system = TYPE_PROMPTS["entertainment"]
+        elif is_places(content_type):
+            system = TYPE_PROMPTS["place"]
         else:
             system = COMPOSER_PROMPT
         config = types.GenerateContentConfig(

@@ -26,6 +26,7 @@ from google.genai import errors as genai_errors
 from config import settings
 from models.note import ContentBundle, NoteExtraction
 from services import note_retrieval as nr
+from services import search_index
 from services import sources
 from services.agent_tools import AgentContext, run_agent_collect
 from services.cloud_tasks import enqueue_process_job
@@ -38,16 +39,22 @@ from services.firebase import (
     flush_usage,
     get_db,
     get_user_categories,
+    get_user_collections,
     record_image_generated,
     reserve_image_slot,
     touch_user_activity,
 )
-from services.gemini import gemini_service, is_entertainment, match_existing, normalize_slug
+from services.gemini import (gemini_service, is_entertainment, is_itinerary, is_places, is_recipe,
+                             is_shopping, match_existing, normalize_slug)
 from services.imagen import generate_cover
+from services.itineraries import enrich_trip_item
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.oidc import verify_oidc
+from services.places import enrich_places
+from services.recipes import enrich_recipe_item
 from services.usage_meter import start_metering
 from services.watchlist import enrich_titles
+from services.wishlist import enrich_wish_item
 
 router = APIRouter(tags=["process"])
 log = logging.getLogger("clipnote.process")
@@ -66,6 +73,22 @@ async def _note_embedding(title: str, ai_summary: str = "") -> Vector | None:
         log.warning("note embedding failed, writing note without it: %s: %s",
                     type(e).__name__, e)
         return None
+
+# Maps a content_type to the mini-app that owns it (or None for a plain note). Priority-ordered so
+# a slug is filed under exactly one app — its capture becomes item(s), not a note.
+def _mini_app_family(content_type: str) -> str | None:
+    if is_entertainment(content_type):
+        return "watchlist"
+    if is_shopping(content_type):
+        return "wishlist"
+    if is_places(content_type):
+        return "places"
+    if is_recipe(content_type):
+        return "recipes"
+    if is_itinerary(content_type):
+        return "trips"
+    return None
+
 
 # A transient failure below this many attempts re-raises as 500 (Cloud Tasks retries,
 # max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
@@ -262,6 +285,7 @@ async def process_job(job_id: str, request: Request):
         else:
             bundle = await sources.acquire(url)
 
+        collection_id: str | None = None
         if input_type == "text" and not process_ai:
             # Save-as-is: skip Gemini entirely. The text is the note; the user titles and
             # categorises it themselves (and can edit the body later). Still embedded below
@@ -269,9 +293,12 @@ async def process_job(job_id: str, request: Request):
             extracted = _raw_text_extraction(job.get("text") or "", title)
             cover_image_url = None
         else:
-            # 2. Categorize against this user's own categories.
+            # 2. Classify against this user's own categories AND smart collections (one lite call):
+            #    content_type routes rendering + mini-apps; collection_id files a note into a bucket.
             existing = await get_user_categories(user_id)
-            content_type = await gemini_service.assign_category(url, bundle, existing, note_hint)
+            collections = await get_user_collections(user_id)
+            content_type, collection_id = await gemini_service.classify(
+                url, bundle, existing, collections, note_hint)
 
             # 3. Type-focused extraction (structured data only — never HTML).
             extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
@@ -301,6 +328,61 @@ async def process_job(job_id: str, request: Request):
         source_domain = (url.split("/")[2].replace("www.", "")
                          if input_type == "url" and "://" in url else "")
 
+        # Mini-app captures (recipes/movies/products/places/trips) don't create a note — they fan
+        # out into their app's item(s), which carry the data and are searchable via search_index.
+        # A matched family that yields NO item (e.g. a shopping slug with no buyable data) falls
+        # back to a plain note below, so a capture is never lost.
+        family = _mini_app_family(extracted.content_type) if process_ai else None
+        item_ids: list[str] = []
+        if family:
+            data = extracted.data or {}
+            try:
+                if family == "watchlist":
+                    item_ids = await enrich_titles(user_id, job_id, data.get("titles") or [])
+                elif family == "wishlist":
+                    iid = await enrich_wish_item(
+                        user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
+                        source_domain=source_domain, data=data, ai_summary=extracted.ai_summary)
+                    item_ids = [iid] if iid else []
+                elif family == "places":
+                    item_ids = await enrich_places(user_id, job_id, data.get("venues") or [])
+                elif family == "recipes":
+                    iid = await enrich_recipe_item(
+                        user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
+                        source_url=source_url, source_domain=source_domain, data=data,
+                        ai_summary=extracted.ai_summary)
+                    item_ids = [iid] if iid else []
+                elif family == "trips":
+                    iid = await enrich_trip_item(
+                        user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
+                        source_url=source_url, source_domain=source_domain, data=data,
+                        ai_summary=extracted.ai_summary)
+                    item_ids = [iid] if iid else []
+            except Exception as e:  # noqa: BLE001 — fan-out failure falls back to a note below.
+                log.warning("%s fan-out failed: %s: %s", family, type(e).__name__, e,
+                            extra={"job_id": job_id, "user_id": user_id, "url": url})
+                item_ids = []
+            if not item_ids:
+                family = None  # nothing materialized — save a normal note instead
+
+        if family:
+            # Item-only capture: no note doc. Route to the produced item (when exactly one) or app.
+            destination: dict = {"kind": "app", "app": family}
+            if len(item_ids) == 1:
+                destination["item_id"] = item_ids[0]
+            if source_domain:
+                await add_user_source(user_id, source_domain)
+            await job_ref.update({"status": "completed", "note_id": None,
+                                  "destination": destination,
+                                  "updated_at": datetime.now(timezone.utc)})
+            await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
+            log.info("mini-app capture (%s, %d item[s]) via %s", family, len(item_ids),
+                     bundle.strategy,
+                     extra={"job_id": job_id, "user_id": user_id, "url": url,
+                            "strategy": bundle.strategy})
+            return {"status": "completed", "destination": destination}
+
+        # Plain note path (everything that isn't a mini-app capture).
         note_id = str(uuid.uuid4())
         embedding = await _note_embedding(extracted.title, extracted.ai_summary)
         note_doc = {
@@ -318,6 +400,8 @@ async def process_job(job_id: str, request: Request):
             "source_domain": source_domain,
             "source": source,
             "cover_image_url": cover_image_url,
+            # Smart-bucket membership from the classifier; null → the Notes catch-all.
+            "collection_id": collection_id,
             "data": firestore_safe(extracted.data),
             "acquisition": bundle.strategy,
             "created_at": now,
@@ -326,29 +410,19 @@ async def process_job(job_id: str, request: Request):
         if embedding is not None:
             note_doc["embedding"] = embedding
         await db.collection("notes").document(note_id).set(note_doc)
-        # Watchlist mini-app: fan the note's extracted titles out into per-title watch_items
-        # (TMDB-enriched). Best-effort and fully guarded — the note already exists, so a
-        # failure here must never reach the outer salvage path (which would duplicate it).
-        if is_entertainment(extracted.content_type):
-            try:
-                titles = (extracted.data or {}).get("titles") or []
-                poster = await enrich_titles(user_id, note_id, titles)
-                if poster and not cover_image_url:
-                    await db.collection("notes").document(note_id).update(
-                        {"cover_image_url": poster, "updated_at": datetime.now(timezone.utc)}
-                    )
-            except Exception as e:  # noqa: BLE001
-                log.warning("watchlist enrichment failed: %s: %s", type(e).__name__, e,
-                            extra={"job_id": job_id, "user_id": user_id, "url": url})
+        # Keep the note searchable + Clip-AI-answerable (reuse its embedding, no second embed call).
+        await search_index.upsert_for_note(db, note_id, note_doc, embedding)
         await add_user_category(user_id, extracted.content_type)
         if source_domain:
             await add_user_source(user_id, source_domain)
+        destination = {"kind": "note", "note_id": note_id}
         await job_ref.update({"status": "completed", "note_id": note_id,
+                              "destination": destination,
                               "updated_at": datetime.now(timezone.utc)})
         await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
         log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
                  extra={"job_id": job_id, "user_id": user_id, "url": url, "strategy": bundle.strategy})
-        return {"status": "completed", "note_id": note_id}
+        return {"status": "completed", "note_id": note_id, "destination": destination}
 
     except BlockedURLError as e:
         # SSRF guard or unsupported scheme — permanent and deliberate: no note, no retry.
@@ -382,9 +456,14 @@ async def process_job(job_id: str, request: Request):
                 await add_user_category(user_id, "bookmark")
                 if input_type == "url" and url:
                     await add_user_source(user_id, _domain_of(url))
+                # Keep even a salvaged bookmark searchable.
+                salvaged = await db.collection("notes").document(note_id).get()
+                if salvaged.exists:
+                    await search_index.upsert_for_note(db, note_id, salvaged.to_dict())
             except Exception:
-                pass  # category/source chips are cosmetic — never fail the salvage over it
+                pass  # category/source chips + index are cosmetic — never fail the salvage over it
             await job_ref.update({"status": "completed", "note_id": note_id,
+                                  "destination": {"kind": "note", "note_id": note_id},
                                   "error": f"salvaged: {type(e).__name__}: {e}"[:500],
                                   "updated_at": datetime.now(timezone.utc)})
             await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
@@ -503,6 +582,7 @@ async def process_agent_job(job_id: str, request: Request):
             "cover_image_url": None,
             "data": firestore_safe(data),
             "acquisition": "ai_deep_task",
+            "collection_id": None,  # AI-authored notes land in the Notes catch-all
             "source_note_ids": list(dict.fromkeys(ctx.cited_ids))[:50],
             "created_at": now,
             "updated_at": datetime.now(timezone.utc),
@@ -510,8 +590,10 @@ async def process_agent_job(job_id: str, request: Request):
         if embedding is not None:
             note_doc["embedding"] = embedding
         await db.collection("notes").document(new_id).set(note_doc)
+        await search_index.upsert_for_note(db, new_id, note_doc, embedding)
         await add_user_category(user_id, slug)
         await job_ref.update({"status": "completed", "note_id": new_id,
+                              "destination": {"kind": "note", "note_id": new_id},
                               "updated_at": datetime.now(timezone.utc)})
         log.info("deep agent task completed", extra={"job_id": job_id, "user_id": user_id})
         return {"status": "completed", "note_id": new_id}

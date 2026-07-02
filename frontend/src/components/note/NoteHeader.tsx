@@ -145,14 +145,15 @@ export function NoteHeader({
     }
   };
 
-  // This note's membership count drives the folder button's "on" look.
-  const inCollections = collections.filter((c) => (c.note_ids ?? []).includes(note.id)).length;
+  // Single-home membership drives the folder button's "on" look (in a bucket or not).
+  const inCollections =
+    note.collection_id && collections.some((c) => c.id === note.collection_id) ? 1 : 0;
 
   return (
     <header className="mb-8 flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <Link
-          to="/"
+          to="/notes"
           className="inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />

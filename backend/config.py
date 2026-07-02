@@ -76,6 +76,14 @@ class Settings:
     # recipes", "consolidate my trip notes") — bounds token cost on a big match set.
     ASK_EXHAUSTIVE_CAP: int = int(os.getenv("ASK_EXHAUSTIVE_CAP", "40"))
 
+    # --- Smart collections backfill (assign pre-existing notes to a new bucket) ---
+    # How many nearest notes to consider when a collection is created, and the max COSINE
+    # distance (1 - similarity) to still count as a match. Tuned for precision over recall —
+    # a missed note can always be moved manually, a wrong one is annoying.
+    COLLECTION_BACKFILL_K: int = int(os.getenv("COLLECTION_BACKFILL_K", "50"))
+    COLLECTION_BACKFILL_MAX_DISTANCE: float = float(
+        os.getenv("COLLECTION_BACKFILL_MAX_DISTANCE", "0.45"))
+
     # --- Agent (orchestrator + subagents + tools) ---
     # Master kill switch: when false, /api/ask/stream answers with no tools (falls back to
     # plain grounded RAG) so the agent path can be disabled without a redeploy.
@@ -164,6 +172,25 @@ class Settings:
     DEFAULT_WATCH_REGION: str = os.getenv("DEFAULT_WATCH_REGION", "IN")
     # Provider lookups cache per (tmdb_id, region) for this many hours (JustWatch data lags ~8h).
     TMDB_PROVIDER_CACHE_HOURS: int = int(os.getenv("TMDB_PROVIDER_CACHE_HOURS", "24"))
+    # Full title details (cast/runtime/rating) cache for this many hours — they change rarely.
+    TMDB_DETAIL_CACHE_HOURS: int = int(os.getenv("TMDB_DETAIL_CACHE_HOURS", "168"))
+
+    # --- Places mini-app (Google Places API New) ---
+    # Server-side calls authenticate with the runtime service account (ADC) — same as Vertex /
+    # Firestore — so there's no API key to manage. Off → enrichment is a graceful no-op: place
+    # notes still save and place_items render from the raw venue name. Cache hard + the free SKU
+    # tier keep cost negligible. (The frontend Maps JS uses a separate browser key.)
+    ENABLE_PLACES: bool = os.getenv("ENABLE_PLACES", "true").lower() == "true"
+    GOOGLE_PLACES_API_BASE: str = os.getenv("GOOGLE_PLACES_API_BASE", "https://places.googleapis.com/v1")
+    # Place search/details results cache for this many hours — they change rarely.
+    PLACES_DETAIL_CACHE_HOURS: int = int(os.getenv("PLACES_DETAIL_CACHE_HOURS", "168"))
+
+    # --- Trips mini-app (itinerary fan-out) ---
+    # Itinerary stops carry no coords, so the trip fan-out geocodes each stop by name via the same
+    # Google Places Text Search (cached, ADC; a no-op when ENABLE_PLACES is off). Cap the geocodes
+    # per trip so a pathological many-stop itinerary can't run up the bill — stops past the cap keep
+    # their text and are simply absent from the detail map.
+    TRIP_MAX_GEOCODED_STOPS: int = int(os.getenv("TRIP_MAX_GEOCODED_STOPS", "40"))
 
     # Optional Firecrawl API key for bot-protected product pages (tier 2 fallback).
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY", "")
