@@ -7,18 +7,18 @@ import {
   Sparkle,
   Plus,
   WandSparkles,
-  Settings,
   AlertCircle,
   X,
   Check,
   Layers,
+  LayoutGrid,
   Link2,
   AlignLeft,
   ImagePlus,
   Mic,
   ArrowLeft,
-  Library,
   Pin,
+  Rows3,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -160,6 +160,18 @@ function Feed() {
   const [layout, setLayout] = useState<Layout>(
     () => (localStorage.getItem("clipnote.layout") as Layout) || "standard",
   );
+  // The view toggle lives here (the Notes collection screen), persisted app-wide.
+  const toggleLayout = () => {
+    setLayout((prev) => {
+      const next: Layout = prev === "condensed" ? "standard" : "condensed";
+      try {
+        localStorage.setItem("clipnote.layout", next);
+      } catch {
+        /* non-fatal — the toggle still applies for this session */
+      }
+      return next;
+    });
+  };
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
     try {
@@ -605,11 +617,13 @@ function Feed() {
               </div>
             ) : (
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand text-brand-foreground">
-                    <Sparkles className="h-4 w-4" />
-                  </span>
-                  <span className="font-serif text-2xl text-ink">Clipnote</span>
+                {/* Notes is a collection now — this header reads like one: back to the
+                    Library + the collection name, not a second app home. */}
+                <div className="flex min-w-0 items-center gap-2">
+                  <Link to="/" aria-label="Back to Library" title="Library" className={ICON_BTN}>
+                    <ArrowLeft className="h-4 w-4" />
+                  </Link>
+                  <span className="truncate font-serif text-2xl text-ink">Notes</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -621,9 +635,21 @@ function Feed() {
                   >
                     <Search className="h-4 w-4" />
                   </button>
-                  <Link to="/" aria-label="Library" title="Library" className={ICON_BTN}>
-                    <Library className="h-4 w-4" />
-                  </Link>
+                  <button
+                    type="button"
+                    onClick={toggleLayout}
+                    aria-label={
+                      layout === "condensed" ? "Switch to card view" : "Switch to condensed view"
+                    }
+                    title={layout === "condensed" ? "Card view" : "Condensed view"}
+                    className={ICON_BTN}
+                  >
+                    {layout === "condensed" ? (
+                      <LayoutGrid className="h-4 w-4" />
+                    ) : (
+                      <Rows3 className="h-4 w-4" />
+                    )}
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -636,9 +662,6 @@ function Feed() {
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                  <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
-                    <Settings className="h-4 w-4" />
-                  </Link>
                 </div>
               </div>
             )}
@@ -665,7 +688,7 @@ function Feed() {
                       onClick={() => setActive("all")}
                       className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
                         active === "all"
-                          ? "bg-brand text-brand-foreground"
+                          ? "bg-ink text-paper"
                           : "border border-border bg-card text-ink-soft hover:text-ink"
                       }`}
                     >

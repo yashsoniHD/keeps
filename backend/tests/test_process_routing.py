@@ -47,7 +47,8 @@ def _wire(monkeypatch, fake_db, *, content_type, collection_id=None, data=None, 
     monkeypatch.setattr(process.sources, "acquire", acquire)
 
     # Capture fan-out args and return canned item ids per family.
-    async def fake_titles(uid, source_id, titles, region=None):
+    async def fake_titles(uid, source_id, titles, region=None,
+                          source_url=None, source_domain=None):
         return item_ids or []
 
     async def fake_places(uid, source_id, venues, region=None):

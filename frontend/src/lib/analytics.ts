@@ -23,8 +23,7 @@ function trackOnce(key: string, event: string, params?: Record<string, string | 
 
 export const analytics = {
   // Acquisition: a brand-new account was created (fired on first sign-in only).
-  signUp: (method = "google", ref?: string) =>
-    track("sign_up", ref ? { method, ref } : { method }),
+  signUp: (method = "google", ref?: string) => track("sign_up", ref ? { method, ref } : { method }),
   // Activation funnel: first capture attempt → first note actually rendered.
   firstCapture: () => trackOnce("first_capture", "first_capture"),
   noteSaved: (contentType?: string) =>

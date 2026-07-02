@@ -128,7 +128,10 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
       {v.goodFor && v.goodFor.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {v.goodFor.map((g, i) => (
-            <span key={i} className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-ink-soft">
+            <span
+              key={i}
+              className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-ink-soft"
+            >
               {g}
             </span>
           ))}

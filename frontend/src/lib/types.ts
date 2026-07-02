@@ -41,6 +41,8 @@ export interface WatchItem {
   id: string;
   user_id: string;
   source_note_ids: string[]; // the note(s) this title was recommended in
+  source_url?: string | null; // the captured link (reel/listicle) the title came from
+  source_domain?: string | null;
   title: string;
   year?: string | null;
   media_type: "movie" | "tv" | "unknown";
@@ -316,6 +318,8 @@ export interface Job {
   status: "pending" | "processing" | "completed" | "failed" | "deferred";
   note_id: string | null;
   destination?: JobDestination | null; // preferred navigation target; note_id kept for back-compat
+  title?: string | null; // display title, stamped by the worker on completion (older jobs lack it)
+  item_count?: number; // mini-app captures: how many items fanned out of this save
   error: string | null;
   attempt_count: number;
   created_at: Timestamp;

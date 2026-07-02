@@ -43,7 +43,8 @@ def test_saved_status_accepted():
 
 
 def test_watching_status_accepted():
-    """The in-progress `watching` bucket (TV-centric) is a valid status."""
+    """The retired in-progress `watching` status stays a valid write: older docs may still
+    hold it (the UI maps them onto the watchlist bucket and no longer offers the transition)."""
     assert wi_mod.WatchItemUpdate(watch_status="watching").watch_status == "watching"
 
 

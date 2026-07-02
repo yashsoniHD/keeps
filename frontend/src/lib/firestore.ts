@@ -107,6 +107,34 @@ export function watchRecent(
   );
 }
 
+// The Library "recent saves" list: one row per CAPTURE (job), not per fanned-out item — a reel
+// that produced five watchlist titles is still one save. Reads the newest completed jobs; each
+// row routes via `destination`. Over-fetches (pending/failed jobs share the query) then trims.
+export function watchRecentSaves(
+  userId: string,
+  callback: (jobs: Job[]) => void,
+  opts: { max?: number; onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const { max = 8, onError } = opts;
+  const q = query(
+    collection(db, "jobs"),
+    where("user_id", "==", userId),
+    orderBy("created_at", "desc"),
+    limit(max + 10),
+  );
+  return onSnapshot(
+    q,
+    (snap) =>
+      callback(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }) as Job)
+          .filter((j) => j.status === "completed")
+          .slice(0, max),
+      ),
+    (err) => onError?.(err),
+  );
+}
+
 export async function getNote(noteId: string): Promise<Note | null> {
   const snap = await getDoc(doc(db, "notes", noteId));
   if (!snap.exists()) return null;
@@ -118,6 +146,14 @@ export async function getNote(noteId: string): Promise<Note | null> {
 export async function getAnnotation(noteId: string): Promise<string> {
   const snap = await getDoc(doc(db, "annotations", noteId));
   return snap.exists() ? ((snap.data().user_note ?? "") as string) : "";
+}
+
+// One-shot job read (owner-only per rules) — used to recover the captured URL for older
+// mini-app items whose source_note_ids hold a job id (item-only captures create no note).
+export async function getJob(jobId: string): Promise<Job | null> {
+  const snap = await getDoc(doc(db, "jobs", jobId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Job;
 }
 
 export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): Unsubscribe {
@@ -258,7 +294,12 @@ export async function createCollection(
 
 export async function updateCollectionMeta(
   cid: string,
-  patch: { name?: string; description?: string | null; icon?: string | null; palette?: number | null },
+  patch: {
+    name?: string;
+    description?: string | null;
+    icon?: string | null;
+    palette?: number | null;
+  },
 ): Promise<void> {
   const clean: Record<string, unknown> = { updated_at: serverTimestamp() };
   if (patch.name !== undefined) clean.name = patch.name.trim();
@@ -277,7 +318,11 @@ export function watchNotesInCollection(
   callback: (notes: Note[]) => void,
   opts: { max?: number; onError?: (e: Error) => void } = {},
 ): Unsubscribe {
-  return watchNotes(userId, callback, { collectionId, max: opts.max ?? 200, onError: opts.onError });
+  return watchNotes(userId, callback, {
+    collectionId,
+    max: opts.max ?? 200,
+    onError: opts.onError,
+  });
 }
 
 export async function deleteCollection(cid: string): Promise<void> {

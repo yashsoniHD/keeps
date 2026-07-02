@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
-export function AISummaryBlock({ summary, className = "" }: { summary: string; className?: string }) {
+export function AISummaryBlock({
+  summary,
+  className = "",
+}: {
+  summary: string;
+  className?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const ref = useRef<HTMLParagraphElement>(null);

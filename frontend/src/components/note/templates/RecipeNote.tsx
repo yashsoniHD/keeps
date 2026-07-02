@@ -1,4 +1,14 @@
-import { Clock, Timer, Flame, Users, Gauge, Globe, Zap, Lightbulb, type LucideIcon } from "lucide-react";
+import {
+  Clock,
+  Timer,
+  Flame,
+  Users,
+  Gauge,
+  Globe,
+  Zap,
+  Lightbulb,
+  type LucideIcon,
+} from "lucide-react";
 import type { Note } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
 

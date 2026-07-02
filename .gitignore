@@ -36,3 +36,4 @@ infra/build/
 # Dev-only component preview harness (not part of the production build)
 frontend/rowpreview.html
 frontend/src/rowpreview-main.tsx
+.playwright-mcp/

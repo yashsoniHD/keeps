@@ -103,11 +103,13 @@ async def add_by_tmdb(uid: str, tmdb_id: int, media_type: str,
 
 
 async def enrich_titles(uid: str, source_id: str, titles: list[dict],
-                        region: str | None = None) -> list[str]:
+                        region: str | None = None, source_url: str | None = None,
+                        source_domain: str | None = None) -> list[str]:
     """Match each extracted title to TMDB and upsert a watch_item. Best-effort and non-fatal:
     any failure logs and is swallowed so ingest never fails because of TMDB. Returns the list of
     produced watch_item ids (for capture-destination routing). `source_id` is the note id when a
-    note exists, else the job id (mini-app captures no longer create a note)."""
+    note exists, else the job id (mini-app captures no longer create a note); `source_url`/
+    `source_domain` are the captured link the titles came from (the reel/listicle)."""
     if not titles:
         return []
     region = region or await get_user_region(uid)
@@ -141,6 +143,12 @@ async def enrich_titles(uid: str, source_id: str, titles: list[dict],
                 "source_note_ids": ArrayUnion([source_id]),
                 "updated_at": now,
             }
+            # Where the recommendation came from (the reel/listicle URL). Only set when we
+            # have one so a dedupe re-save from a source-less path never blanks it out.
+            if source_url:
+                enrichment["source_url"] = source_url
+            if source_domain:
+                enrichment["source_domain"] = source_domain
             if hit:
                 enrichment.update({
                     "tmdb_id": hit.tmdb_id,
@@ -195,7 +203,9 @@ async def backfill_user(uid: str, limit: int = 100) -> dict:
             )
             if titles:
                 titles_found += len(titles)
-                await enrich_titles(uid, snap.id, titles, region=region)
+                await enrich_titles(uid, snap.id, titles, region=region,
+                                    source_url=note.get("source_url"),
+                                    source_domain=note.get("source_domain"))
         except Exception as e:  # noqa: BLE001 — one note must not sink the backfill.
             log.warning("backfill failed for note %s: %s: %s", snap.id, type(e).__name__, e)
     log.info("watchlist backfill for %s: %d notes, %d titles", uid, notes_seen, titles_found)

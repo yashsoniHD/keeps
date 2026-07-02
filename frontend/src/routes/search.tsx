@@ -30,7 +30,12 @@ function ResultRow({ hit, onOpen }: { hit: SearchResult; onOpen: () => void }) {
     >
       <span className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-muted">
         {hit.cover_image_url ? (
-          <img src={hit.cover_image_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+          <img
+            src={hit.cover_image_url}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
         ) : (
           <span className={`flex h-full w-full items-center justify-center ${tool.soft}`}>
             <Icon className="h-5 w-5" />
@@ -65,7 +70,11 @@ function Group({
       </h2>
       <div className="space-y-2">
         {hits.map((h) => (
-          <ResultRow key={`${h.app ?? "note"}-${h.ref_id ?? h.id}`} hit={h} onOpen={() => onOpen(h)} />
+          <ResultRow
+            key={`${h.app ?? "note"}-${h.ref_id ?? h.id}`}
+            hit={h}
+            onOpen={() => onOpen(h)}
+          />
         ))}
       </div>
     </section>

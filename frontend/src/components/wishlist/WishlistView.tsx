@@ -9,7 +9,9 @@ import { WishCard } from "./WishCard";
 import { AddProductSheet } from "./AddProductSheet";
 
 type SortKey = "added" | "price" | "rating" | "target";
-type Queue = "saved" | "to_buy" | "purchased";
+// Two display tabs. "saved" shows both `saved` and legacy `to_buy` docs (display-only merge —
+// no data migration); "purchased" is the Bought tab.
+type Queue = "saved" | "purchased";
 
 // A compact icon filter: a round button showing only an icon, with the native <select> overlaid
 // transparently on top (mirrors the watchlist's IconSelect). The icon fills with the product
@@ -62,8 +64,8 @@ const dedupeKey = (i: WishItem) =>
   `${(i.brand ?? "").toLowerCase()}|${(i.title ?? "").toLowerCase().trim().replace(/\s+/g, " ")}`;
 
 // Collapse the same product saved across multiple notes into one card, keyed by buy URL (falling
-// back to brand+title). When a product survives in more than one bucket, keep the most-progressed
-// copy (purchased > to_buy > saved) so user state is never hidden.
+// back to brand+title). When a product survives with more than one status, keep the most-progressed
+// copy (purchased > to_buy > saved) so a Bought item never resurfaces in Saved.
 function dedupeItems(list: WishItem[]): WishItem[] {
   const best = new Map<string, WishItem>();
   const fav = new Map<string, boolean>();
@@ -79,27 +81,21 @@ function dedupeItems(list: WishItem[]): WishItem[] {
 const EMPTY: Record<Queue, { title: string; body: string }> = {
   saved: {
     title: "Save a product and it lands here",
-    body: "Share a product link or a buying-guide and each product becomes its own card. Tap “+ Wishlist” to move the ones you’re actually considering.",
-  },
-  to_buy: {
-    title: "Your wishlist is empty",
-    body: "Add products from Saved with “+ Wishlist”, or paste a product link — this is your hand-picked shortlist of what to buy.",
+    body: "Share a product link or a buying-guide and each product becomes its own card — your wishlist of things you’re considering.",
   },
   purchased: {
     title: "Nothing bought yet",
-    body: "Mark a product bought and it moves here, so your wishlist stays to what you still want.",
+    body: "Mark a product bought and it moves here, so Saved stays to what you still want.",
   },
 };
 
 function Grid({
   items,
   onToggleBought,
-  onAddToWishlist,
   onToggleFavorite,
 }: {
   items: WishItem[];
   onToggleBought: (i: WishItem) => void;
-  onAddToWishlist: (i: WishItem) => void;
   onToggleFavorite: (i: WishItem) => void;
 }) {
   return (
@@ -109,7 +105,6 @@ function Grid({
           key={i.id}
           item={i}
           onToggleBought={onToggleBought}
-          onAddToWishlist={onAddToWishlist}
           onToggleFavorite={onToggleFavorite}
         />
       ))}
@@ -117,10 +112,9 @@ function Grid({
   );
 }
 
-// The Wishlist mini-app body: a live product wall split into three mutually-exclusive buckets —
-// Saved (auto-captured from product notes, the inbox) → Wishlist (explicitly added) → Bought —
-// with a store filter and sort. Owns the wish_items listener and applies optimistic state so
-// promoting / marking bought feels instant.
+// The Wishlist mini-app body: a live product wall split into two tabs — Saved (auto-captured
+// from product notes, plus legacy to_buy docs) and Bought — with a store filter and sort. Owns
+// the wish_items listener and applies optimistic state so marking bought feels instant.
 export function WishlistView({ uid }: { uid: string }) {
   const [items, setItems] = useState<WishItem[] | null>(null);
   const [queue, setQueue] = useState<Queue>("saved");
@@ -144,21 +138,12 @@ export function WishlistView({ uid }: { uid: string }) {
   const patchLocal = (id: string, patch: Partial<WishItem>) =>
     setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev);
 
+  // Bought ↔ Saved. Undoing a purchase always lands in `saved` (never back to legacy `to_buy`).
   const onToggleBought = async (item: WishItem) => {
-    const next = item.wish_status === "purchased" ? "to_buy" : "purchased";
+    const next = item.wish_status === "purchased" ? "saved" : "purchased";
     patchLocal(item.id, { wish_status: next });
     try {
       await updateWishItem(item.id, { wish_status: next });
-    } catch {
-      patchLocal(item.id, { wish_status: item.wish_status }); // revert on failure
-    }
-  };
-
-  // Promote a Saved (inbox) item onto the wishlist.
-  const onAddToWishlist = async (item: WishItem) => {
-    patchLocal(item.id, { wish_status: "to_buy" });
-    try {
-      await updateWishItem(item.id, { wish_status: "to_buy" });
     } catch {
       patchLocal(item.id, { wish_status: item.wish_status }); // revert on failure
     }
@@ -210,60 +195,46 @@ export function WishlistView({ uid }: { uid: string }) {
     );
   }
 
+  // "Saved" folds legacy to_buy docs in — display-only, the docs keep their status.
+  const inQueue = (i: WishItem, q: Queue) =>
+    q === "saved" ? i.wish_status !== "purchased" : i.wish_status === "purchased";
   const counts = {
-    saved: deduped.filter((i) => i.wish_status === "saved").length,
-    to_buy: deduped.filter((i) => i.wish_status === "to_buy").length,
-    purchased: deduped.filter((i) => i.wish_status === "purchased").length,
+    saved: deduped.filter((i) => inQueue(i, "saved")).length,
+    purchased: deduped.filter((i) => inQueue(i, "purchased")).length,
   };
   const favCount = deduped.filter((i) => i.favorite).length;
-  const base = favOnly ? deduped.filter((i) => i.favorite) : deduped.filter((i) => i.wish_status === queue);
+  const base = favOnly
+    ? deduped.filter((i) => i.favorite)
+    : deduped.filter((i) => inQueue(i, queue));
   const shown = filterSort(base);
 
-  // Saved → Wishlist are the hero buckets; "Bought" is a quiet archive (the secondary toggle below),
-  // not a co-equal tab — once bought, a product leaves the active shopping flow.
-  const PRIMARY_TABS: { key: Queue; label: string }[] = [
+  const TABS: { key: Queue; label: string }[] = [
     { key: "saved", label: "Saved" },
-    { key: "to_buy", label: "Wishlist" },
+    { key: "purchased", label: "Bought" },
   ];
-  const onBought = !favOnly && queue === "purchased";
 
   return (
     <div className="space-y-6">
       {/* Queue tabs + Add */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-full border border-border bg-card p-0.5">
-            {PRIMARY_TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => {
-                  setQueue(t.key);
-                  setFavOnly(false);
-                }}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
-                  !favOnly && queue === t.key ? "bg-product text-white" : "text-ink-soft hover:text-ink"
-                }`}
-              >
-                {t.label} · {counts[t.key]}
-              </button>
-            ))}
-          </div>
-          {/* Bought is a quiet archive, not a co-equal tab */}
-          {counts.purchased > 0 && (
+        <div className="inline-flex rounded-full border border-border bg-card p-0.5">
+          {TABS.map((t) => (
             <button
+              key={t.key}
               type="button"
               onClick={() => {
-                setQueue("purchased");
+                setQueue(t.key);
                 setFavOnly(false);
               }}
-              className={`text-xs font-medium transition-colors ${FOCUS_RING} rounded-full px-2 py-1 ${
-                onBought ? "text-product" : "text-ink-soft/70 hover:text-ink"
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
+                !favOnly && queue === t.key
+                  ? "bg-product text-white"
+                  : "text-ink-soft hover:text-ink"
               }`}
             >
-              Bought · {counts.purchased}
+              {t.label} · {counts[t.key]}
             </button>
-          )}
+          ))}
         </div>
         <button
           type="button"
@@ -322,7 +293,9 @@ export function WishlistView({ uid }: { uid: string }) {
             title="Favorites"
             aria-pressed={favOnly}
             className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-              favOnly ? "border-transparent bg-product text-white" : "border-border bg-card text-ink-soft"
+              favOnly
+                ? "border-transparent bg-product text-white"
+                : "border-border bg-card text-ink-soft"
             }`}
           >
             <Star className={`h-4 w-4 ${favOnly ? "fill-current" : ""}`} />
@@ -331,12 +304,7 @@ export function WishlistView({ uid }: { uid: string }) {
       </div>
 
       {shown.length > 0 ? (
-        <Grid
-          items={shown}
-          onToggleBought={onToggleBought}
-          onAddToWishlist={onAddToWishlist}
-          onToggleFavorite={onToggleFavorite}
-        />
+        <Grid items={shown} onToggleBought={onToggleBought} onToggleFavorite={onToggleFavorite} />
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">
           No products match your filters.
@@ -346,7 +314,7 @@ export function WishlistView({ uid }: { uid: string }) {
           <Star className="mx-auto h-10 w-10 text-ink-soft/50" />
           <p className="mt-4 font-medium text-ink">No favorites yet</p>
           <p className="mt-1 text-sm text-ink-soft">
-            Tap the star on a product to keep the ones you really want here, across every bucket.
+            Tap the star on a product to keep the ones you really want here, across both tabs.
           </p>
         </div>
       ) : (

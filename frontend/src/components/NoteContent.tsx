@@ -140,7 +140,7 @@ function PublicNoteHeader({ note }: { note: Note }) {
   return (
     <header className="mb-8 flex flex-col gap-5">
       <Link to="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-brand text-brand-foreground">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
           <Sparkles className="h-3.5 w-3.5" />
         </span>
         Clipnote

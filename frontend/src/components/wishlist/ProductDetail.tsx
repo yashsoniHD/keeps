@@ -7,7 +7,6 @@ import {
   Trash2,
   FileText,
   Loader2,
-  Plus,
   ExternalLink,
   ThumbsUp,
   ThumbsDown,
@@ -85,18 +84,16 @@ export function ProductDetail({
   }
 
   const bought = item.wish_status === "purchased";
-  const saved = item.wish_status === "saved";
   const favorite = !!item.favorite;
   const dealMet =
     item.target_price != null &&
     item.price_amount != null &&
     item.price_amount <= item.target_price;
 
+  // Bought ↔ Saved. Undoing a purchase always lands in `saved` (never back to legacy `to_buy`).
   const toggleBought = () =>
-    updateWishItem(item.id, { wish_status: bought ? "to_buy" : "purchased" }).catch(() => {});
-  const addToWishlist = () => updateWishItem(item.id, { wish_status: "to_buy" }).catch(() => {});
-  const toggleFavorite = () =>
-    updateWishItem(item.id, { favorite: !favorite }).catch(() => {});
+    updateWishItem(item.id, { wish_status: bought ? "saved" : "purchased" }).catch(() => {});
+  const toggleFavorite = () => updateWishItem(item.id, { favorite: !favorite }).catch(() => {});
   const saveTarget = () => {
     const n = targetDraft.trim() === "" ? null : Number(targetDraft);
     if (n != null && (Number.isNaN(n) || n < 0)) return;
@@ -170,16 +167,6 @@ export function ProductDetail({
 
           {/* Your status */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            {saved && (
-              <button
-                type="button"
-                onClick={addToWishlist}
-                className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-product-soft ${FOCUS_RING}`}
-              >
-                <Plus className="h-4 w-4" />
-                Add to wishlist
-              </button>
-            )}
             <button
               type="button"
               onClick={toggleBought}

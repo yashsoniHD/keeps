@@ -1,6 +1,16 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Trash2, Loader2, AlertCircle, RotateCcw, WifiOff, Clock, X, Star, Pin } from "lucide-react";
+import {
+  Trash2,
+  Loader2,
+  AlertCircle,
+  RotateCcw,
+  WifiOff,
+  Clock,
+  X,
+  Star,
+  Pin,
+} from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";

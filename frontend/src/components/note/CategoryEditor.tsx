@@ -30,7 +30,10 @@ export function CategoryEditor({
     if (!open) return;
     setQ("");
     inputRef.current?.focus();
-    if (user) getUserCategories(user.uid).then(setCategories).catch(() => {});
+    if (user)
+      getUserCategories(user.uid)
+        .then(setCategories)
+        .catch(() => {});
   }, [open, user]);
 
   // Close on outside click / Escape.
@@ -68,12 +71,15 @@ export function CategoryEditor({
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const all = Array.from(new Set([type, ...categories]));
-    return all.filter((c) => !needle || c.includes(needle) || noteLabel(c).toLowerCase().includes(needle));
+    return all.filter(
+      (c) => !needle || c.includes(needle) || noteLabel(c).toLowerCase().includes(needle),
+    );
   }, [q, categories, type]);
 
   // Offer "Create" when the typed name isn't already one of the user's categories.
   const newSlug = slugifyCategory(q);
-  const canCreate = newSlug.length > 0 && !Array.from(new Set([type, ...categories])).includes(newSlug);
+  const canCreate =
+    newSlug.length > 0 && !Array.from(new Set([type, ...categories])).includes(newSlug);
 
   return (
     <div ref={wrapRef} className="relative">

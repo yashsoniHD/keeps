@@ -7,7 +7,6 @@ import {
   Trash2,
   FileText,
   Loader2,
-  Plus,
   Clock,
   Repeat,
   Sparkles,
@@ -26,9 +25,9 @@ import { PlacesMap } from "./PlacesMap";
 const PLACE = paletteAccent(1);
 
 // The venue detail page: photo hero, embedded mini-map, address & hours, region-aware actions,
-// highlights/must-try/tips from the source, your status + personal rating + notes, and links back
-// to the notes it came from. Live-listens to the item; rich Google data (hours/photo) is fetched
-// on demand and not stored on the item.
+// highlights/must-try/tips from the source, the star toggle (feeds the Starred tab) + Been visit
+// log + personal rating + notes, and links back to the notes it came from. Live-listens to the
+// item; rich Google data (hours/photo) is fetched on demand and not stored on the item.
 export function PlaceDetail({
   uid,
   itemId,
@@ -98,7 +97,6 @@ export function PlaceDetail({
   }
 
   const visited = item.place_status === "visited";
-  const saved = item.place_status === "saved";
   const favorite = !!item.favorite;
   const visitCount = item.visit_count ?? 0;
   const photo = item.photo_url ?? details.photo_url ?? null;
@@ -107,12 +105,10 @@ export function PlaceDetail({
 
   // Marking Been (a sticky attribute) seeds the visit count; un-marking is a correction.
   const toggleVisited = () =>
-    updatePlaceItem(item.id, { place_status: visited ? "to_visit" : "visited" }).catch(() => {});
+    updatePlaceItem(item.id, { place_status: visited ? "saved" : "visited" }).catch(() => {});
   // Record another visit without losing history (a place is revisitable).
   const logVisit = () => updatePlaceItem(item.id, { log_visit: true }).catch(() => {});
-  const addToList = () => updatePlaceItem(item.id, { place_status: "to_visit" }).catch(() => {});
-  const toggleFavorite = () =>
-    updatePlaceItem(item.id, { favorite: !favorite }).catch(() => {});
+  const toggleFavorite = () => updatePlaceItem(item.id, { favorite: !favorite }).catch(() => {});
   const rate = (n: number) => updatePlaceItem(item.id, { user_rating: n }).catch(() => {});
 
   const onNotesChange = (v: string) => {
@@ -133,12 +129,9 @@ export function PlaceDetail({
     }
   };
 
-  const metaBits = [
-    item.category,
-    item.cuisine,
-    item.price_level,
-    item.price_for_two,
-  ].filter(Boolean);
+  const metaBits = [item.category, item.cuisine, item.price_level, item.price_for_two].filter(
+    Boolean,
+  );
 
   return (
     <div>
@@ -179,18 +172,22 @@ export function PlaceDetail({
         <ActionRow actions={item.action_links} />
       </div>
 
-      {/* Your status + rating */}
+      {/* Star + your visit log */}
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        {saved && (
-          <button
-            type="button"
-            onClick={addToList}
-            className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-itinerary-soft ${FOCUS_RING}`}
-          >
-            <Plus className="h-4 w-4" />
-            Want to go
-          </button>
-        )}
+        {/* Star — feeds the Starred tab; your shortlist of go-to (and must-try) spots */}
+        <button
+          type="button"
+          onClick={toggleFavorite}
+          aria-pressed={favorite}
+          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
+            favorite
+              ? "border-transparent bg-amber-400 text-white"
+              : "border-border bg-card text-ink hover:bg-itinerary-soft"
+          }`}
+        >
+          <Star className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
+          {favorite ? "Starred" : "Star"}
+        </button>
         <button
           type="button"
           onClick={toggleVisited}
@@ -210,24 +207,9 @@ export function PlaceDetail({
             onClick={logVisit}
             className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-itinerary-soft ${FOCUS_RING}`}
           >
-            <Repeat className="h-4 w-4" />
-            I went again
+            <Repeat className="h-4 w-4" />I went again
           </button>
         )}
-        {/* Favorite — cross-cutting ⭐ flag for your go-to spots, independent of bucket */}
-        <button
-          type="button"
-          onClick={toggleFavorite}
-          aria-pressed={favorite}
-          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
-            favorite
-              ? "border-transparent bg-amber-400 text-white"
-              : "border-border bg-card text-ink hover:bg-itinerary-soft"
-          }`}
-        >
-          <Star className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
-          Favorite
-        </button>
         {visited && (
           <div className="flex items-center gap-0.5">
             {[1, 2, 3, 4, 5].map((n) => (
@@ -251,19 +233,17 @@ export function PlaceDetail({
         )}
       </div>
 
-      {/* Your notes (once you're tracking it) */}
-      {!saved && (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-semibold text-ink-soft">Your notes</h2>
-          <textarea
-            value={notesDraft}
-            onChange={(e) => onNotesChange(e.target.value)}
-            rows={3}
-            placeholder="What to order, who you went with, what you thought…"
-            className={`w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
-          />
-        </section>
-      )}
+      {/* Your notes */}
+      <section className="mt-6">
+        <h2 className="mb-2 text-sm font-semibold text-ink-soft">Your notes</h2>
+        <textarea
+          value={notesDraft}
+          onChange={(e) => onNotesChange(e.target.value)}
+          rows={3}
+          placeholder="What to order, who you went with, what you thought…"
+          className={`w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
+        />
+      </section>
 
       {summary && (
         <section className="mt-6">
@@ -333,7 +313,10 @@ export function PlaceDetail({
           </h2>
           <div className="flex flex-wrap gap-2">
             {item.good_for!.map((g, i) => (
-              <span key={i} className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-ink">
+              <span
+                key={i}
+                className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-ink"
+              >
                 {g}
               </span>
             ))}

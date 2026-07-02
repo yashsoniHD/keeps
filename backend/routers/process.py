@@ -338,7 +338,9 @@ async def process_job(job_id: str, request: Request):
             data = extracted.data or {}
             try:
                 if family == "watchlist":
-                    item_ids = await enrich_titles(user_id, job_id, data.get("titles") or [])
+                    item_ids = await enrich_titles(
+                        user_id, job_id, data.get("titles") or [],
+                        source_url=source_url, source_domain=source_domain)
                 elif family == "wishlist":
                     iid = await enrich_wish_item(
                         user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
@@ -372,8 +374,12 @@ async def process_job(job_id: str, request: Request):
                 destination["item_id"] = item_ids[0]
             if source_domain:
                 await add_user_source(user_id, source_domain)
+            # Stamp the capture's display identity on the job — the Library "recent saves"
+            # list is job-backed (one row per capture, not per fanned-out item).
             await job_ref.update({"status": "completed", "note_id": None,
                                   "destination": destination,
+                                  "title": extracted.title,
+                                  "item_count": len(item_ids),
                                   "updated_at": datetime.now(timezone.utc)})
             await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
             log.info("mini-app capture (%s, %d item[s]) via %s", family, len(item_ids),
@@ -418,6 +424,7 @@ async def process_job(job_id: str, request: Request):
         destination = {"kind": "note", "note_id": note_id}
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "destination": destination,
+                              "title": extracted.title,
                               "updated_at": datetime.now(timezone.utc)})
         await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
         log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
@@ -594,6 +601,7 @@ async def process_agent_job(job_id: str, request: Request):
         await add_user_category(user_id, slug)
         await job_ref.update({"status": "completed", "note_id": new_id,
                               "destination": {"kind": "note", "note_id": new_id},
+                              "title": title,
                               "updated_at": datetime.now(timezone.utc)})
         log.info("deep agent task completed", extra={"job_id": job_id, "user_id": user_id})
         return {"status": "completed", "note_id": new_id}

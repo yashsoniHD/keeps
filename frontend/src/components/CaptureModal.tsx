@@ -50,7 +50,10 @@ export function CaptureModal({ url, onClose }: { url: string; onClose: () => voi
 
   let domain = "";
   try {
-    domain = new URL(url.startsWith("http") ? url : `https://${url}`).hostname.replace(/^www\./, "");
+    domain = new URL(url.startsWith("http") ? url : `https://${url}`).hostname.replace(
+      /^www\./,
+      "",
+    );
   } catch {
     domain = url;
   }
@@ -106,7 +109,7 @@ export function CaptureModal({ url, onClose }: { url: string; onClose: () => voi
                     <span
                       className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
                         complete
-                          ? "bg-brand text-brand-foreground"
+                          ? "bg-ink text-paper"
                           : active
                             ? "bg-summary-soft text-summary"
                             : "bg-muted text-ink-soft"

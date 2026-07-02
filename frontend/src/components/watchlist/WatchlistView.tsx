@@ -10,7 +10,12 @@ import { AddTitleSheet } from "./AddTitleSheet";
 
 type MediaFilter = "all" | "movie" | "tv";
 type SortKey = "added" | "year" | "rating";
-type Queue = "saved" | "to_watch" | "watching" | "watched";
+type Queue = "saved" | "to_watch" | "watched";
+
+// Which tab an item belongs to. The retired in-progress "watching" status may still exist on
+// older docs — display-only mapping onto the watchlist bucket (no migration writes).
+const bucketOf = (i: WatchItem): Queue =>
+  i.watch_status === "watching" ? "to_watch" : i.watch_status;
 
 // A compact icon filter: a round button showing only an icon, with the native <select> overlaid
 // transparently on top (keeps the native picker + accessibility on every platform). The icon
@@ -35,9 +40,7 @@ function IconSelect({
       <span
         aria-hidden
         className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-          active
-            ? "border-transparent bg-media text-white"
-            : "border-border bg-card text-ink-soft"
+          active ? "border-transparent bg-media text-white" : "border-border bg-card text-ink-soft"
         } ${FOCUS_RING}`}
       >
         {icon}
@@ -99,10 +102,6 @@ const EMPTY: Record<Queue, { title: string; body: string }> = {
     title: "Your watchlist is empty",
     body: "Add titles from Saved with “+ Watchlist”, or add one directly — this is your hand-picked queue of what to watch next.",
   },
-  watching: {
-    title: "Nothing in progress",
-    body: "Start a series and it lands here, so you can keep track of what you’re partway through.",
-  },
   watched: {
     title: "Nothing watched yet",
     body: "Mark a title watched and it moves here, where you can rate it.",
@@ -113,13 +112,11 @@ function Grid({
   items,
   onToggleWatched,
   onAddToWatchlist,
-  onStartWatching,
   onToggleFavorite,
 }: {
   items: WatchItem[];
   onToggleWatched: (i: WatchItem) => void;
   onAddToWatchlist: (i: WatchItem) => void;
-  onStartWatching: (i: WatchItem) => void;
   onToggleFavorite: (i: WatchItem) => void;
 }) {
   return (
@@ -130,7 +127,6 @@ function Grid({
           item={i}
           onToggleWatched={onToggleWatched}
           onAddToWatchlist={onAddToWatchlist}
-          onStartWatching={onStartWatching}
           onToggleFavorite={onToggleFavorite}
         />
       ))}
@@ -190,16 +186,6 @@ export function WatchlistView({ uid }: { uid: string }) {
     }
   };
 
-  // Move a title into the in-progress "Watching" bucket (TV-centric, but allowed for films too).
-  const onStartWatching = async (item: WatchItem) => {
-    patchLocal(item.id, { watch_status: "watching" });
-    try {
-      await updateWatchItem(item.id, { watch_status: "watching" });
-    } catch {
-      patchLocal(item.id, { watch_status: item.watch_status }); // revert on failure
-    }
-  };
-
   // Cross-cutting ⭐ flag — independent of the bucket the title sits in.
   const onToggleFavorite = async (item: WatchItem) => {
     const next = !item.favorite;
@@ -224,8 +210,7 @@ export function WatchlistView({ uid }: { uid: string }) {
       out = out.filter((i) => (i.providers ?? []).some((p) => p.name === provider));
     const sorted = [...out];
     if (effectiveSort === "year") sorted.sort((a, b) => Number(b.year ?? 0) - Number(a.year ?? 0));
-    else if (effectiveSort === "rating")
-      sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    else if (effectiveSort === "rating") sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
     // "added" keeps the listener's created_at-desc order.
     return sorted;
   };
@@ -238,23 +223,24 @@ export function WatchlistView({ uid }: { uid: string }) {
     );
   }
 
-  // Buckets are mutually exclusive: each item is in exactly one of Saved / Watchlist / Watching /
-  // Watched. Counts and filtering run on the deduped list so a title saved in several notes is
-  // counted once. Favorites is a cross-cutting view: when active it shows ⭐ titles across all buckets.
+  // Buckets are mutually exclusive: each item is in exactly one of Saved / Watchlist / Watched
+  // (legacy "watching" docs count as Watchlist via bucketOf). Counts and filtering run on the
+  // deduped list so a title saved in several notes is counted once. Favorites is a cross-cutting
+  // view: when active it shows ⭐ titles across all buckets.
   const counts = {
-    saved: deduped.filter((i) => i.watch_status === "saved").length,
-    to_watch: deduped.filter((i) => i.watch_status === "to_watch").length,
-    watching: deduped.filter((i) => i.watch_status === "watching").length,
-    watched: deduped.filter((i) => i.watch_status === "watched").length,
+    saved: deduped.filter((i) => bucketOf(i) === "saved").length,
+    to_watch: deduped.filter((i) => bucketOf(i) === "to_watch").length,
+    watched: deduped.filter((i) => bucketOf(i) === "watched").length,
   };
   const favCount = deduped.filter((i) => i.favorite).length;
-  const base = favOnly ? deduped.filter((i) => i.favorite) : deduped.filter((i) => i.watch_status === queue);
+  const base = favOnly
+    ? deduped.filter((i) => i.favorite)
+    : deduped.filter((i) => bucketOf(i) === queue);
   const shown = filterSort(base);
 
   const TABS: { key: Queue; label: string }[] = [
     { key: "saved", label: "Saved" },
     { key: "to_watch", label: "Watchlist" },
-    { key: "watching", label: "Watching" },
     { key: "watched", label: "Watched" },
   ];
 
@@ -346,7 +332,9 @@ export function WatchlistView({ uid }: { uid: string }) {
             title="Favorites"
             aria-pressed={favOnly}
             className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-              favOnly ? "border-transparent bg-media text-white" : "border-border bg-card text-ink-soft"
+              favOnly
+                ? "border-transparent bg-media text-white"
+                : "border-border bg-card text-ink-soft"
             }`}
           >
             <Star className={`h-4 w-4 ${favOnly ? "fill-current" : ""}`} />
@@ -359,7 +347,6 @@ export function WatchlistView({ uid }: { uid: string }) {
           items={shown}
           onToggleWatched={onToggleWatched}
           onAddToWatchlist={onAddToWatchlist}
-          onStartWatching={onStartWatching}
           onToggleFavorite={onToggleFavorite}
         />
       ) : base.length > 0 ? (

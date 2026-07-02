@@ -21,7 +21,7 @@ export const db = getFirestore(app);
 
 // Analytics is optional — requires VITE_FIREBASE_MEASUREMENT_ID and browser support.
 // Get the measurement ID from Firebase Console → Project Settings → Your apps → Web app.
-export const analyticsReady: Promise<ReturnType<typeof getAnalytics> | null> =
-  import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
-    ? isSupported().then((ok) => (ok ? getAnalytics(app) : null))
-    : Promise.resolve(null);
+export const analyticsReady: Promise<ReturnType<typeof getAnalytics> | null> = import.meta.env
+  .VITE_FIREBASE_MEASUREMENT_ID
+  ? isSupported().then((ok) => (ok ? getAnalytics(app) : null))
+  : Promise.resolve(null);

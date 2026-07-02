@@ -59,7 +59,7 @@ export function AddProductSheet({ onClose }: { onClose: () => void }) {
             <>
               <p className="text-sm text-ink-soft">
                 Paste a link to any product page. We’ll pull the price, specs and image, and add it
-                to your Saved inbox.
+                to Saved.
               </p>
               <input
                 ref={inputRef}

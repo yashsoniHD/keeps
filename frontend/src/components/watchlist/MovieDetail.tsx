@@ -5,14 +5,14 @@ import {
   Tv,
   Eye,
   CheckCircle2,
-  PlayCircle,
+  ExternalLink,
   Star,
   Trash2,
   FileText,
   Loader2,
   Plus,
 } from "lucide-react";
-import { watchWatchItem, getNote } from "@/lib/firestore";
+import { watchWatchItem, getNote, getJob } from "@/lib/firestore";
 import { getWatchItemDetails, updateWatchItem, deleteWatchItem } from "@/lib/api";
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
@@ -35,6 +35,14 @@ function runtimeLabel(d: WatchItemDetails, item: WatchItem): string | null {
   return null;
 }
 
+function domainOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 // The movie/show detail page: backdrop hero, overview, cast, where-to-watch, your status +
 // rating, and links back to the notes it came from. Live-listens to the item so toggles persist
 // visibly; rich TMDB data (cast/runtime/rating) is fetched on demand and not stored on the item.
@@ -50,6 +58,11 @@ export function MovieDetail({
   const [item, setItem] = useState<WatchItem | null | undefined>(undefined); // undefined = loading
   const [details, setDetails] = useState<WatchItemDetails>({});
   const [sources, setSources] = useState<{ id: string; title: string }[]>([]);
+  // Recovered source link for items saved before source_url was stored on the doc.
+  const [fallbackSource, setFallbackSource] = useState<{
+    url: string;
+    domain: string | null;
+  } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => watchWatchItem(uid, itemId, setItem), [uid, itemId]);
@@ -60,26 +73,34 @@ export function MovieDetail({
       .catch(() => setDetails({}));
   }, [itemId]);
 
-  // Resolve source-note titles for the "From your notes" links (best-effort).
+  // Resolve source-note titles for the "From your notes" links (best-effort). For older items
+  // that predate the stored source_url field, also recover the original captured link: from the
+  // first source note that has one, else the job doc (item-only captures store a job id).
   useEffect(() => {
     const ids = item?.source_note_ids ?? [];
-    if (ids.length === 0) {
-      setSources([]);
-      return;
-    }
+    setSources([]);
+    setFallbackSource(null);
+    if (ids.length === 0) return;
     let cancelled = false;
-    Promise.all(
-      ids.map(async (id) => {
-        const n = await getNote(id).catch(() => null);
-        return n ? { id, title: n.title || "Source note" } : null;
-      }),
-    ).then((rows) => {
-      if (!cancelled) setSources(rows.filter((r): r is { id: string; title: string } => !!r));
-    });
+    (async () => {
+      const notes = await Promise.all(ids.map((id) => getNote(id).catch(() => null)));
+      if (cancelled) return;
+      setSources(
+        notes.flatMap((n, i) => (n ? [{ id: ids[i], title: n.title || "Source note" }] : [])),
+      );
+      if (item?.source_url) return; // the doc carries its own link — no fallback needed
+      const withUrl = notes.find((n) => n?.source_url);
+      if (withUrl?.source_url) {
+        setFallbackSource({ url: withUrl.source_url, domain: withUrl.source_domain || null });
+        return;
+      }
+      const job = await getJob(ids[0]).catch(() => null);
+      if (!cancelled && job?.url) setFallbackSource({ url: job.url, domain: null });
+    })();
     return () => {
       cancelled = true;
     };
-  }, [item?.source_note_ids]);
+  }, [item?.source_note_ids, item?.source_url]);
 
   if (item === undefined) {
     return (
@@ -99,9 +120,10 @@ export function MovieDetail({
     );
   }
 
+  // Legacy in-progress "watching" docs (the bucket was retired) are treated as on-watchlist:
+  // not `saved`, not `watched`, so the only offered transitions are to_watch ↔ watched.
   const watched = item.watch_status === "watched";
   const saved = item.watch_status === "saved";
-  const watching = item.watch_status === "watching";
   const favorite = !!item.favorite;
   const Icon = item.media_type === "tv" ? Tv : Clapperboard;
   const backdrop = item.backdrop_url ?? details.backdrop_url ?? null;
@@ -109,6 +131,10 @@ export function MovieDetail({
   const genres = item.genres?.length ? item.genres : (details.genres ?? []);
   const runtime = runtimeLabel(details, item);
   const providers = item.providers ?? [];
+  // Where this title was saved from: the doc's own link, else the recovered legacy one.
+  const sourceUrl = item.source_url || fallbackSource?.url || null;
+  const sourceDomain =
+    item.source_domain || fallbackSource?.domain || (sourceUrl ? domainOf(sourceUrl) : null);
 
   const toggleWatched = () =>
     updateWatchItem(item.id, {
@@ -116,12 +142,7 @@ export function MovieDetail({
     }).catch(() => {});
   const addToWatchlist = () =>
     updateWatchItem(item.id, { watch_status: "to_watch" }).catch(() => {});
-  const toggleWatching = () =>
-    updateWatchItem(item.id, {
-      watch_status: watching ? "to_watch" : "watching",
-    }).catch(() => {});
-  const toggleFavorite = () =>
-    updateWatchItem(item.id, { favorite: !favorite }).catch(() => {});
+  const toggleFavorite = () => updateWatchItem(item.id, { favorite: !favorite }).catch(() => {});
   const rate = (n: number) => updateWatchItem(item.id, { rating: n }).catch(() => {});
   const remove = async () => {
     setDeleting(true);
@@ -180,6 +201,19 @@ export function MovieDetail({
             ) : null}
           </div>
 
+          {/* The video/page this title was saved from */}
+          {sourceUrl && (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`mt-2 inline-flex items-center gap-1 rounded text-xs text-ink-soft transition-colors hover:text-ink hover:underline ${FOCUS_RING}`}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              From {sourceDomain ?? "source"}
+            </a>
+          )}
+
           {genres.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {genres.map((g) => (
@@ -200,21 +234,6 @@ export function MovieDetail({
               >
                 <Plus className="h-4 w-4" />
                 Add to watchlist
-              </button>
-            )}
-            {/* Start / stop watching — the in-progress bucket (handy for TV) */}
-            {!saved && !watched && (
-              <button
-                type="button"
-                onClick={toggleWatching}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
-                  watching
-                    ? "border-transparent bg-media text-white"
-                    : "border-border bg-card text-ink hover:bg-media-soft"
-                }`}
-              >
-                <PlayCircle className="h-4 w-4" />
-                {watching ? "Watching" : "Start watching"}
               </button>
             )}
             <button

@@ -44,9 +44,7 @@ export function NoteMenuProvider({
   children: ReactNode;
 }) {
   return (
-    <MenuContext.Provider value={{ categories, collections, uid }}>
-      {children}
-    </MenuContext.Provider>
+    <MenuContext.Provider value={{ categories, collections, uid }}>{children}</MenuContext.Provider>
   );
 }
 
@@ -312,11 +310,7 @@ function NoteMenu({
               label={note.pinned_at ? "Unpin" : "Pin to top"}
               onClick={togglePin}
             />
-            <MenuItem
-              icon={FolderPlus}
-              label="Add to collection"
-              onClick={onAddToCollection}
-            />
+            <MenuItem icon={FolderPlus} label="Add to collection" onClick={onAddToCollection} />
             {recatTargets.length > 0 && (
               <MenuItem
                 icon={FolderInput}

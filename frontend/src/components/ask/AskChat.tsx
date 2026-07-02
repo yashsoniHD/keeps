@@ -936,7 +936,7 @@ export function AskChat({
                 >
                   <span
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      on ? "border-brand bg-brand text-brand-foreground" : "border-border"
+                      on ? "border-ink bg-ink text-paper" : "border-border"
                     }`}
                   >
                     {on && <Check className="h-3 w-3" />}
@@ -1016,7 +1016,7 @@ export function AskChat({
             type="submit"
             disabled={!input.trim() || sending}
             aria-label="Send"
-            className="mb-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground transition-transform active:scale-95 disabled:opacity-40"
+            className="mb-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform active:scale-95 disabled:opacity-40"
           >
             <ArrowUp className="h-4 w-4" />
           </button>

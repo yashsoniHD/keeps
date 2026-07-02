@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Clapperboard, Tv, Eye, CheckCircle2, PlayCircle, Star, Plus } from "lucide-react";
+import { Clapperboard, Tv, Eye, CheckCircle2, Star, Plus } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import type { WatchItem } from "@/lib/types";
@@ -37,18 +37,15 @@ export function WatchCard({
   item,
   onToggleWatched,
   onAddToWatchlist,
-  onStartWatching,
   onToggleFavorite,
 }: {
   item: WatchItem;
   onToggleWatched: (item: WatchItem) => void;
   onAddToWatchlist: (item: WatchItem) => void;
-  onStartWatching: (item: WatchItem) => void;
   onToggleFavorite: (item: WatchItem) => void;
 }) {
   const watched = item.watch_status === "watched";
   const saved = item.watch_status === "saved";
-  const toWatch = item.watch_status === "to_watch";
   const favorite = !!item.favorite;
   const flatrate = (item.providers ?? []).filter((p) => p.type === "flatrate");
 
@@ -103,7 +100,12 @@ export function WatchCard({
         <p className="truncate text-sm font-medium text-ink" title={item.title}>
           {item.title}
         </p>
-        {item.year && <p className="text-xs text-ink-soft">{item.year}</p>}
+        {/* Year + where it was saved from, on one quiet line */}
+        {(item.year || item.source_domain) && (
+          <p className="truncate text-xs text-ink-soft">
+            {[item.year, item.source_domain].filter(Boolean).join(" · ")}
+          </p>
+        )}
       </div>
 
       {/* Promote a Saved (inbox) item onto the watchlist */}
@@ -115,18 +117,6 @@ export function WatchCard({
         >
           <Plus className="h-3.5 w-3.5" />
           Watchlist
-        </button>
-      )}
-
-      {/* Start watching — moves a queued title into the in-progress bucket (handy for TV) */}
-      {toWatch && (
-        <button
-          type="button"
-          onClick={() => onStartWatching(item)}
-          className={`inline-flex w-full items-center justify-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-xs font-medium text-ink transition-colors hover:bg-media-soft ${FOCUS_RING}`}
-        >
-          <PlayCircle className="h-3.5 w-3.5" />
-          {item.media_type === "tv" ? "Start watching" : "Watching"}
         </button>
       )}
 

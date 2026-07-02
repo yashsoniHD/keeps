@@ -89,14 +89,11 @@ function PublicNote() {
   if (status === "unavailable" || !note) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-        <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand text-brand-foreground">
+        <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-ink text-paper">
           <Sparkles className="h-6 w-6" />
         </span>
         <p className="text-ink-soft">This note isn't available. It may be private or removed.</p>
-        <Link
-          to="/"
-          className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper"
-        >
+        <Link to="/" className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper">
           Go to Clipnote
         </Link>
       </div>
@@ -105,13 +102,7 @@ function PublicNote() {
 
   return (
     <AppShell>
-      <NoteContent
-        note={note}
-        variant="public"
-        onSave={onSave}
-        saving={saving}
-        isAuthed={!!user}
-      />
+      <NoteContent note={note} variant="public" onSave={onSave} saving={saving} isAuthed={!!user} />
       {saveError && (
         <p className="mx-auto max-w-4xl px-5 pb-8 text-sm text-destructive md:px-8">{saveError}</p>
       )}

@@ -1,29 +1,20 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
-import { House, Plus, RefreshCw, Search, Settings, Sparkle, type LucideIcon } from "lucide-react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useRouterState } from "@tanstack/react-router";
+import { RefreshCw } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { useAsk } from "@/contexts/ask-context";
 import { ingestMedia, ingestText, ingestVoice } from "@/lib/api";
-import { FOCUS_RING } from "@/lib/ui";
 import { AddNoteSheet } from "@/components/AddNoteSheet";
 import { CaptureModal } from "@/components/CaptureModal";
 
 // How far (px, after resistance) the user must pull before release triggers a reload.
 const THRESHOLD = 70;
 
-// Routes with no app chrome (bottom nav / capture): signed-out + public viewer surfaces.
+// Routes with no app chrome (shell-owned capture / error toast): signed-out + public viewer surfaces.
 const CHROMELESS_PREFIXES = ["/login", "/share", "/p/"];
 
 // --- Capture: owned by the shell, opened from anywhere -------------------------------------
-// The capture flow (paste a link / write / upload / record) lives in the shell so every screen —
-// and the bottom nav's + — can trigger it through one context, instead of each screen re-wiring it.
+// The capture flow (paste a link / write / upload / record) lives in the shell so every screen
+// can trigger it through one context, instead of each screen re-wiring it.
 type CaptureCtx = { openCapture: (url?: string) => void };
 const CaptureContext = createContext<CaptureCtx>({ openCapture: () => {} });
 export const useCapture = () => useContext(CaptureContext);
@@ -89,79 +80,8 @@ function usePullToRefresh() {
   return { pull, refreshing };
 }
 
-// One bottom-nav destination. The center Capture (+) is styled as the brand action.
-function NavItem({
-  icon: Icon,
-  label,
-  active,
-  onClick,
-  to,
-  primary,
-}: {
-  icon: LucideIcon;
-  label: string;
-  active?: boolean;
-  onClick?: () => void;
-  to?: string;
-  primary?: boolean;
-}) {
-  const inner = primary ? (
-    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg shadow-brand/30 transition-transform active:scale-90 motion-reduce:active:scale-100">
-      <Icon className="h-6 w-6" />
-    </span>
-  ) : (
-    <span className="flex flex-col items-center gap-0.5">
-      <Icon className={`h-6 w-6 ${active ? "text-brand" : "text-ink-soft"}`} strokeWidth={active ? 2.4 : 2} />
-      <span className={`text-[10px] font-medium ${active ? "text-brand" : "text-ink-soft"}`}>{label}</span>
-    </span>
-  );
-
-  const cls = `flex flex-1 items-center justify-center py-2 ${FOCUS_RING} rounded-2xl`;
-  if (to) {
-    return (
-      <Link to={to} aria-label={label} className={cls}>
-        {inner}
-      </Link>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} aria-label={label} className={cls}>
-      {inner}
-    </button>
-  );
-}
-
-// Mobile bottom tab bar — the app's primary navigation. Home · Search · Capture(+) · Clip AI · You.
-// Hidden on desktop (md+), where the per-screen headers carry navigation.
-function BottomNav({ onCapture }: { onCapture: () => void }) {
-  const { toggleChat, isOpen } = useAsk();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  return (
-    <nav
-      aria-label="Primary"
-      data-no-refresh
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur md:hidden"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-    >
-      <div className="mx-auto flex max-w-lg items-center px-2">
-        <NavItem icon={House} label="Home" to="/" active={pathname === "/"} />
-        <NavItem icon={Search} label="Search" to="/search" active={pathname.startsWith("/search")} />
-        <NavItem icon={Plus} label="Save" onClick={onCapture} primary />
-        <NavItem icon={Sparkle} label="Clip AI" onClick={toggleChat} active={isOpen} />
-        <NavItem
-          icon={Settings}
-          label="You"
-          to="/settings"
-          active={pathname.startsWith("/settings")}
-        />
-      </div>
-    </nav>
-  );
-}
-
-// The app frame: pull-to-refresh, the mobile bottom nav, and the shell-owned capture flow.
-// Navigation on desktop still lives in each screen's header (unified in later passes); the
-// bottom nav is mobile-only, so the two never collide.
+// The app frame: pull-to-refresh and the shell-owned capture flow. Navigation lives in each
+// screen's header (back links, gear → settings) — no bottom tab bar on any size.
 export function AppShell({ children }: { children: ReactNode }) {
   const { pull, refreshing } = usePullToRefresh();
   const { user } = useAuth();
@@ -174,7 +94,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [capturingUrl, setCapturingUrl] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
 
-  const chromeless = !user || CHROMELESS_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+  const chromeless =
+    !user || CHROMELESS_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 
   const openCapture = (url?: string) => {
     setIngestError(null);
@@ -206,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <CaptureContext.Provider value={{ openCapture }}>
-      <div className={`min-h-screen bg-background ${chromeless ? "" : "pb-20 md:pb-0"}`}>
+      <div className="min-h-screen bg-background">
         {visible && (
           <div
             className="pointer-events-none fixed left-1/2 top-0 z-50"
@@ -217,7 +138,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-md">
               <RefreshCw
-                className={`h-4 w-4 ${pull >= THRESHOLD || refreshing ? "text-brand" : "text-ink-soft"} ${refreshing ? "animate-spin" : ""}`}
+                className={`h-4 w-4 ${pull >= THRESHOLD || refreshing ? "text-ink" : "text-ink-soft"} ${refreshing ? "animate-spin" : ""}`}
                 style={refreshing ? undefined : { transform: `rotate(${pull * 2.5}deg)` }}
               />
             </span>
@@ -234,8 +155,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
 
         {children}
-
-        {!chromeless && <BottomNav onCapture={() => openCapture()} />}
       </div>
 
       {showAdd && (

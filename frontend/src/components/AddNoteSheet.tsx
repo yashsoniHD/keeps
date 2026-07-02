@@ -158,7 +158,9 @@ export function AddNoteSheet({
                     disabled={busy}
                     className={`flex flex-col gap-3 rounded-2xl border border-border bg-paper p-4 text-left transition-colors hover:bg-accent disabled:opacity-60 ${FOCUS_RING}`}
                   >
-                    <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${m.tile}`}>
+                    <span
+                      className={`flex h-11 w-11 items-center justify-center rounded-xl ${m.tile}`}
+                    >
                       <Icon className="h-5 w-5" />
                     </span>
                     <span>
@@ -255,7 +257,9 @@ export function AddNoteSheet({
                       Let Clip AI structure it
                     </span>
                     <span className="block text-xs text-ink-soft">
-                      {processAI ? "Titled, tagged & formatted for you" : "Saved exactly as written"}
+                      {processAI
+                        ? "Titled, tagged & formatted for you"
+                        : "Saved exactly as written"}
                     </span>
                   </span>
                 </span>

@@ -7,6 +7,18 @@ import type { RecipeItem } from "@/lib/types";
 
 const RECIPE_ACCENT = paletteAccent(0); // the "recipe" palette, shared with recipe notes
 
+// The item's source site, for the favicon hint: the stored domain, falling back to the
+// source URL's hostname (older items predate the `domain` field).
+export function recipeDomain(item: RecipeItem): string | null {
+  if (item.domain) return item.domain;
+  if (!item.source_url) return null;
+  try {
+    return new URL(item.source_url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 // Food photos look good cropped, so (unlike products) the image is cover-filled at a landscape
 // ratio rather than contained.
 function RecipeImage({ item }: { item: RecipeItem }) {
@@ -48,6 +60,7 @@ export function RecipeCard({
   onToggleFavorite: (item: RecipeItem) => void;
 }) {
   const favorite = !!item.favorite;
+  const domain = recipeDomain(item);
 
   return (
     <div className="group relative flex min-w-0 flex-col gap-2">
@@ -106,6 +119,18 @@ export function RecipeCard({
               <Clock className="h-3 w-3" />
               {item.total_time}
             </span>
+          )}
+          {domain && (
+            <img
+              src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+              alt=""
+              title={domain}
+              loading="lazy"
+              className="ml-auto h-3.5 w-3.5 shrink-0 rounded-sm opacity-70"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
           )}
         </div>
       </div>

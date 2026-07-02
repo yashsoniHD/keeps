@@ -23,8 +23,7 @@ const nf = new Intl.NumberFormat("en-US");
 const fmt = (n: number) => nf.format(n);
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const inr = (n: number) => `₹${nf.format(Math.round(n))}`;
-const usdSmall = (n: number) =>
-  n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`;
+const usdSmall = (n: number) => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`);
 
 function fmtDate(ms: number | null): string {
   if (!ms) return "—";
@@ -61,12 +60,7 @@ function MiniBarChart({
   const barW = 100 / n;
   const gap = 0.6;
   return (
-    <svg
-      viewBox="0 0 100 28"
-      preserveAspectRatio="none"
-      className="h-7 w-full"
-      aria-hidden
-    >
+    <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-7 w-full" aria-hidden>
       {values.map((v, i) => {
         const h = Math.max((v / max) * 26, v > 0 ? 1.5 : 0);
         const isToday = i === n - 1;
@@ -120,20 +114,14 @@ function TrendCard({
       </div>
       <div className="mt-2 flex items-end justify-between gap-2">
         <div>
-          <div className="font-serif text-2xl tabular-nums text-ink">
-            {formatTotal(total)}
-          </div>
+          <div className="font-serif text-2xl tabular-nums text-ink">{formatTotal(total)}</div>
           <div className="mt-0.5 text-xs text-ink-soft">
             {formatTotal(todayVal)} today · peak {formatTotal(peak)}
           </div>
         </div>
       </div>
       <div className="mt-3">
-        <MiniBarChart
-          values={values}
-          colorClass={colorClass}
-          accentClass={accentClass}
-        />
+        <MiniBarChart values={values} colorClass={colorClass} accentClass={accentClass} />
         <div className="mt-1 flex justify-between text-[10px] text-ink-soft/60">
           <span>{trend.length ? fmtDay(trend[0].date) : ""}</span>
           <span>today</span>
@@ -282,11 +270,7 @@ function AdminPage() {
                 value={usdSmall(t.cost_per_note_usd)}
                 sub={`₹${(t.cost_per_note_usd * 84).toFixed(2)} / note`}
               />
-              <StatCard
-                icon={MessageSquare}
-                label="Asks today"
-                value={fmt(t.asks_today)}
-              />
+              <StatCard icon={MessageSquare} label="Asks today" value={fmt(t.asks_today)} />
               <StatCard
                 icon={Image}
                 label="AI covers"
@@ -431,9 +415,7 @@ function AdminPage() {
                           {inr(u.cost_inr)}
                           <div className="text-[10px] text-ink-soft">{usd(u.cost_usd)}</div>
                         </td>
-                        <td className="px-4 py-3 text-xs text-ink-soft">
-                          {fmtDate(u.created_at)}
-                        </td>
+                        <td className="px-4 py-3 text-xs text-ink-soft">{fmtDate(u.created_at)}</td>
                         <td className="px-4 py-3 text-center">
                           {u.active_7d ? (
                             <span

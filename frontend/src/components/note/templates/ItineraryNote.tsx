@@ -7,7 +7,11 @@ interface ItineraryData {
   duration?: string;
   budget?: string;
   bestSeason?: string;
-  days?: { day: number; title?: string; stops?: { time?: string; place: string; note?: string }[] }[];
+  days?: {
+    day: number;
+    title?: string;
+    stops?: { time?: string; place: string; note?: string }[];
+  }[];
   tips?: string[];
 }
 

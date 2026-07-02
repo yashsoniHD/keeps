@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ShoppingBag, Check, Star, Plus, Tag } from "lucide-react";
+import { ShoppingBag, Check, Star, Tag } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import type { WishItem } from "@/lib/types";
@@ -32,21 +32,17 @@ function ProductImage({ item }: { item: WishItem }) {
 }
 
 // One product card. Tapping the image opens the product-detail page; the bought toggle and the
-// "+ Wishlist" promote action (Saved items only) write through the backend (optimistic — handled
-// by the parent).
+// favorite star write through the backend (optimistic — handled by the parent).
 export function WishCard({
   item,
   onToggleBought,
-  onAddToWishlist,
   onToggleFavorite,
 }: {
   item: WishItem;
   onToggleBought: (item: WishItem) => void;
-  onAddToWishlist: (item: WishItem) => void;
   onToggleFavorite: (item: WishItem) => void;
 }) {
   const bought = item.wish_status === "purchased";
-  const saved = item.wish_status === "saved";
   const favorite = !!item.favorite;
   // A target the current price has met → flag the deal.
   const dealMet =
@@ -119,18 +115,6 @@ export function WishCard({
           </span>
         ) : null}
       </div>
-
-      {/* Promote a Saved (inbox) item onto the wishlist */}
-      {saved && (
-        <button
-          type="button"
-          onClick={() => onAddToWishlist(item)}
-          className={`inline-flex w-full items-center justify-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-xs font-medium text-ink transition-colors hover:bg-product-soft ${FOCUS_RING}`}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Wishlist
-        </button>
-      )}
     </div>
   );
 }

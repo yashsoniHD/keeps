@@ -19,9 +19,10 @@ import {
 } from "lucide-react";
 import { watchRecipeItem, getNote } from "@/lib/firestore";
 import { updateRecipeItem, deleteRecipeItem } from "@/lib/api";
-import { paletteAccent } from "@/lib/note-meta";
+import { paletteAccent, sourceLabel } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import type { RecipeItem } from "@/lib/types";
+import { recipeDomain } from "./RecipeCard";
 
 const RECIPE = paletteAccent(0);
 
@@ -83,6 +84,7 @@ export function RecipeDetail({
   }
 
   const favorite = !!item.favorite;
+  const domain = recipeDomain(item);
   const toggleFavorite = () => updateRecipeItem(item.id, { favorite: !favorite }).catch(() => {});
   const remove = async () => {
     setDeleting(true);
@@ -145,8 +147,20 @@ export function RecipeDetail({
                 rel="noopener noreferrer"
                 className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-recipe-soft ${FOCUS_RING}`}
               >
-                <ExternalLink className="h-4 w-4" />
-                View on {item.domain ?? "source"}
+                {domain ? (
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                    alt=""
+                    className="h-4 w-4 rounded-sm"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <ExternalLink className="h-4 w-4" />
+                )}
+                <span className="capitalize">From {domain ? sourceLabel(domain) : "source"}</span>
+                <ExternalLink className="h-3.5 w-3.5 text-ink-soft" />
               </a>
             )}
           </div>

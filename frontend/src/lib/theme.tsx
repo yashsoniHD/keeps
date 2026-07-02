@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 // Light/dark theming. The `dark` class on <html> drives the CSS tokens (see styles.css);
 // the first-paint class is set by an inline script in index.html to avoid a flash, and

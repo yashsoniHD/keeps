@@ -26,9 +26,7 @@ export function BookNote({ note }: { note: Note }) {
     <div className="space-y-10">
       {meta && <div className="text-ink-soft">{meta}</div>}
 
-      {data.premise && (
-        <p className="text-lg leading-relaxed text-ink">{data.premise}</p>
-      )}
+      {data.premise && <p className="text-lg leading-relaxed text-ink">{data.premise}</p>}
 
       {data.facts && data.facts.length > 0 && (
         <section className={`rounded-2xl border border-border p-5 ${accent.soft}`}>

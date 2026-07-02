@@ -95,7 +95,7 @@ export function CollectionPicker({
                 type="button"
                 onClick={create}
                 aria-label="Create collection"
-                className={`-my-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground active:scale-95 ${FOCUS_RING}`}
+                className={`-my-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper active:scale-95 ${FOCUS_RING}`}
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               </button>
@@ -130,7 +130,7 @@ export function CollectionPicker({
                   <span className="flex-1 truncate text-ink">{c.name}</span>
                   <span
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                      checked ? "border-brand bg-brand text-brand-foreground" : "border-border"
+                      checked ? "border-ink bg-ink text-paper" : "border-border"
                     }`}
                   >
                     {checked && <Check className="h-3 w-3" />}

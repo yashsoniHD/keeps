@@ -19,7 +19,7 @@ import { PlaceRow } from "./PlaceCard";
 import { AddPlaceSheet } from "./AddPlaceSheet";
 
 type SortKey = "added" | "rating";
-type Queue = "saved" | "to_visit" | "visited";
+type Tab = "saved" | "starred";
 type ViewMode = "grid" | "list";
 
 // Compact icon filter — round button with a transparent native <select> on top (mirrors the
@@ -44,7 +44,9 @@ function IconSelect({
       <span
         aria-hidden
         className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-          active ? "border-transparent bg-itinerary text-white" : "border-border bg-card text-ink-soft"
+          active
+            ? "border-transparent bg-itinerary text-white"
+            : "border-border bg-card text-ink-soft"
         } ${FOCUS_RING}`}
       >
         {icon}
@@ -87,20 +89,16 @@ function dedupeItems(list: PlaceItem[]): PlaceItem[] {
   return [...best.entries()].map(([k, i]) => ({ ...i, favorite: fav.get(k) || i.favorite }));
 }
 
-// A place is revisitable, so "Been" is a sticky attribute, not a terminal state — these buckets
-// never hide a place, they just describe your relationship to it.
-const EMPTY: Record<Queue, { title: string; body: string }> = {
+// Two tabs: Saved is everything you've captured; Starred is the cross-cutting ⭐ shortlist.
+// Neither hides a place — Starred is just the subset you've flagged.
+const EMPTY: Record<Tab, { title: string; body: string }> = {
   saved: {
     title: "Save a place and it lands here",
-    body: "Share a reel or article about restaurants, cafés or bars and each venue becomes its own card. Open one and tap “Want to go” to shortlist the places you actually want to visit.",
+    body: "Share a reel or article about restaurants, cafés or bars and each venue becomes its own card. Everything you save lives here.",
   },
-  to_visit: {
-    title: "Your want-to-go list is empty",
-    body: "Open a saved place and tap “Want to go”, or search to add one directly — this is your shortlist of where to head next.",
-  },
-  visited: {
-    title: "Nowhere marked Been yet",
-    body: "Open a place and mark it Been — it stays here as your personal map, where you can rate it, jot a note, and log each time you go back.",
+  starred: {
+    title: "No starred places yet",
+    body: "Open a place and tap the star to keep your go-to spots — and the ones you most want to try — in one shortlist.",
   },
 };
 
@@ -124,19 +122,18 @@ function ListView({ items }: { items: PlaceItem[] }) {
   );
 }
 
-// The Places mini-app body: a live venue collection split into three buckets — Saved (auto-captured
-// from place notes, the inbox) → Want to go (shortlisted) → Been (sticky; visited at least once).
-// Grid / List views, city/category filters, a search picker, and a cross-cutting Favorites chip.
-// Cards are lean (tap to open); all actions live on the detail page. Owns the place_items listener.
+// The Places mini-app body: a live venue collection under two tabs — Saved (everything captured
+// from place notes or added manually) and Starred (the places you've flagged with the ⭐).
+// Grid / List views plus city/category filters and a search picker. Cards are lean (tap to open);
+// all actions live on the detail page. Owns the place_items listener.
 export function PlacesView({ uid }: { uid: string }) {
   const [items, setItems] = useState<PlaceItem[] | null>(null);
-  const [queue, setQueue] = useState<Queue>("saved");
+  const [tab, setTab] = useState<Tab>("saved");
   const [view, setView] = useState<ViewMode>("grid");
   const [query, setQuery] = useState("");
   const [city, setCity] = useState<string>("all");
   const [category, setCategory] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("added");
-  const [favOnly, setFavOnly] = useState(false);
   const [adding, setAdding] = useState(false);
 
   useEffect(() => watchPlaceItems(uid, setItems), [uid]);
@@ -181,20 +178,15 @@ export function PlacesView({ uid }: { uid: string }) {
   }
 
   const counts = {
-    saved: deduped.filter((i) => i.place_status === "saved").length,
-    to_visit: deduped.filter((i) => i.place_status === "to_visit").length,
-    visited: deduped.filter((i) => i.place_status === "visited").length,
+    saved: deduped.length,
+    starred: deduped.filter((i) => i.favorite).length,
   };
-  const favCount = deduped.filter((i) => i.favorite).length;
-  const base = favOnly
-    ? deduped.filter((i) => i.favorite)
-    : deduped.filter((i) => i.place_status === queue);
+  const base = tab === "starred" ? deduped.filter((i) => i.favorite) : deduped;
   const shown = filterSort(base);
 
-  const TABS: { key: Queue; label: string }[] = [
+  const TABS: { key: Tab; label: string }[] = [
     { key: "saved", label: "Saved" },
-    { key: "to_visit", label: "Want to go" },
-    { key: "visited", label: "Been" },
+    { key: "starred", label: "Starred" },
   ];
 
   const VIEWS: { key: ViewMode; icon: ReactNode; label: string }[] = [
@@ -204,19 +196,16 @@ export function PlacesView({ uid }: { uid: string }) {
 
   return (
     <div className="space-y-6">
-      {/* Queue tabs + Add */}
+      {/* Saved / Starred tabs + Add */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex rounded-full border border-border bg-card p-0.5">
           {TABS.map((t) => (
             <button
               key={t.key}
               type="button"
-              onClick={() => {
-                setQueue(t.key);
-                setFavOnly(false);
-              }}
+              onClick={() => setTab(t.key)}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
-                !favOnly && queue === t.key ? "bg-itinerary text-white" : "text-ink-soft hover:text-ink"
+                tab === t.key ? "bg-itinerary text-white" : "text-ink-soft hover:text-ink"
               }`}
             >
               {t.label} · {counts[t.key]}
@@ -305,19 +294,6 @@ export function PlacesView({ uid }: { uid: string }) {
           <option value="added">Newest</option>
           <option value="rating">Rating</option>
         </IconSelect>
-        {(favOnly || favCount > 0) && (
-          <button
-            type="button"
-            onClick={() => setFavOnly((v) => !v)}
-            title="Favorites"
-            aria-pressed={favOnly}
-            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-              favOnly ? "border-transparent bg-itinerary text-white" : "border-border bg-card text-ink-soft"
-            }`}
-          >
-            <Star className={`h-4 w-4 ${favOnly ? "fill-current" : ""}`} />
-          </button>
-        )}
       </div>
 
       {shown.length > 0 ? (
@@ -328,19 +304,15 @@ export function PlacesView({ uid }: { uid: string }) {
         )
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">No places match your filters.</div>
-      ) : favOnly ? (
-        <div className="mx-auto max-w-md py-16 text-center">
-          <Star className="mx-auto h-10 w-10 text-ink-soft/50" />
-          <p className="mt-4 font-medium text-ink">No favorites yet</p>
-          <p className="mt-1 text-sm text-ink-soft">
-            Tap the star on a place to keep your go-to spots here, across every bucket.
-          </p>
-        </div>
       ) : (
         <div className="mx-auto max-w-md py-16 text-center">
-          <MapPin className="mx-auto h-10 w-10 text-ink-soft/50" />
-          <p className="mt-4 font-medium text-ink">{EMPTY[queue].title}</p>
-          <p className="mt-1 text-sm text-ink-soft">{EMPTY[queue].body}</p>
+          {tab === "starred" ? (
+            <Star className="mx-auto h-10 w-10 text-ink-soft/50" />
+          ) : (
+            <MapPin className="mx-auto h-10 w-10 text-ink-soft/50" />
+          )}
+          <p className="mt-4 font-medium text-ink">{EMPTY[tab].title}</p>
+          <p className="mt-1 text-sm text-ink-soft">{EMPTY[tab].body}</p>
         </div>
       )}
 

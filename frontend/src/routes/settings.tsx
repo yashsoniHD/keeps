@@ -17,12 +17,7 @@ import {
 import { getUserRegion, setUserRegion } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
 import { ADMIN_EMAILS } from "@/routes/admin";
-import {
-  createToken,
-  listTokens,
-  revokeToken,
-  type ShortcutToken,
-} from "@/lib/api";
+import { createToken, listTokens, revokeToken, type ShortcutToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { CategoriesSection } from "@/components/CategoriesSection";
 import { Switch } from "@/components/ui/switch";
@@ -42,7 +37,8 @@ const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/d3ba89f721d54d1ba
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://clipnote.web.app";
-const APP_SHARE_TEXT = "Clipnote: save any link as a beautifully structured note you'll actually re-read.";
+const APP_SHARE_TEXT =
+  "Clipnote: save any link as a beautifully structured note you'll actually re-read.";
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
@@ -250,15 +246,6 @@ function WatchRegionSection({ uid }: { uid: string }) {
 function AppearanceSection() {
   const { resolved, setTheme } = useTheme();
   const isDark = resolved === "dark";
-  const [condensed, setCondensed] = useState<boolean>(
-    () => localStorage.getItem("clipnote.layout") === "condensed",
-  );
-
-  const handleCondensed = (checked: boolean) => {
-    const next = checked ? "condensed" : "standard";
-    localStorage.setItem("clipnote.layout", next);
-    setCondensed(checked);
-  };
 
   return (
     <section className="mt-4 rounded-3xl border border-border bg-card p-6">
@@ -275,17 +262,6 @@ function AppearanceSection() {
           checked={isDark}
           onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
           aria-label="Toggle dark mode"
-        />
-      </label>
-      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3 border-t border-border pt-4">
-        <span>
-          <span className="block text-sm font-medium text-ink">Condensed view</span>
-          <span className="block text-xs text-ink-soft">Show notes as a compact list instead of cards.</span>
-        </span>
-        <Switch
-          checked={condensed}
-          onCheckedChange={handleCondensed}
-          aria-label="Toggle condensed view"
         />
       </label>
     </section>

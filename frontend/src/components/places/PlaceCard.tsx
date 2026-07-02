@@ -36,9 +36,9 @@ function visitsLabel(item: PlaceItem): string | null {
   return n > 1 ? `Been ${n}×` : "Been";
 }
 
-// Lean venue card — tap to open the detail page, where all actions (Want to go / Been / favorite /
-// directions / rate / note) live. The card itself is intentionally minimal: photo, name, category +
-// city, rating, and a small favorite star + Been-count adornment. No inline buttons.
+// Lean venue card — tap to open the detail page, where all actions (star / Been / directions /
+// rate / note) live. The card itself is intentionally minimal: photo, name, category + city,
+// rating, and a small star + Been-count adornment. No inline buttons.
 export function PlaceCard({ item }: { item: PlaceItem }) {
   const subtitle = [item.category, item.city].filter(Boolean).join(" · ");
   const visits = visitsLabel(item);
@@ -53,7 +53,7 @@ export function PlaceCard({ item }: { item: PlaceItem }) {
         <PlaceImage item={item} />
         {item.favorite && (
           <span
-            aria-label="Favorite"
+            aria-label="Starred"
             className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-400 text-white shadow-sm"
           >
             <Star className="h-3.5 w-3.5 fill-current" />
@@ -105,7 +105,12 @@ export function PlaceRow({ item }: { item: PlaceItem }) {
     >
       <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-itinerary-soft">
         {item.photo_url ? (
-          <img src={item.photo_url} alt={item.name} loading="lazy" className="h-full w-full object-cover" />
+          <img
+            src={item.photo_url}
+            alt={item.name}
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
         ) : (
           <div className="flex h-full items-center justify-center">
             <MapPin className="h-5 w-5 text-itinerary/50" />

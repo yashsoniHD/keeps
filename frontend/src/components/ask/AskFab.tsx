@@ -230,8 +230,8 @@ export function AskFab() {
         onClick={toggleChat}
         aria-label={isOpen ? "Close Clip AI" : "Clip AI"}
         title={isOpen ? "Close Clip AI" : "Clip AI"}
-        className={`fixed bottom-8 right-5 z-50 hidden h-14 w-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-xl shadow-brand/30 transition-transform active:scale-95 md:flex ${
-          isOpen ? "md:hidden" : ""
+        className={`fixed bottom-8 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 ${
+          isOpen ? "hidden" : ""
         }`}
       >
         {isOpen ? <X className="h-6 w-6" /> : <Sparkle className="h-6 w-6" />}

@@ -157,7 +157,10 @@ export async function moveNoteToCollection(
 export async function backfillCollection(collectionId: string): Promise<{ assigned: number }> {
   const res = await apiFetch(`/api/collections/${collectionId}/backfill`, { method: "POST" });
   if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't sort notes into the collection."), res.status);
+    throw new ApiError(
+      await errorDetail(res, "Couldn't sort notes into the collection."),
+      res.status,
+    );
   return res.json();
 }
 

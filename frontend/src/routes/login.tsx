@@ -40,17 +40,17 @@ function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm text-center">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-3xl bg-brand text-brand-foreground shadow-lg shadow-brand/30">
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-ink text-paper">
           <Sparkles className="h-8 w-8" />
         </div>
-        <h1 className="font-display text-5xl text-ink">Clipnote</h1>
-        <p className="mx-auto mt-3 max-w-xs text-sm text-ink-soft">
-          Save anything — reels, products, places, recipes — and it becomes a living collection
-          you can actually use.
+        <h1 className="font-serif text-4xl text-ink">Clipnote</h1>
+        <p className="mx-auto mt-2 max-w-xs text-sm text-ink-soft">
+          Save anything — reels, products, places, recipes — and it becomes a living collection you
+          can actually use.
         </p>
         <button
           onClick={handleSignIn}
-          className="press mt-8 flex w-full items-center justify-center gap-3 rounded-full border border-border bg-card px-6 py-3.5 text-sm font-medium text-ink shadow-sm transition-shadow hover:shadow-md"
+          className="mt-8 flex w-full items-center justify-center gap-3 rounded-full bg-ink px-6 py-3.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path

@@ -54,6 +54,30 @@ async def test_list_fans_out_into_one_item_per_title(fake_db):
     assert item_ids == ["m_1", "m_2", "t_3"]  # produced item ids, for destination routing
 
 
+async def test_source_url_stored_on_new_items(fake_db):
+    """The captured link (the reel/listicle the titles came from) is stored on each item."""
+    await wl.enrich_titles("u", "note-1", [{"title": "Inception", "mediaType": "movie"}],
+                           region="IN", source_url="https://instagram.com/reel/abc",
+                           source_domain="instagram.com")
+    item = fake_db.docs[(COL, "m_1")]
+    assert item["source_url"] == "https://instagram.com/reel/abc"
+    assert item["source_domain"] == "instagram.com"
+
+
+async def test_resave_without_source_does_not_clobber_source_url(fake_db):
+    """A dedupe re-save from a source-less path (e.g. backfill of a typed note) must not
+    blank out the item's existing source link."""
+    fake_db.seed(COL, "m_1", {
+        "user_id": "u", "watch_status": "saved",
+        "source_url": "https://instagram.com/reel/abc", "source_domain": "instagram.com",
+    })
+    await wl.enrich_titles("u", "note-2", [{"title": "Inception", "mediaType": "movie"}],
+                           region="IN", source_url=None, source_domain=None)
+    item = fake_db.docs[(COL, "m_1")]
+    assert item["source_url"] == "https://instagram.com/reel/abc"  # preserved
+    assert item["source_domain"] == "instagram.com"                # preserved
+
+
 async def test_unmatched_title_still_creates_a_raw_item(fake_db):
     item_ids = await wl.enrich_titles("u", "note-1",
                                       [{"title": "Some Indie Film", "year": "2021"}], region="IN")

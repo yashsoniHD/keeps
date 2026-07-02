@@ -148,7 +148,7 @@ export function VoiceRecorder({
           <button
             type="button"
             onClick={stop}
-            className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-brand text-brand-foreground transition-opacity hover:opacity-90"
+            className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-ink text-paper transition-opacity hover:opacity-90"
             aria-label="Stop recording"
           >
             <Square className="h-6 w-6 fill-current" />

@@ -55,10 +55,17 @@ export function SummaryNote({ note }: { note: Note }) {
           <h2 className="font-serif text-2xl text-ink">Highlights</h2>
           <div className="mt-4 space-y-4">
             {data.quotes.map((q, i) => (
-              <blockquote key={i} className="relative rounded-2xl border border-border bg-card p-5 pl-12">
+              <blockquote
+                key={i}
+                className="relative rounded-2xl border border-border bg-card p-5 pl-12"
+              >
                 <Quote className={`absolute left-4 top-5 h-5 w-5 ${accent.text}`} />
-                <p className="text-[15px] italic leading-relaxed text-ink md:text-base">"{q.text}"</p>
-                {q.timestamp && <div className="mt-2 font-mono text-xs text-ink-soft">{q.timestamp}</div>}
+                <p className="text-[15px] italic leading-relaxed text-ink md:text-base">
+                  "{q.text}"
+                </p>
+                {q.timestamp && (
+                  <div className="mt-2 font-mono text-xs text-ink-soft">{q.timestamp}</div>
+                )}
               </blockquote>
             ))}
           </div>
@@ -73,7 +80,9 @@ export function SummaryNote({ note }: { note: Note }) {
           <ul className="mt-3 space-y-2">
             {data.actionItems.map((item, i) => (
               <li key={i} className="flex items-start gap-3 text-ink">
-                <span className={`mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${accent.border}`} />
+                <span
+                  className={`mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${accent.border}`}
+                />
                 <span>{item}</span>
               </li>
             ))}
