@@ -114,15 +114,25 @@ async def recent_notes(db, user_id: str, limit: int) -> list[dict]:
     return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
 
 
-async def vector_shortlist(db, user_id: str, question: str) -> list[dict] | None:
-    """Top-K candidate notes by semantic similarity (Firestore Vector Search). Returns
-    None when the query embedding is unavailable so the caller falls back to recency alone."""
+async def _query_embedding(question: str, user_id: str) -> list[float] | None:
+    """Embed the ask/search query once — callers thread the vector through both shortlists
+    so a single ask never pays for the same embedding twice. None on any failure (callers
+    degrade to recency-only retrieval)."""
     try:
-        query_vec = await embedding_service.embed_query(question)
+        vec = await embedding_service.embed_query(question)
     except Exception as e:
-        log.warning("ask shortlist embedding failed: %s: %s", type(e).__name__, e,
+        log.warning("query embedding failed: %s: %s", type(e).__name__, e,
                     extra={"user_id": user_id})
         return None
+    return vec or None
+
+
+async def vector_shortlist(db, user_id: str, question: str,
+                           query_vec: list[float] | None = None) -> list[dict] | None:
+    """Top-K candidate notes by semantic similarity (Firestore Vector Search). Returns
+    None when the query embedding is unavailable so the caller falls back to recency alone."""
+    if query_vec is None:
+        query_vec = await _query_embedding(question, user_id)
     if not query_vec:
         return None
     vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
@@ -137,17 +147,14 @@ async def vector_shortlist(db, user_id: str, question: str) -> list[dict] | None
     ]
 
 
-async def item_shortlist(db, user_id: str, question: str) -> list[dict]:
+async def item_shortlist(db, user_id: str, question: str,
+                         query_vec: list[float] | None = None) -> list[dict]:
     """Top-K mini-app items by semantic similarity, so Clip AI can ground answers on saved
     movies/restaurants/recipes/etc. Reads the unified search_index vector index and shapes each
     hit like a note (prefixed id + kind/app), so the planner and answer stages need no item
     special-casing. Best-effort — a miss just means items are absent from this pool."""
-    try:
-        query_vec = await embedding_service.embed_query(question)
-    except Exception as e:  # noqa: BLE001
-        log.warning("item shortlist embedding failed: %s: %s", type(e).__name__, e,
-                    extra={"user_id": user_id})
-        return []
+    if query_vec is None:
+        query_vec = await _query_embedding(question, user_id)
     if not query_vec:
         return []
     try:
@@ -181,13 +188,14 @@ async def candidate_pool(db, user_id: str, question: str) -> list[dict]:
     """The grounding pool the planner chooses from: most-recent notes (temporal coverage) ∪
     vector top-K notes (deep-semantic coverage) ∪ vector top-K mini-app items (so Clip AI can
     answer about saved movies/restaurants/recipes), deduped by id."""
+    query_vec = await _query_embedding(question, user_id)  # embed once for both shortlists
     recent = await recent_notes(db, user_id, settings.ASK_RECENT_POOL)
     pool = {n["id"]: n for n in recent}
-    shortlist = await vector_shortlist(db, user_id, question)
+    shortlist = await vector_shortlist(db, user_id, question, query_vec)
     if shortlist:
         for n in shortlist:
             pool.setdefault(n["id"], n)
-    for it in await item_shortlist(db, user_id, question):
+    for it in await item_shortlist(db, user_id, question, query_vec):
         pool.setdefault(it["id"], it)
     return list(pool.values())
 

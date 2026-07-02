@@ -90,7 +90,7 @@ export function AddPlaceSheet({ onClose }: { onClose: () => void }) {
                 </div>
                 {r.rating ? (
                   <span className="inline-flex items-center gap-0.5 text-xs text-ink-soft">
-                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                    <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
                     {r.rating}
                   </span>
                 ) : null}
@@ -100,7 +100,7 @@ export function AddPlaceSheet({ onClose }: { onClose: () => void }) {
                   onClick={() => add(r)}
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
                     isAdded
-                      ? "border-transparent bg-itinerary text-white"
+                      ? "border-transparent bg-place text-white"
                       : "border-border bg-card text-ink-soft hover:text-ink"
                   }`}
                   aria-label={isAdded ? "Added" : "Add to places"}

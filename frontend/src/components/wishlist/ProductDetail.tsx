@@ -140,12 +140,12 @@ export function ProductDetail({
             )}
             {item.rating ? (
               <span className="inline-flex items-center gap-1 text-sm text-ink-soft">
-                <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                <Star className="h-4 w-4 fill-favorite text-favorite" />
                 {item.rating}/5
               </span>
             ) : null}
             {dealMet && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-medium text-white">
+              <span className="inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-xs font-medium text-white">
                 <Tag className="h-3 w-3" />
                 Below your target
               </span>
@@ -186,7 +186,7 @@ export function ProductDetail({
               aria-pressed={favorite}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-amber-400 text-white"
+                  ? "border-transparent bg-favorite text-white"
                   : "border-border bg-card text-ink hover:bg-product-soft"
               }`}
             >
@@ -240,7 +240,7 @@ export function ProductDetail({
           {(item.pros?.length ?? 0) > 0 && (
             <div>
               <h2 className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft">
-                <ThumbsUp className="h-4 w-4 text-emerald-500" />
+                <ThumbsUp className="h-4 w-4 text-success" />
                 Pros
               </h2>
               <ul className="space-y-1.5">
@@ -304,7 +304,7 @@ export function ProductDetail({
           type="button"
           onClick={remove}
           disabled={deleting}
-          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-red-500 disabled:opacity-60 ${FOCUS_RING} rounded`}
+          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-destructive disabled:opacity-60 ${FOCUS_RING} rounded`}
         >
           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           Remove from wishlist

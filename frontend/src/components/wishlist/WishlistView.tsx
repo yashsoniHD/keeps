@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { ArrowDownUp, Globe, Plus, Search, ShoppingBag, Star } from "lucide-react";
 import { watchWishItems } from "@/lib/firestore";
 import { updateWishItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
 import type { WishItem } from "@/lib/types";
+import {
+  IconSelect,
+  LoadMoreButton,
+  WALL_GRID,
+  WallError,
+  WallSkeleton,
+  useWallItems,
+} from "@/components/mini-apps/wall";
 import { WishCard } from "./WishCard";
 import { AddProductSheet } from "./AddProductSheet";
 
@@ -13,48 +20,8 @@ type SortKey = "added" | "price" | "rating" | "target";
 // no data migration); "purchased" is the Bought tab.
 type Queue = "saved" | "purchased";
 
-// A compact icon filter: a round button showing only an icon, with the native <select> overlaid
-// transparently on top (mirrors the watchlist's IconSelect). The icon fills with the product
-// accent while a non-default value is active, so active filters stay visible.
-function IconSelect({
-  icon,
-  value,
-  active,
-  onChange,
-  title,
-  children,
-}: {
-  icon: ReactNode;
-  value: string;
-  active: boolean;
-  onChange: (v: string) => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <span
-        aria-hidden
-        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-          active
-            ? "border-transparent bg-product text-white"
-            : "border-border bg-card text-ink-soft"
-        } ${FOCUS_RING}`}
-      >
-        {icon}
-      </span>
-      <select
-        aria-label={title}
-        title={title}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      >
-        {children}
-      </select>
-    </div>
-  );
-}
+// Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
+const ACCENT_ACTIVE = "bg-product text-white";
 
 // Status priority for collapsing duplicates: keep the most-progressed copy.
 const STATUS_RANK: Record<WishItem["wish_status"], number> = { purchased: 2, to_buy: 1, saved: 0 };
@@ -99,7 +66,7 @@ function Grid({
   onToggleFavorite: (i: WishItem) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    <div className={WALL_GRID}>
       {items.map((i) => (
         <WishCard
           key={i.id}
@@ -116,15 +83,18 @@ function Grid({
 // from product notes, plus legacy to_buy docs) and Bought — with a store filter and sort. Owns
 // the wish_items listener and applies optimistic state so marking bought feels instant.
 export function WishlistView({ uid }: { uid: string }) {
-  const [items, setItems] = useState<WishItem[] | null>(null);
+  const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<WishItem>(
+    uid,
+    watchWishItems,
+  );
   const [queue, setQueue] = useState<Queue>("saved");
   const [query, setQuery] = useState("");
+  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
+  const deferredQuery = useDeferredValue(query);
   const [store, setStore] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("added");
   const [favOnly, setFavOnly] = useState(false);
   const [adding, setAdding] = useState(false);
-
-  useEffect(() => watchWishItems(uid, setItems), [uid]);
 
   const deduped = useMemo(() => dedupeItems(items ?? []), [items]);
 
@@ -135,34 +105,45 @@ export function WishlistView({ uid }: { uid: string }) {
     return [...s].sort();
   }, [deduped]);
 
-  const patchLocal = (id: string, patch: Partial<WishItem>) =>
-    setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev);
+  // Stable identities (useCallback) so the memoized WishCards skip re-rendering when
+  // unrelated state (search text, filters) changes.
+  const patchLocal = useCallback(
+    (id: string, patch: Partial<WishItem>) =>
+      setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev),
+    [setItems],
+  );
 
   // Bought ↔ Saved. Undoing a purchase always lands in `saved` (never back to legacy `to_buy`).
-  const onToggleBought = async (item: WishItem) => {
-    const next = item.wish_status === "purchased" ? "saved" : "purchased";
-    patchLocal(item.id, { wish_status: next });
-    try {
-      await updateWishItem(item.id, { wish_status: next });
-    } catch {
-      patchLocal(item.id, { wish_status: item.wish_status }); // revert on failure
-    }
-  };
+  const onToggleBought = useCallback(
+    async (item: WishItem) => {
+      const next = item.wish_status === "purchased" ? "saved" : "purchased";
+      patchLocal(item.id, { wish_status: next });
+      try {
+        await updateWishItem(item.id, { wish_status: next });
+      } catch {
+        patchLocal(item.id, { wish_status: item.wish_status }); // revert on failure
+      }
+    },
+    [patchLocal],
+  );
 
   // Cross-cutting ⭐ flag — the "really want this" star, independent of the buy bucket.
-  const onToggleFavorite = async (item: WishItem) => {
-    const next = !item.favorite;
-    patchLocal(item.id, { favorite: next });
-    try {
-      await updateWishItem(item.id, { favorite: next });
-    } catch {
-      patchLocal(item.id, { favorite: item.favorite }); // revert on failure
-    }
-  };
+  const onToggleFavorite = useCallback(
+    async (item: WishItem) => {
+      const next = !item.favorite;
+      patchLocal(item.id, { favorite: next });
+      try {
+        await updateWishItem(item.id, { favorite: next });
+      } catch {
+        patchLocal(item.id, { favorite: item.favorite }); // revert on failure
+      }
+    },
+    [patchLocal],
+  );
 
   const filterSort = (list: WishItem[]) => {
     let out = list;
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     if (q)
       out = out.filter(
         (i) =>
@@ -187,13 +168,8 @@ export function WishlistView({ uid }: { uid: string }) {
     return sorted;
   };
 
-  if (items === null) {
-    return (
-      <div className="flex justify-center py-20">
-        <ShoppingBag className="h-6 w-6 animate-pulse text-ink-soft" />
-      </div>
-    );
-  }
+  if (error && items === null) return <WallError onRetry={retry} />;
+  if (items === null) return <WallSkeleton aspect="aspect-square" />;
 
   // "Saved" folds legacy to_buy docs in — display-only, the docs keep their status.
   const inQueue = (i: WishItem, q: Queue) =>
@@ -264,6 +240,7 @@ export function WishlistView({ uid }: { uid: string }) {
             title="Filter by store"
             value={store}
             active={store !== "all"}
+            activeClass={ACCENT_ACTIVE}
             onChange={setStore}
           >
             <option value="all">Any store</option>
@@ -279,6 +256,7 @@ export function WishlistView({ uid }: { uid: string }) {
           title="Sort"
           value={sort}
           active={sort !== "added"}
+          activeClass={ACCENT_ACTIVE}
           onChange={(v) => setSort(v as SortKey)}
         >
           <option value="added">Newest</option>
@@ -304,7 +282,10 @@ export function WishlistView({ uid }: { uid: string }) {
       </div>
 
       {shown.length > 0 ? (
-        <Grid items={shown} onToggleBought={onToggleBought} onToggleFavorite={onToggleFavorite} />
+        <>
+          <Grid items={shown} onToggleBought={onToggleBought} onToggleFavorite={onToggleFavorite} />
+          {canLoadMore && <LoadMoreButton onClick={loadMore} />}
+        </>
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">
           No products match your filters.

@@ -152,7 +152,7 @@ export function GettingStarted({
           >
             <span
               className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
-                step.done ? "bg-itinerary-soft text-itinerary" : "bg-muted text-ink-soft"
+                step.done ? "bg-place-soft text-place" : "bg-muted text-ink-soft"
               }`}
             >
               {step.done ? <Check className="h-4 w-4" /> : <step.icon className="h-4 w-4" />}

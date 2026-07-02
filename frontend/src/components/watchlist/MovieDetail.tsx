@@ -209,7 +209,7 @@ export function MovieDetail({
             {runtime && <span>· {runtime}</span>}
             {details.vote_average ? (
               <span className="inline-flex items-center gap-1">
-                · <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                · <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
                 {details.vote_average.toFixed(1)}
               </span>
             ) : null}
@@ -277,7 +277,7 @@ export function MovieDetail({
               aria-pressed={favorite}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-amber-400 text-white"
+                  ? "border-transparent bg-favorite text-white"
                   : "border-border bg-card text-ink hover:bg-media-soft"
               }`}
             >
@@ -298,7 +298,7 @@ export function MovieDetail({
                     <Star
                       className={`h-5 w-5 ${
                         (item.rating ?? 0) >= n
-                          ? "fill-amber-400 text-amber-400"
+                          ? "fill-favorite text-favorite"
                           : "text-ink-soft/40"
                       }`}
                     />
@@ -336,7 +336,7 @@ export function MovieDetail({
               </span>
             ))}
           </div>
-          <p className="mt-2 text-xs text-ink-soft/70">Streaming data by JustWatch</p>
+          <p className="mt-2 text-xs text-ink-soft">Streaming data by JustWatch</p>
         </section>
       )}
 
@@ -397,7 +397,7 @@ export function MovieDetail({
           type="button"
           onClick={remove}
           disabled={deleting}
-          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-red-500 disabled:opacity-60 ${FOCUS_RING} rounded`}
+          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-destructive disabled:opacity-60 ${FOCUS_RING} rounded`}
         >
           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           Remove from watchlist

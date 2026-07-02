@@ -160,12 +160,13 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
     local_now = now_utc + timedelta(minutes=body.tz_offset_minutes)
     today_str = local_now.strftime("%Y-%m-%d (%A)")
 
-    pool = await nr.candidate_pool(db, user_id, body.question)
-
+    # Caps first, then the meter, then any paid work: the candidate pool embeds the query,
+    # so a capped user must 429 before it runs and its spend must land on the meter.
     await _enforce_ask_caps(db, user_id)
     await touch_user_activity(user_id)  # retention signal (best-effort)
-    meter = start_metering()  # both Gemini stages; flushed once when the request ends
+    meter = start_metering()  # embeds + both Gemini stages; flushed once when the request ends
     try:
+        pool = await nr.candidate_pool(db, user_id, body.question)
         index = nr.dated_index(pool, body.tz_offset_minutes)
         plan = await gemini_service.plan_ask(body.question, history[-4:], today_str, index)
 
@@ -309,6 +310,14 @@ async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
     history = [t.model_dump() for t in body.history[-10:]]
     now_utc = datetime.now(timezone.utc)
 
+    # Enforce caps before opening the stream (a limit returns a normal 429, not mid-SSE) and
+    # before the candidate pool — building it embeds the query, a paid call a capped user
+    # must not trigger. The meter starts here too so that embed spend is attributed; the
+    # contextvar it sets is inherited by the streaming task, which flushes it once at the end.
+    await _enforce_ask_caps(db, user_id)
+    await touch_user_activity(user_id)  # retention signal (best-effort)
+    meter = start_metering()
+
     # Build the grounding pool. Explicit selection bypasses retrieval — the pool IS the chosen set.
     selected = [i for i in dict.fromkeys(body.selected_note_ids) if i][:20]
     if selected:
@@ -321,10 +330,6 @@ async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
         found = await nr.fetch_notes_by_ids(db, user_id, [body.note_id])
         focal = found[0] if found else None
 
-    # Enforce caps before opening the stream so a limit returns a normal 429, not mid-SSE.
-    await _enforce_ask_caps(db, user_id)
-    await touch_user_activity(user_id)  # retention signal (best-effort)
-
     ctx = AgentContext(
         db=db, user_id=user_id, question=body.question, history=history, pool=pool,
         tz_offset_minutes=body.tz_offset_minutes, now_utc=now_utc, focal=focal,
@@ -334,7 +339,6 @@ async def ask_stream(body: AskRequest, user_id: str = Depends(require_user)):
     cid = body.conversation_id or str(uuid.uuid4())
 
     async def gen():
-        meter = start_metering()  # set inside the streaming context that records + flushes
         answer_parts: list[str] = []
         try:
             # Tell the client the conversation id up front so a new chat can track it.

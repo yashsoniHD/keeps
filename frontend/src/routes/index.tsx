@@ -19,9 +19,9 @@ import { useCategoryMeta } from "@/contexts/category-meta";
 import {
   watchCollections,
   watchFavorites,
-  watchNotes,
   watchRecent,
   createCollection,
+  getManualNotesCount,
   getToolCounts,
   type ToolCounts,
 } from "@/lib/firestore";
@@ -29,7 +29,7 @@ import { backfillCollection } from "@/lib/api";
 import { goToHit } from "@/lib/nav";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
 import { TOOLS, toolByApp } from "@/lib/collections-meta";
-import { FOCUS_RING } from "@/lib/ui";
+import { FOCUS_RING, TILE } from "@/lib/ui";
 import { AppShell, useCapture } from "@/components/AppShell";
 import type { Collection, SearchHit } from "@/lib/types";
 
@@ -67,10 +67,7 @@ function CollectionTile({
   count?: number;
 }) {
   return (
-    <Link
-      to={to}
-      className={`press ${FOCUS_RING} flex h-28 flex-col justify-between rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow-md sm:h-32`}
-    >
+    <Link to={to} className={`${TILE} flex h-28 flex-col justify-between p-4 sm:h-32`}>
       <div className="flex items-start justify-between">
         <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tint}`}>
           <Icon className="h-4.5 w-4.5" />
@@ -80,7 +77,7 @@ function CollectionTile({
         )}
       </div>
       <span className="min-w-0">
-        <span className="block truncate font-display text-xl leading-tight text-ink">{name}</span>
+        <span className="block truncate font-serif text-xl leading-tight text-ink">{name}</span>
         <span className="mt-0.5 block truncate text-xs text-ink-soft">{sub}</span>
       </span>
     </Link>
@@ -219,26 +216,30 @@ function LibraryHomeContent({ uid }: { uid: string }) {
   const [manualCount, setManualCount] = useState(0);
   const [recent, setRecent] = useState<SearchHit[]>([]);
   const [counts, setCounts] = useState<ToolCounts>({});
+  // A listener failure must be visible — silently swallowing it makes a broken load look
+  // like an empty library. One banner covers all the home listeners; retry resubscribes.
+  const [loadError, setLoadError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    const unsubFav = watchFavorites(uid, (n) => setFavorites(n.length), { onError: () => {} });
-    const unsubCol = watchCollections(uid, setCollections, { onError: () => {} });
-    const unsubRecent = watchRecent(uid, setRecent, { max: 6, onError: () => {} });
-    const unsubNotes = watchNotes(
-      uid,
-      (all) => setManualCount(all.filter((n) => n.input_type && n.input_type !== "url").length),
-      { max: 200 },
-    );
+    setLoadError(false);
+    const onError = () => setLoadError(true);
+    const unsubFav = watchFavorites(uid, (n) => setFavorites(n.length), { onError });
+    const unsubCol = watchCollections(uid, setCollections, { onError });
+    const unsubRecent = watchRecent(uid, setRecent, { max: 6, onError });
+    // "Your notes" needs only a number — a server-side aggregate, not 200 streamed docs.
+    getManualNotesCount(uid)
+      .then(setManualCount)
+      .catch(() => {}); // cosmetic count — the tile just stays hidden
     getToolCounts(uid)
       .then(setCounts)
-      .catch(() => {});
+      .catch(onError);
     return () => {
       unsubFav();
       unsubCol();
       unsubRecent();
-      unsubNotes();
     };
-  }, [uid]);
+  }, [uid, attempt]);
 
   // Virtual folders (Favorites / Your notes) sit alongside real collections. Empty ones hide.
   const folders = useMemo(() => {
@@ -248,7 +249,7 @@ function LibraryHomeContent({ uid }: { uid: string }) {
       out.push({
         id: "favorites",
         icon: Star,
-        tint: "bg-summary-soft text-summary",
+        tint: "bg-favorite-soft text-favorite",
         name: "Favorites",
         count: favorites,
       });
@@ -280,7 +281,7 @@ function LibraryHomeContent({ uid }: { uid: string }) {
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
               <Sparkles className="h-4 w-4" />
             </span>
-            <span className="font-display text-2xl text-ink">Clipnote</span>
+            <span className="font-serif text-2xl text-ink">Clipnote</span>
           </div>
           <div className="flex items-center gap-1">
             <Link to="/search" aria-label="Search" title="Search" className={ICON_BTN}>
@@ -294,6 +295,29 @@ function LibraryHomeContent({ uid }: { uid: string }) {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-9 px-4 py-6 md:px-8 md:py-8">
+        {loadError && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-ink">
+            <span>Couldn’t load part of your library.</span>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setAttempt((n) => n + 1)}
+                className={`rounded-full bg-ink px-3 py-1 text-xs font-medium text-paper ${FOCUS_RING}`}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoadError(false)}
+                aria-label="Dismiss"
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink ${FOCUS_RING}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Capture: one friendly, always-visible entry point styled like a search field. */}
         <button
           type="button"

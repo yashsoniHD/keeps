@@ -17,9 +17,11 @@ from starlette.responses import JSONResponse
 
 log = logging.getLogger("clipnote.ratelimit")
 
-# Only the costly POST endpoints are throttled. Reads, the OIDC worker (/api/process*), and
+# Only the costly endpoints are throttled. Other reads, the OIDC worker (/api/process*), and
 # the client-error sink are exempt. str.startswith accepts a tuple of prefixes.
+# /api/search is a GET but embeds every query (a paid Vertex call), so it's throttled too.
 _THROTTLED_PREFIXES = ("/api/ingest", "/api/ask")
+_THROTTLED_GET_PREFIXES = ("/api/search",)
 
 
 def _client_ip(request) -> str:
@@ -38,12 +40,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if request.method != "POST" or not path.startswith(_THROTTLED_PREFIXES):
+        if request.method == "POST" and path.startswith(_THROTTLED_PREFIXES):
+            bucket_kind = "write"
+        elif request.method == "GET" and path.startswith(_THROTTLED_GET_PREFIXES):
+            bucket_kind = "search"
+        else:
             return await call_next(request)
 
         now = time.monotonic()
         window_start = now - 60.0
-        ip = _client_ip(request)
+        # Separate buckets per path class: a burst of (debounced, per-keystroke) searches must
+        # never starve a capture save from the same IP within the window.
+        ip = f"{_client_ip(request)}:{bucket_kind}"
         dq = self._hits.setdefault(ip, deque())
         while dq and dq[0] < window_start:
             dq.popleft()

@@ -301,7 +301,7 @@ function NoteMenu({
               onClick={toggleFavorite}
               trailing={
                 note.is_favorite ? (
-                  <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" />
+                  <Star className="h-4 w-4 shrink-0 fill-favorite text-favorite" />
                 ) : undefined
               }
             />

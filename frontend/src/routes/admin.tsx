@@ -122,7 +122,7 @@ function TrendCard({
       </div>
       <div className="mt-3">
         <MiniBarChart values={values} colorClass={colorClass} accentClass={accentClass} />
-        <div className="mt-1 flex justify-between text-[10px] text-ink-soft/60">
+        <div className="mt-1 flex justify-between text-[10px] text-ink-soft">
           <span>{trend.length ? fmtDay(trend[0].date) : ""}</span>
           <span>today</span>
         </div>
@@ -203,7 +203,7 @@ function AdminPage() {
             className="inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
           >
             <ArrowLeft className="h-4 w-4" />
-            Notes
+            Library
           </Link>
           <button
             type="button"
@@ -349,8 +349,8 @@ function AdminPage() {
                   trend={stats.daily_trend}
                   getValue={(d) => d.asks}
                   formatTotal={(v) => fmt(v)}
-                  colorClass="fill-itinerary/30"
-                  accentClass="fill-itinerary"
+                  colorClass="fill-place/30"
+                  accentClass="fill-place"
                 />
                 <TrendCard
                   icon={Coins}
@@ -419,7 +419,7 @@ function AdminPage() {
                         <td className="px-4 py-3 text-center">
                           {u.active_7d ? (
                             <span
-                              className="inline-block h-2 w-2 rounded-full bg-itinerary"
+                              className="inline-block h-2 w-2 rounded-full bg-place"
                               title="Active in last 7 days"
                             />
                           ) : u.active_30d ? (

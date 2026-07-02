@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from services import tmdb
 from services import search_index
 from services.auth_dep import require_user
-from services.firebase import flush_usage, get_db
+from services.firebase import flush_usage, get_db, reserve_backfill_run
 from services.usage_meter import start_metering
 from services.watchlist import add_by_tmdb, backfill_user
 
@@ -96,8 +96,11 @@ async def watch_item_details(item_id: str, user_id: str = Depends(require_user))
 @router.post("/watch-items/backfill")
 async def backfill_watch_items(user_id: str = Depends(require_user)):
     """Import movies & shows from the user's existing entertainment notes into the watchlist.
-    Extracts the titles named in each note (no re-scraping) and TMDB-enriches them. Safe to
-    re-run (e.g. after the TMDB token is configured, to add posters)."""
+    Extracts the titles named in each note (no re-scraping) and TMDB-enriches them. Writes are
+    idempotent — re-running (e.g. after the TMDB token is configured) is safe — but the Gemini
+    title-extraction spend re-incurs each run, so runs are capped per day."""
+    if not await reserve_backfill_run(user_id, "watchlist"):
+        raise HTTPException(429, "Backfill limit reached for today. Try again tomorrow.")
     meter = start_metering()
     try:
         result = await backfill_user(user_id)

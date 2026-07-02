@@ -1,7 +1,9 @@
 """Cloud Tasks worker: the full URL → note pipeline.
 
 Auth: Cloud Tasks OIDC token (signature + audience + SA email) — no shared secret.
-Idempotent: a retry of a completed job is a no-op (no double AI spend).
+Idempotent: a retry of a completed job is a no-op, and a concurrent duplicate delivery is
+rejected by a transactional claim (409 → Cloud Tasks redelivers after the winner finishes),
+so paid AI work never runs twice for one job.
 
 Failure ladder (a capture must always produce a note):
   - BlockedURLError (SSRF guard) → failed, no note, no retry. Permanent by design.
@@ -94,6 +96,50 @@ def _mini_app_family(content_type: str) -> str | None:
 # max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
 MAX_TRANSIENT_ATTEMPTS = 3
 
+# A "processing" claim whose heartbeat (updated_at) is older than this is treated as a dead
+# run (crashed instance) and may be re-claimed. Kept above the worst-case single-run wall
+# time so a live run is never double-claimed.
+CLAIM_STALE_SECONDS = 15 * 60
+
+
+def _stable_id(kind: str, job_id: str) -> str:
+    """Deterministic doc id per (job, kind): if a duplicate delivery ever slips past the
+    claim, both runs converge on the same note doc instead of minting an orphan duplicate."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"clipnote:{kind}:{job_id}"))
+
+
+async def _claim_job(db, job_ref):
+    """Transactionally claim a job for this delivery. Cloud Tasks is at-least-once and can
+    dispatch the same task twice concurrently (retry near the deadline) — without a claim both
+    runs pass the completed-check and each pays for classification + extraction.
+
+    Returns (job_dict_with_bumped_attempt, None) when claimed, or (None, response) when the
+    job is missing/already completed. A job actively claimed by another delivery raises 409 —
+    Cloud Tasks redelivers later, by which point the winner has completed (no-op) or died
+    (stale heartbeat, re-claimable)."""
+    transaction = db.transaction()
+
+    @fs.async_transactional
+    async def _tx(tx):
+        snap = await job_ref.get(transaction=tx)
+        if not snap.exists:
+            return None, {"status": "missing"}   # permanent — don't make Cloud Tasks retry
+        job = snap.to_dict()
+        if job.get("status") == "completed":
+            return None, {"status": "completed", "note_id": job.get("note_id")}
+        now = datetime.now(timezone.utc)
+        if job.get("status") == "processing":
+            updated = job.get("updated_at")
+            age = (now - updated).total_seconds() if updated is not None else None
+            if age is not None and age < CLAIM_STALE_SECONDS:
+                raise HTTPException(409, "Job already claimed by a concurrent delivery")
+        attempt = (job.get("attempt_count") or 0) + 1
+        tx.set(job_ref, {"status": "processing", "attempt_count": attempt,
+                         "updated_at": now}, merge=True)
+        return {**job, "attempt_count": attempt}, None
+
+    return await _tx(transaction)
+
 
 def _is_transient(e: Exception) -> bool:
     """Failures with a real chance of succeeding on a Cloud Tasks retry."""
@@ -133,7 +179,7 @@ async def _link_preview(url: str) -> dict:
 
 async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: str,
                         user_title: str | None, bundle: ContentBundle | None,
-                        now: datetime) -> str:
+                        now: datetime, note_id: str | None = None) -> str:
     """Writes a minimal note so the capture is never lost.
 
     For URL captures: title/cover tiers are bundle metadata → lightweight og: fetch → domain.
@@ -160,7 +206,7 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: 
 
     fallback_title = title or domain or "Saved item"
     facts = [{"label": "Source", "value": domain}] if domain else []
-    note_id = str(uuid.uuid4())
+    note_id = note_id or str(uuid.uuid4())
     embedding = await _note_embedding(fallback_title)
     note_doc = {
         "user_id": user_id,
@@ -214,13 +260,9 @@ async def process_job(job_id: str, request: Request):
 
     db = get_db()
     job_ref = db.collection("jobs").document(job_id)
-    job_snap = await job_ref.get()
-    if not job_snap.exists:
-        return {"status": "missing"}   # permanent — don't make Cloud Tasks retry
-
-    job = job_snap.to_dict()
-    if job.get("status") == "completed":
-        return {"status": "completed", "note_id": job.get("note_id")}
+    job, early = await _claim_job(db, job_ref)
+    if early is not None:
+        return early
 
     user_id: str = job["user_id"]
     input_type: str = job.get("input_type") or "url"
@@ -234,10 +276,9 @@ async def process_job(job_id: str, request: Request):
     note_hint: str | None = job.get("note_hint")
     process_ai: bool = job.get("process_ai", True) is not False
     now = datetime.now(timezone.utc)
-    # This run's attempt number — read before the Increment so the ladder below can
-    # compare against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
-    attempt = (job.get("attempt_count") or 0) + 1
-    await job_ref.update({"status": "processing", "attempt_count": fs.Increment(1), "updated_at": now})
+    # This run's attempt number (bumped by the claim) — the transient ladder below compares
+    # it against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
+    attempt = job["attempt_count"]
 
     # Meter Gemini token spend for this job; flushed once below regardless of outcome
     # (a failed/salvaged job still incurred AI cost that must be attributed).
@@ -389,7 +430,7 @@ async def process_job(job_id: str, request: Request):
             return {"status": "completed", "destination": destination}
 
         # Plain note path (everything that isn't a mini-app capture).
-        note_id = str(uuid.uuid4())
+        note_id = _stable_id("note", job_id)
         embedding = await _note_embedding(extracted.title, extracted.ai_summary)
         note_doc = {
             "user_id": user_id,
@@ -458,7 +499,8 @@ async def process_job(job_id: str, request: Request):
         try:
             note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
                                           input_type=input_type, user_title=title,
-                                          bundle=bundle, now=datetime.now(timezone.utc))
+                                          bundle=bundle, now=datetime.now(timezone.utc),
+                                          note_id=_stable_id("salvage", job_id))
             try:
                 await add_user_category(user_id, "bookmark")
                 if input_type == "url" and url:
@@ -527,12 +569,9 @@ async def process_agent_job(job_id: str, request: Request):
 
     db = get_db()
     job_ref = db.collection("jobs").document(job_id)
-    job_snap = await job_ref.get()
-    if not job_snap.exists:
-        return {"status": "missing"}
-    job = job_snap.to_dict()
-    if job.get("status") == "completed":
-        return {"status": "completed", "note_id": job.get("note_id")}
+    job, early = await _claim_job(db, job_ref)
+    if early is not None:
+        return early
 
     user_id: str = job["user_id"]
     req: dict = job.get("agent_request") or {}
@@ -541,7 +580,6 @@ async def process_agent_job(job_id: str, request: Request):
     selected: list = req.get("selected_note_ids", []) or []
     tz: int = req.get("tz_offset_minutes", 0)
     now = datetime.now(timezone.utc)
-    await job_ref.update({"status": "processing", "attempt_count": fs.Increment(1), "updated_at": now})
 
     meter = start_metering()
     try:
@@ -575,7 +613,7 @@ async def process_agent_job(job_id: str, request: Request):
                                   "items": [result.get("text") or "No content generated."]}]}
 
         slug = match_existing(normalize_slug(content_type), await get_user_categories(user_id))
-        new_id = str(uuid.uuid4())
+        new_id = _stable_id("agent-note", job_id)
         embedding = await _note_embedding(title, ai_summary)
         note_doc = {
             "user_id": user_id,

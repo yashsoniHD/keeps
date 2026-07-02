@@ -224,7 +224,7 @@ function ArtifactCard({
             to="/notes/$noteId"
             params={{ noteId }}
             onClick={onNavigate}
-            className="inline-flex items-center gap-2 rounded-full bg-summary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
           >
             <Check className="h-4 w-4" />{" "}
             {state === "added" ? "Added — view note" : "Saved — view note"}
@@ -610,7 +610,7 @@ export function AskChat({
               <div className="p-2">
                 {groupConversations(conversations).map((group) => (
                   <div key={group.label} className="mb-1">
-                    <p className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-ink-soft/70">
+                    <p className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-ink-soft">
                       {group.label}
                     </p>
                     {group.items.map((c) => {
@@ -627,7 +627,7 @@ export function AskChat({
                               removeConversation(c.id, e);
                               setSwipedId(null);
                             }}
-                            className="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 text-white"
+                            className="absolute inset-y-0 right-0 flex items-center justify-center bg-destructive text-white"
                             style={{ width: SWIPE_REVEAL }}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -649,7 +649,7 @@ export function AskChat({
                               }
                               resumeConversation(c.id);
                             }}
-                            onKeyDown={(e) => e.key === "Enter" && resumeConversation(c.id)}
+                            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && resumeConversation(c.id)}
                             onTouchStart={(e) => {
                               if (swipedId && swipedId !== c.id) setSwipedId(null);
                               swipeTouchStart.current = {
@@ -695,7 +695,7 @@ export function AskChat({
                               type="button"
                               aria-label="Delete chat"
                               onClick={(e) => removeConversation(c.id, e)}
-                              className="hidden shrink-0 text-ink-soft transition-colors hover:text-red-500 sm:block sm:opacity-0 sm:group-hover:opacity-100"
+                              className="hidden shrink-0 text-ink-soft transition-colors hover:text-destructive sm:block sm:opacity-0 sm:group-hover:opacity-100"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -720,7 +720,7 @@ export function AskChat({
         data-drag-zone
         className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-summary-soft text-summary">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink text-paper">
           <Sparkle className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
@@ -763,10 +763,10 @@ export function AskChat({
       <div data-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
         {!hasMessages ? (
           <div className="flex h-full flex-col items-center justify-center px-4 pb-10 text-center">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-summary-soft text-summary">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-paper">
               <Sparkle className="h-5 w-5" />
             </span>
-            <h2 className="mt-4 text-xl font-semibold text-ink">
+            <h2 className="mt-4 font-serif text-2xl text-ink">
               {noteTitle ? "Ask about this note" : "What can I help with?"}
             </h2>
             {!noteTitle && (
@@ -806,7 +806,7 @@ export function AskChat({
                   {/* Deep async task: working → result link / failure. */}
                   {m.pending && (
                     <div className="flex items-center gap-2.5 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-ink-soft">
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-summary" />
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-ink-soft" />
                       <span>
                         Working on this — I'll save it as a note when it's ready. You can keep
                         chatting.
@@ -823,7 +823,7 @@ export function AskChat({
                       to="/notes/$noteId"
                       params={{ noteId: m.resultNoteId }}
                       onClick={onClose}
-                      className="inline-flex items-center gap-2 rounded-full bg-summary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                      className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
                     >
                       <Check className="h-4 w-4" /> Done — view the note
                     </Link>
@@ -833,7 +833,7 @@ export function AskChat({
                       to="/notes/$noteId"
                       params={{ noteId: m.saved_note_id }}
                       onClick={onClose}
-                      className="inline-flex items-center gap-2 rounded-full bg-summary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                      className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
                     >
                       <Check className="h-4 w-4" /> View saved note
                     </Link>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Plane, Calendar, Star } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
@@ -30,7 +30,7 @@ function TripImage({ item }: { item: TripItem }) {
 
 // One trip card. Tapping the image opens the trip-detail page; the ⭐ toggle writes through the
 // backend (optimistic — handled by the parent).
-export function TripCard({
+export const TripCard = memo(function TripCard({
   item,
   onToggleFavorite,
 }: {
@@ -42,7 +42,7 @@ export function TripCard({
   return (
     <div className="group relative flex min-w-0 flex-col gap-2">
       <div className="relative">
-        <Link to="/trips/$itemId" params={{ itemId: item.id }} className="block">
+        <Link to="/trips/$itemId" params={{ itemId: item.id }} className={`press block rounded-xl shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}>
           <TripImage item={item} />
         </Link>
         <button
@@ -52,7 +52,7 @@ export function TripCard({
           onClick={() => onToggleFavorite(item)}
           className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
             favorite
-              ? "border-transparent bg-amber-400 text-white"
+              ? "border-transparent bg-favorite text-white"
               : "border-border bg-background/80 text-ink-soft hover:text-ink"
           }`}
         >
@@ -77,4 +77,4 @@ export function TripCard({
       </div>
     </div>
   );
-}
+});

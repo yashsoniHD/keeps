@@ -1,56 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { ArrowDownUp, Calendar, MapPin, Plane, Plus, Search, Star, Sun } from "lucide-react";
 import { watchTripItems } from "@/lib/firestore";
 import { updateTripItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
 import type { TripItem } from "@/lib/types";
+import {
+  IconSelect,
+  LoadMoreButton,
+  WALL_GRID,
+  WallError,
+  WallSkeleton,
+  useWallItems,
+} from "@/components/mini-apps/wall";
 import { TripCard } from "./TripCard";
 import { AddTripSheet } from "./AddTripSheet";
 
 type SortKey = "added" | "duration";
 type LengthBucket = "all" | "weekend" | "week" | "long";
 
-// A compact icon filter: a round button showing only an icon, with the native <select> overlaid
-// transparently on top (mirrors the recipes app's IconSelect). The icon fills with the trip accent
-// while a non-default value is active, so active filters stay visible.
-function IconSelect({
-  icon,
-  value,
-  active,
-  onChange,
-  title,
-  children,
-}: {
-  icon: ReactNode;
-  value: string;
-  active: boolean;
-  onChange: (v: string) => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <span
-        aria-hidden
-        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-          active ? "border-transparent bg-trip text-white" : "border-border bg-card text-ink-soft"
-        } ${FOCUS_RING}`}
-      >
-        {icon}
-      </span>
-      <select
-        aria-label={title}
-        title={title}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      >
-        {children}
-      </select>
-    </div>
-  );
-}
+// Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
+const ACCENT_ACTIVE = "bg-trip text-white";
 
 const dedupeKey = (i: TripItem) =>
   i.source_url?.trim().toLowerCase() ||
@@ -94,16 +63,19 @@ function inBucket(days: number | null, bucket: LengthBucket): boolean {
 // status workflow — trips are organised by filters (destination / length / season) + a Favorites ⭐
 // toggle, sorted newest-first or by trip length.
 export function TripsView({ uid }: { uid: string }) {
-  const [items, setItems] = useState<TripItem[] | null>(null);
+  const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<TripItem>(
+    uid,
+    watchTripItems,
+  );
   const [query, setQuery] = useState("");
+  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
+  const deferredQuery = useDeferredValue(query);
   const [destination, setDestination] = useState("all");
   const [length, setLength] = useState<LengthBucket>("all");
   const [season, setSeason] = useState("all");
   const [sort, setSort] = useState<SortKey>("added");
   const [favOnly, setFavOnly] = useState(false);
   const [adding, setAdding] = useState(false);
-
-  useEffect(() => watchTripItems(uid, setItems), [uid]);
 
   const deduped = useMemo(() => dedupeItems(items ?? []), [items]);
 
@@ -119,22 +91,30 @@ export function TripsView({ uid }: { uid: string }) {
     return [...s].sort();
   }, [deduped]);
 
-  const patchLocal = (id: string, patch: Partial<TripItem>) =>
-    setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev);
+  // Stable identities (useCallback) so the memoized TripCards skip re-rendering when
+  // unrelated state (search text, filters) changes.
+  const patchLocal = useCallback(
+    (id: string, patch: Partial<TripItem>) =>
+      setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev),
+    [setItems],
+  );
 
-  const onToggleFavorite = async (item: TripItem) => {
-    const next = !item.favorite;
-    patchLocal(item.id, { favorite: next });
-    try {
-      await updateTripItem(item.id, { favorite: next });
-    } catch {
-      patchLocal(item.id, { favorite: item.favorite }); // revert on failure
-    }
-  };
+  const onToggleFavorite = useCallback(
+    async (item: TripItem) => {
+      const next = !item.favorite;
+      patchLocal(item.id, { favorite: next });
+      try {
+        await updateTripItem(item.id, { favorite: next });
+      } catch {
+        patchLocal(item.id, { favorite: item.favorite }); // revert on failure
+      }
+    },
+    [patchLocal],
+  );
 
   const filterSort = (list: TripItem[]) => {
     let out = list;
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     if (q)
       out = out.filter(
         (i) =>
@@ -152,13 +132,8 @@ export function TripsView({ uid }: { uid: string }) {
     return sorted;
   };
 
-  if (items === null) {
-    return (
-      <div className="flex justify-center py-20">
-        <Plane className="h-6 w-6 animate-pulse text-ink-soft" />
-      </div>
-    );
-  }
+  if (error && items === null) return <WallError onRetry={retry} />;
+  if (items === null) return <WallSkeleton aspect="aspect-[4/3]" />;
 
   const favCount = deduped.filter((i) => i.favorite).length;
   const base = favOnly ? deduped.filter((i) => i.favorite) : deduped;
@@ -196,6 +171,7 @@ export function TripsView({ uid }: { uid: string }) {
             title="Filter by destination"
             value={destination}
             active={destination !== "all"}
+            activeClass={ACCENT_ACTIVE}
             onChange={setDestination}
           >
             <option value="all">Any destination</option>
@@ -211,6 +187,7 @@ export function TripsView({ uid }: { uid: string }) {
           title="Filter by length"
           value={length}
           active={length !== "all"}
+          activeClass={ACCENT_ACTIVE}
           onChange={(v) => setLength(v as LengthBucket)}
         >
           <option value="all">Any length</option>
@@ -224,6 +201,7 @@ export function TripsView({ uid }: { uid: string }) {
             title="Filter by season"
             value={season}
             active={season !== "all"}
+            activeClass={ACCENT_ACTIVE}
             onChange={setSeason}
           >
             <option value="all">Any season</option>
@@ -239,6 +217,7 @@ export function TripsView({ uid }: { uid: string }) {
           title="Sort"
           value={sort}
           active={sort !== "added"}
+          activeClass={ACCENT_ACTIVE}
           onChange={(v) => setSort(v as SortKey)}
         >
           <option value="added">Newest</option>
@@ -262,11 +241,14 @@ export function TripsView({ uid }: { uid: string }) {
       </div>
 
       {shown.length > 0 ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {shown.map((i) => (
-            <TripCard key={i.id} item={i} onToggleFavorite={onToggleFavorite} />
-          ))}
-        </div>
+        <>
+          <div className={WALL_GRID}>
+            {shown.map((i) => (
+              <TripCard key={i.id} item={i} onToggleFavorite={onToggleFavorite} />
+            ))}
+          </div>
+          {canLoadMore && <LoadMoreButton onClick={loadMore} />}
+        </>
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">No trips match your filters.</div>
       ) : favOnly ? (

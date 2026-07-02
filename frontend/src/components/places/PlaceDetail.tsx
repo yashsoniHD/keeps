@@ -89,7 +89,7 @@ export function PlaceDetail({
     return (
       <div className="py-20 text-center text-ink-soft">
         <p className="font-medium text-ink">This place isn’t in your list.</p>
-        <Link to="/places" className="mt-2 inline-block text-sm text-itinerary hover:underline">
+        <Link to="/places" className="mt-2 inline-block text-sm text-place hover:underline">
           Back to places
         </Link>
       </div>
@@ -136,12 +136,12 @@ export function PlaceDetail({
   return (
     <div>
       {/* Photo hero */}
-      <div className="relative -mx-4 mb-6 h-44 overflow-hidden bg-itinerary-soft sm:h-64 md:-mx-8 md:rounded-2xl">
+      <div className="relative -mx-4 mb-6 h-44 overflow-hidden bg-place-soft sm:h-64 md:-mx-8 md:rounded-2xl">
         {photo ? (
           <img src={photo} alt="" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center">
-            <MapPin className="h-12 w-12 text-itinerary/40" />
+            <MapPin className="h-12 w-12 text-place/40" />
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
@@ -160,7 +160,7 @@ export function PlaceDetail({
         ))}
         {item.rating ? (
           <span className="inline-flex items-center gap-1">
-            · <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            · <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
             {item.rating}
             {item.user_rating_count ? ` (${item.user_rating_count})` : ""}
           </span>
@@ -181,8 +181,8 @@ export function PlaceDetail({
           aria-pressed={favorite}
           className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
             favorite
-              ? "border-transparent bg-amber-400 text-white"
-              : "border-border bg-card text-ink hover:bg-itinerary-soft"
+              ? "border-transparent bg-favorite text-white"
+              : "border-border bg-card text-ink hover:bg-place-soft"
           }`}
         >
           <Star className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
@@ -193,8 +193,8 @@ export function PlaceDetail({
           onClick={toggleVisited}
           className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
             visited
-              ? "border-transparent bg-itinerary text-white"
-              : "border-border bg-card text-ink hover:bg-itinerary-soft"
+              ? "border-transparent bg-place text-white"
+              : "border-border bg-card text-ink hover:bg-place-soft"
           }`}
         >
           {visited ? <CheckCircle2 className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
@@ -205,7 +205,7 @@ export function PlaceDetail({
           <button
             type="button"
             onClick={logVisit}
-            className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-itinerary-soft ${FOCUS_RING}`}
+            className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-place-soft ${FOCUS_RING}`}
           >
             <Repeat className="h-4 w-4" />I went again
           </button>
@@ -223,7 +223,7 @@ export function PlaceDetail({
                 <Star
                   className={`h-5 w-5 ${
                     (item.user_rating ?? 0) >= n
-                      ? "fill-amber-400 text-amber-400"
+                      ? "fill-favorite text-favorite"
                       : "text-ink-soft/40"
                   }`}
                 />
@@ -351,7 +351,7 @@ export function PlaceDetail({
                 key={s.id}
                 to="/notes/$noteId"
                 params={{ noteId: s.id }}
-                className={`flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-ink transition-colors hover:bg-itinerary-soft ${FOCUS_RING}`}
+                className={`flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-ink transition-colors hover:bg-place-soft ${FOCUS_RING}`}
               >
                 <FileText className="h-4 w-4 shrink-0 text-ink-soft" />
                 <span className="truncate">{s.title}</span>
@@ -367,7 +367,7 @@ export function PlaceDetail({
           type="button"
           onClick={remove}
           disabled={deleting}
-          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-red-500 disabled:opacity-60 ${FOCUS_RING} rounded`}
+          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-destructive disabled:opacity-60 ${FOCUS_RING} rounded`}
         >
           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           Remove from places

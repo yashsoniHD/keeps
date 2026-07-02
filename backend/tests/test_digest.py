@@ -4,6 +4,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import routers.digest as digest_mod
+from config import settings
+
+
+@pytest.fixture(autouse=True)
+def _unsub_secret(monkeypatch):
+    """_unsub_secret fails loud when unconfigured — give tests a deterministic one."""
+    monkeypatch.setattr(settings, "DIGEST_UNSUB_SECRET", "test-unsub-secret")
 
 
 class FakeReq:

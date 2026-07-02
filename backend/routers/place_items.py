@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from services import google_places, search_index
 from services.auth_dep import require_user
-from services.firebase import flush_usage, get_db
+from services.firebase import flush_usage, get_db, reserve_backfill_run
 from services.places import add_by_place_id, backfill_user
 from services.usage_meter import start_metering
 
@@ -122,7 +122,10 @@ async def place_item_details(item_id: str, user_id: str = Depends(require_user))
 async def backfill_place_items(user_id: str = Depends(require_user)):
     """Import places from the user's existing place notes into the places list. Reads each note's
     `data.venues` (or extracts venue names from its stored text — a lite Gemini call, hence
-    metered) and Google-Places-enriches them. Safe to re-run (idempotent)."""
+    metered) and Google-Places-enriches them. Writes are idempotent; runs are capped per day
+    because the Gemini/Places spend re-incurs on every run."""
+    if not await reserve_backfill_run(user_id, "places"):
+        raise HTTPException(429, "Backfill limit reached for today. Try again tomorrow.")
     meter = start_metering()
     try:
         result = await backfill_user(user_id)

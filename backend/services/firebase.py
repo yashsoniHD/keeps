@@ -152,8 +152,9 @@ async def move_category_meta(uid: str, old_slug: str, new_slug: str) -> None:
         updates[f"category_meta.{new_slug}"] = entry
     try:
         await get_db().collection("users").document(uid).update(updates)
-    except Exception:
-        pass  # user doc/field may not exist yet — nothing to migrate
+    except Exception as e:  # noqa: BLE001 — best-effort, but a real write failure must be visible
+        log.warning("category meta move %s→%s failed for %s: %s: %s",
+                    old_slug, new_slug, uid, type(e).__name__, e)
 
 
 async def remove_category_meta(uid: str, slug: str) -> None:
@@ -162,8 +163,9 @@ async def remove_category_meta(uid: str, slug: str) -> None:
         await get_db().collection("users").document(uid).update(
             {f"category_meta.{slug}": DELETE_FIELD}
         )
-    except Exception:
-        pass  # field may not exist; nothing to clean up
+    except Exception as e:  # noqa: BLE001 — best-effort, but a real write failure must be visible
+        log.warning("category meta removal of %s failed for %s: %s: %s",
+                    slug, uid, type(e).__name__, e)
 
 
 async def prune_category_if_empty(uid: str, slug: str) -> bool:
@@ -334,6 +336,30 @@ async def reserve_image_slot(user_id: str) -> bool:
     except Exception as e:  # noqa: BLE001 — capping is best-effort; never fail a note.
         log.warning("image slot reservation failed for %s: %s: %s", user_id, type(e).__name__, e)
         return False
+
+
+async def reserve_backfill_run(user_id: str, app: str) -> bool:
+    """Transactionally claim one mini-app backfill run for today (per user, per app).
+    Backfill writes are idempotent but their Gemini / enrichment-API spend re-incurs on
+    every run, so repeats are capped (MAX_BACKFILLS_PER_APP_PER_DAY). Returns False when
+    today's budget for this app is used up — the router turns that into a 429."""
+    from google.cloud import firestore as fs
+
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    field = f"backfill_{app}_count"
+
+    @fs.async_transactional
+    async def _claim(tx) -> bool:
+        ref = db.collection("usage").document(f"{user_id}-{today}")
+        snap = await ref.get(transaction=tx)
+        n = (snap.to_dict() or {}).get(field, 0)
+        if n >= settings.MAX_BACKFILLS_PER_APP_PER_DAY:
+            return False
+        tx.set(ref, {"user_id": user_id, "date": today, field: n + 1}, merge=True)
+        return True
+
+    return await _claim(db.transaction())
 
 
 async def reserve_apify_slot() -> bool:

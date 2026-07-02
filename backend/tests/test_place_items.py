@@ -184,9 +184,28 @@ async def test_backfill_delegates_to_service(monkeypatch):
         assert uid == "u"
         return {"notes_processed": 2, "venues_found": 3}
     monkeypatch.setattr(pi_mod, "backfill_user", fake_backfill)
+
+    async def fake_reserve(uid, app):
+        assert app == "places"
+        return True
+    monkeypatch.setattr(pi_mod, "reserve_backfill_run", fake_reserve)
     monkeypatch.setattr(pi_mod, "start_metering", lambda: object())
     async def fake_flush(uid, meter):
         return None
     monkeypatch.setattr(pi_mod, "flush_usage", fake_flush)
     assert await pi_mod.backfill_place_items(user_id="u") == {"notes_processed": 2,
                                                               "venues_found": 3}
+
+
+async def test_backfill_cap_hit_is_429(monkeypatch):
+    async def fake_reserve(uid, app):
+        return False
+    monkeypatch.setattr(pi_mod, "reserve_backfill_run", fake_reserve)
+
+    async def fake_backfill(uid):  # must never run once the cap rejects
+        raise AssertionError("backfill ran past the cap")
+    monkeypatch.setattr(pi_mod, "backfill_user", fake_backfill)
+
+    with pytest.raises(HTTPException) as exc:
+        await pi_mod.backfill_place_items(user_id="u")
+    assert exc.value.status_code == 429

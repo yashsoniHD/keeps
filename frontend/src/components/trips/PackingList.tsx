@@ -119,7 +119,7 @@ export function PackingList({ uid, itemId }: { uid: string; itemId: string }) {
                 type="button"
                 onClick={() => remove(idx)}
                 aria-label="Remove item"
-                className={`shrink-0 rounded p-1 text-ink-soft/50 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100 ${FOCUS_RING}`}
+                className={`shrink-0 rounded p-1 text-ink-soft/50 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 ${FOCUS_RING}`}
               >
                 <X className="h-3.5 w-3.5" />
               </button>

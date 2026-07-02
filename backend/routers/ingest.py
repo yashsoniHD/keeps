@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from google.cloud import firestore as fs
+from pydantic import ValidationError
 
 from config import settings
 from models.note import IngestRequest, JobStatus
@@ -135,7 +136,12 @@ async def _create_job(db, user_id: str, body: IngestRequest) -> JobStatus:
 
 @router.post("/ingest", response_model=JobStatus)
 async def ingest(request: Request, user_id: str = Depends(require_user)):
-    body = await _parse_ingest_request(request)
+    try:
+        body = await _parse_ingest_request(request)
+    except ValidationError:
+        # Manual model construction (headers/raw-body paths) bypasses FastAPI's 422 handling —
+        # an over-limit field must be a clean 400, not an unhandled 500.
+        raise HTTPException(status_code=400, detail="Capture is too large or malformed.")
 
     if body.input_type == "text":
         if not (body.text or "").strip():

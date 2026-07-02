@@ -8,8 +8,10 @@ class IngestRequest(BaseModel):
     # memo). Binary inputs (image/pdf/voice) arrive pre-uploaded to GCS via /ingest/upload,
     # so the request only carries a reference (media_gcs_uri), never the bytes.
     input_type: Literal["url", "text", "image", "pdf", "voice", "video"] = "url"
-    url: str = ""                      # required only when input_type == "url"
-    text: str | None = None            # the note body when input_type == "text"
+    # Size ceilings reject junk at the model boundary instead of carrying megabytes of body
+    # into Firestore job docs (the worker additionally truncates text/content to 30k chars).
+    url: str = Field(default="", max_length=4096)  # required only when input_type == "url"
+    text: str | None = Field(default=None, max_length=100_000)  # note body (input_type "text")
     # Typed notes only: when False the note is saved verbatim (no Gemini extraction) — the
     # raw text becomes the body, the user titles/tags it themselves. Default True keeps the
     # AI-structured behaviour for every other path.
@@ -18,7 +20,7 @@ class IngestRequest(BaseModel):
     media_gcs_uri: str | None = None   # gs:// URI of the uploaded file (image/pdf/voice/video)
     media_mime: str | None = None      # MIME of the uploaded file (Vertex needs it on FileData)
     media_cover_url: str | None = None # public https cover (images double as their own cover)
-    content: str | None = None         # pre-extracted text (paywall/auth bypass via PWA/shortcut)
+    content: str | None = Field(default=None, max_length=200_000)  # device-extracted page text (PWA/shortcut)
     source: str = "web"                # "web" | "shortcut" | "pwa" | "ai_chat" | "upload"
     note_hint: str | None = Field(default=None, max_length=500)  # user instructions for Gemini
 

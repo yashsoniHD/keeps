@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   Clapperboard,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { getUserRegion, setUserRegion } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
@@ -74,7 +75,14 @@ function Settings() {
     }
   };
 
-  if (loading || !user) return null;
+  // Auth still resolving — show a spinner instead of a blank flash.
+  if (loading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <SettingsIcon className="h-6 w-6 animate-pulse text-ink-soft" />
+      </div>
+    );
+  }
 
   return (
     <AppShell>
@@ -84,7 +92,7 @@ function Settings() {
           className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
-          Notes
+          Library
         </Link>
         <h1 className="font-serif text-3xl text-ink">Settings</h1>
 
@@ -491,7 +499,7 @@ function ConnectPhone() {
                 aria-label="Copy token"
               >
                 {copied ? (
-                  <Check className="h-4 w-4 text-itinerary" />
+                  <Check className="h-4 w-4 text-place" />
                 ) : (
                   <Copy className="h-4 w-4" />
                 )}

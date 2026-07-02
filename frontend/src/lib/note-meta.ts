@@ -69,12 +69,12 @@ const PALETTES: NoteAccent[] = [
     border: "border-recipe",
   },
   {
-    dot: "bg-itinerary",
-    chip: "bg-itinerary-soft text-itinerary",
-    ring: "group-hover:ring-itinerary/30",
-    text: "text-itinerary",
-    soft: "bg-itinerary-soft/40",
-    border: "border-itinerary",
+    dot: "bg-place",
+    chip: "bg-place-soft text-place",
+    ring: "group-hover:ring-place/30",
+    text: "text-place",
+    soft: "bg-place-soft/40",
+    border: "border-place",
   },
   {
     dot: "bg-product",

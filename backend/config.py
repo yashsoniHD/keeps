@@ -28,6 +28,12 @@ class Settings:
     EMBED_DIM: int = int(os.getenv("EMBED_DIM", "768"))
     # Top-K notes returned by a semantic search.
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "20"))
+    # Per-user daily cap on /api/search — each search embeds the query (a paid Vertex call,
+    # tiny but previously unbounded). Generous: real usage is a handful of searches a day.
+    MAX_SEARCHES_PER_USER_PER_DAY: int = int(os.getenv("MAX_SEARCHES_PER_USER_PER_DAY", "500"))
+    # Per-user, per-app daily cap on mini-app backfill runs. Backfill writes are idempotent
+    # but each run re-incurs its Gemini / enrichment-API spend, so repeats are bounded.
+    MAX_BACKFILLS_PER_APP_PER_DAY: int = int(os.getenv("MAX_BACKFILLS_PER_APP_PER_DAY", "3"))
 
     CLOUD_TASKS_QUEUE: str = os.getenv("CLOUD_TASKS_QUEUE", "clip-note-jobs")
     CLOUD_TASKS_LOCATION: str = os.getenv("CLOUD_TASKS_LOCATION", "us-central1")
@@ -209,10 +215,11 @@ class Settings:
 
     # --- Admin dashboard ---
     # Emails allowed to read /api/admin/stats (comma-separated). Gating is by verified
-    # Firebase email, not uid, so it's set-and-forget across re-signups.
+    # Firebase email, not uid, so it's set-and-forget across re-signups. NO baked-in
+    # default: unset ⇒ empty set ⇒ admin is fully closed. Set ADMIN_EMAILS on Cloud Run.
     ADMIN_EMAILS: set[str] = {
         e.strip().lower()
-        for e in os.getenv("ADMIN_EMAILS", "yashsoni102@gmail.com").split(",")
+        for e in os.getenv("ADMIN_EMAILS", "").split(",")
         if e.strip()
     }
 

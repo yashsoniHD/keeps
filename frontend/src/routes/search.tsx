@@ -66,7 +66,7 @@ function Group({
       <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-ink-soft">
         <tool.icon className={`h-3.5 w-3.5 ${tool.text}`} />
         {tool.label}
-        <span className="text-ink-soft/60">· {hits.length}</span>
+        <span className="text-ink-soft">· {hits.length}</span>
       </h2>
       <div className="space-y-2">
         {hits.map((h) => (
@@ -135,7 +135,7 @@ function SearchScreen() {
           <Link
             to="/"
             aria-label="Back to Library"
-            className={`inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
+            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>

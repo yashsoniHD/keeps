@@ -144,7 +144,7 @@ export function PlacesMap({
                   </p>
                   {open.rating ? (
                     <p className="inline-flex items-center gap-0.5 text-xs text-ink-soft">
-                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                      <Star className="h-3 w-3 fill-favorite text-favorite" />
                       {open.rating}
                       {open.price_level ? ` · ${open.price_level}` : ""}
                     </p>

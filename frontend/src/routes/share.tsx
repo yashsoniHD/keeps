@@ -137,7 +137,7 @@ function SharePage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-center">
       <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
-      {error && <p className="max-w-xs text-sm text-red-600">{error}</p>}
+      {error && <p className="max-w-xs text-sm text-destructive">{error}</p>}
     </div>
   );
 }

@@ -16,6 +16,22 @@ import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@
 import { FOCUS_RING } from "@/lib/ui";
 import { WithNoteMenu } from "@/components/NoteContextMenu";
 
+// One debounced window-resize notifier shared by every card. Card width only changes when
+// the viewport does (the responsive column count), so a lone resize listener replaces the
+// previous per-card ResizeObserver — dozens of live observers doing layout work on a full feed.
+const resizeCallbacks = new Set<() => void>();
+let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => resizeCallbacks.forEach((cb) => cb()), 150);
+  });
+}
+function onSharedResize(cb: () => void): () => void {
+  resizeCallbacks.add(cb);
+  return () => resizeCallbacks.delete(cb);
+}
+
 // Footer label for a note with no web source (typed note / uploaded image or PDF / Clip AI).
 function savedLabel(note: Note): string {
   switch (note.input_type) {
@@ -121,20 +137,19 @@ export function NoteCard({ note }: { note: Note }) {
 
   // Measure how many lines the (already 2-line-clamped) title actually renders to. Title
   // wrapping changes with card width — which shifts across the responsive 1–4 col grid —
-  // so re-measure via ResizeObserver, not just once on mount.
+  // so re-measure on (shared, debounced) window resize; a layout toggle remounts the card
+  // and re-measures on mount.
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [titleLines, setTitleLines] = useState(1);
   useLayoutEffect(() => {
     const el = titleRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
+    if (!el) return;
     const measure = () => {
       const lh = parseFloat(getComputedStyle(el).lineHeight);
       if (lh > 0) setTitleLines(Math.max(1, Math.round(el.offsetHeight / lh)));
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    return onSharedResize(measure);
   }, [note.title]);
   const summaryClamp = titleLines >= 2 ? "line-clamp-2" : "line-clamp-3";
 
@@ -165,7 +180,7 @@ export function NoteCard({ note }: { note: Note }) {
           </div>
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-soft">
             {note.pinned_at && <Pin className="h-3 w-3 fill-ink/70 text-ink/70" />}
-            {note.is_favorite && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+            {note.is_favorite && <Star className="h-3 w-3 fill-favorite text-favorite" />}
             {formatDateShort(note.created_at)}
           </span>
         </div>

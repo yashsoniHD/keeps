@@ -8,10 +8,11 @@ embedding vector itself.
 Requires the Firestore vector index on `notes.embedding` (COSINE, user_id prefix) —
 see infra/. Notes written before embeddings shipped won't match until backfilled.
 """
-import asyncio
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from google.cloud import firestore as fs
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 from google.cloud.firestore_v1.vector import Vector
 
@@ -19,8 +20,9 @@ from config import settings
 from services import search_index
 from services.auth_dep import require_user
 from services.embeddings import embedding_service
-from services.firebase import get_db
+from services.firebase import flush_usage, get_db
 from services.source_alias import source_matches
+from services.usage_meter import start_metering
 
 log = logging.getLogger("clipnote.search")
 
@@ -79,6 +81,25 @@ async def _notes_by_source(db, user_id: str, keyword: str) -> list[dict]:
     return out
 
 
+async def _enforce_search_caps(db, user_id: str) -> None:
+    """Transactional per-user daily counter on search_count. Each search embeds the query —
+    a paid Vertex call (tiny, but real and previously unbounded) — so it gets the same
+    counter treatment as every other paid path. Raises 429 at the limit."""
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    transaction = db.transaction()
+
+    @fs.async_transactional
+    async def _bump(tx):
+        user_ref = db.collection("usage").document(f"{user_id}-{today}")
+        snap = await user_ref.get(transaction=tx)
+        n = (snap.to_dict() or {}).get("search_count", 0)
+        if n >= settings.MAX_SEARCHES_PER_USER_PER_DAY:
+            raise HTTPException(429, "Daily search limit reached. Try again tomorrow.")
+        tx.set(user_ref, {"user_id": user_id, "date": today, "search_count": n + 1}, merge=True)
+
+    await _bump(transaction)
+
+
 @router.get("/search")
 async def search(
     q: str = Query(..., min_length=1, max_length=200),
@@ -89,40 +110,45 @@ async def search(
         return {"results": []}
 
     db = get_db()
-
-    # A one-word query is often a source name ("pinterest", "youtube"). Vector search alone
-    # misses these — a recipe note isn't semantically "pinterest" — so look up notes by brand
-    # and surface them first, ahead of the semantic results.
-    source_hits: list[dict] = []
-    if " " not in q and len(q) <= 20:
-        try:
-            source_hits = await _notes_by_source(db, user_id, q)
-        except Exception as e:
-            log.warning("source lookup failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
-
-    vector_hits: list[dict] = []
+    await _enforce_search_caps(db, user_id)
+    # Meter the query embedding so search spend shows up in the admin dashboard.
+    meter = start_metering()
     try:
-        query_vec = await embedding_service.embed_query(q)
-    except Exception as e:
-        log.error("query embedding failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
-        query_vec = None
-    if query_vec:
-        # Search the unified index so results span notes AND mini-app items (recipes, movies,
-        # products, places, trips) that no longer create note docs.
-        vector_query = db.collection(search_index.COLLECTION).where(
-            "user_id", "==", user_id).find_nearest(
-            vector_field="embedding",
-            query_vector=Vector(query_vec),
-            distance_measure=DistanceMeasure.COSINE,
-            limit=settings.SEARCH_LIMIT,
-        )
-        vector_hits = [_project_index(doc.to_dict() or {}) async for doc in vector_query.stream()]
+        # A one-word query is often a source name ("pinterest", "youtube"). Vector search alone
+        # misses these — a recipe note isn't semantically "pinterest" — so look up notes by brand
+        # and surface them first, ahead of the semantic results.
+        source_hits: list[dict] = []
+        if " " not in q and len(q) <= 20:
+            try:
+                source_hits = await _notes_by_source(db, user_id, q)
+            except Exception as e:
+                log.warning("source lookup failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
 
-    # Source matches first (exact intent), then semantic, deduped by underlying doc id and capped.
-    seen, results = set(), []
-    for d in (*source_hits, *vector_hits):
-        if d["id"] in seen:
-            continue
-        seen.add(d["id"])
-        results.append(d)
-    return {"results": results[: settings.SEARCH_LIMIT]}
+        vector_hits: list[dict] = []
+        try:
+            query_vec = await embedding_service.embed_query(q)
+        except Exception as e:
+            log.error("query embedding failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
+            query_vec = None
+        if query_vec:
+            # Search the unified index so results span notes AND mini-app items (recipes, movies,
+            # products, places, trips) that no longer create note docs.
+            vector_query = db.collection(search_index.COLLECTION).where(
+                "user_id", "==", user_id).find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(query_vec),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=settings.SEARCH_LIMIT,
+            )
+            vector_hits = [_project_index(doc.to_dict() or {}) async for doc in vector_query.stream()]
+
+        # Source matches first (exact intent), then semantic, deduped by underlying doc id and capped.
+        seen, results = set(), []
+        for d in (*source_hits, *vector_hits):
+            if d["id"] in seen:
+                continue
+            seen.add(d["id"])
+            results.append(d)
+        return {"results": results[: settings.SEARCH_LIMIT]}
+    finally:
+        await flush_usage(user_id, meter)

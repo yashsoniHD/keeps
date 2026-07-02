@@ -18,8 +18,9 @@ from pydantic import BaseModel
 
 from services import search_index
 from services.auth_dep import require_user
-from services.firebase import get_db
+from services.firebase import flush_usage, get_db, reserve_backfill_run
 from services.itineraries import backfill_user
+from services.usage_meter import start_metering
 
 router = APIRouter(tags=["trip_items"])
 
@@ -53,10 +54,17 @@ async def update_trip_item(item_id: str, body: TripItemUpdate,
 
 @router.post("/trip-items/backfill")
 async def backfill_trip_items(user_id: str = Depends(require_user)):
-    """Import trips from the user's existing itinerary notes into the wall. Reads each note's
-    already-structured `data` (no re-scraping, no Gemini; only cached stop geocodes). Safe to
-    re-run (idempotent)."""
-    return await backfill_user(user_id)
+    """Import trips from the user's existing itinerary notes into the wall. Notes that already
+    carry days[] are a pure copy; older travel notes get a one-off Gemini re-extraction of the
+    day plan (see itineraries.backfill_user) — that spend is metered here and runs are capped
+    per day. Writes are idempotent, so re-running within the cap is safe."""
+    if not await reserve_backfill_run(user_id, "trips"):
+        raise HTTPException(429, "Backfill limit reached for today. Try again tomorrow.")
+    meter = start_metering()
+    try:
+        return await backfill_user(user_id)
+    finally:
+        await flush_usage(user_id, meter)
 
 
 @router.delete("/trip-items/{item_id}")

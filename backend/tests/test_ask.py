@@ -100,6 +100,22 @@ async def test_daily_cap_hit_blocks_before_gemini(fake_db, monkeypatch):
     assert calls["plan"] == []  # cap is enforced before any paid AI call
 
 
+async def test_daily_cap_hit_blocks_before_pool_embedding(fake_db, monkeypatch):
+    """The candidate pool embeds the query (a paid call) — a capped user must 429 first."""
+    fake_db.seed("usage", f"u-{TODAY}", {"ask_count": settings.MAX_ASKS_PER_USER_PER_DAY})
+    _gemini(monkeypatch, AskPlan(scope="notes", note_ids=["n1"]))
+
+    async def boom_pool(db, user_id, question):
+        raise AssertionError("candidate_pool ran past the cap")
+    monkeypatch.setattr(nr, "candidate_pool", boom_pool)
+
+    with pytest.raises(HTTPException) as exc:
+        await ask_mod.ask(AskRequest(question="what to watch"), user_id="u")
+    assert exc.value.status_code == 429
+
+
+
+
 async def test_semantic_happy_path(fake_db, monkeypatch):
     _gemini(monkeypatch, AskPlan(scope="notes", note_ids=["n1"]))
     res = await ask_mod.ask(AskRequest(question="what to watch"), user_id="u")

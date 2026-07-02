@@ -14,10 +14,10 @@
   --radius-3xl: calc(var(--radius) + 12px);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* One display voice: Instrument Serif carries every heading — wordmark, collection names,
+     note titles. (Fraunces was retired: it shipped in only three spots, so the same name
+     rendered in two faces depending on the screen.) */
   --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
-  /* Display face for collection names + big headings: Fraunces has the weight and character
-     Instrument Serif lacks at tile sizes, while staying in the warm serif house style. */
-  --font-display: "Fraunces Variable", "Instrument Serif", ui-serif, Georgia, serif;
 
   --color-background: var(--background);
   --color-brand: var(--brand);
@@ -48,8 +48,8 @@
 
   --color-recipe: var(--recipe);
   --color-recipe-soft: var(--recipe-soft);
-  --color-itinerary: var(--itinerary);
-  --color-itinerary-soft: var(--itinerary-soft);
+  --color-place: var(--place);
+  --color-place-soft: var(--place-soft);
   --color-product: var(--product);
   --color-product-soft: var(--product-soft);
   --color-summary: var(--summary);
@@ -64,6 +64,12 @@
   --color-health-soft: var(--health-soft);
   --color-trip: var(--trip);
   --color-trip-soft: var(--trip-soft);
+
+  /* semantic accents (cross-cutting, not tied to a collection) */
+  --color-favorite: var(--favorite);
+  --color-favorite-soft: var(--favorite-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
 }
 
 :root {
@@ -97,13 +103,15 @@
   --destructive-foreground: oklch(0.99 0 0);
   --border: oklch(0.9 0.012 75);
   --input: oklch(0.9 0.012 75);
-  --ring: oklch(0.7 0.04 60);
+  /* Dark enough to be clearly visible against warm paper — the focus ring is an a11y
+     affordance, not a decoration. */
+  --ring: oklch(0.5 0.06 55);
 
   /* type accents */
   --recipe: oklch(0.62 0.16 38);          /* terracotta */
   --recipe-soft: oklch(0.94 0.04 40);
-  --itinerary: oklch(0.55 0.09 155);      /* sage */
-  --itinerary-soft: oklch(0.94 0.03 155);
+  --place: oklch(0.55 0.09 155);          /* sage — venues (Places app) */
+  --place-soft: oklch(0.94 0.03 155);
   --product: oklch(0.48 0.14 265);        /* indigo */
   --product-soft: oklch(0.94 0.03 265);
   --summary: oklch(0.65 0.13 75);         /* amber */
@@ -118,6 +126,12 @@
   --health-soft: oklch(0.95 0.03 10);
   --trip: oklch(0.55 0.11 240);           /* sky — trips & itineraries */
   --trip-soft: oklch(0.94 0.03 240);
+
+  /* semantic accents */
+  --favorite: oklch(0.72 0.15 78);        /* warm gold — the ⭐ everywhere */
+  --favorite-soft: oklch(0.95 0.05 85);
+  --success: oklch(0.58 0.13 160);        /* calm green — "target hit", positive signals */
+  --success-soft: oklch(0.94 0.04 160);
 }
 
 .dark {
@@ -145,14 +159,14 @@
   --destructive-foreground: oklch(0.99 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.55 0 0);
+  --ring: oklch(0.68 0.02 60);
 
   /* type accents — base nudged lighter for legibility on charcoal; -soft inverts from
      near-white fills to dark, low-chroma tints that sit just above the card surface. */
   --recipe: oklch(0.72 0.15 38);
   --recipe-soft: oklch(0.30 0.05 40);
-  --itinerary: oklch(0.70 0.11 155);
-  --itinerary-soft: oklch(0.30 0.04 155);
+  --place: oklch(0.70 0.11 155);
+  --place-soft: oklch(0.30 0.04 155);
   --product: oklch(0.68 0.14 265);
   --product-soft: oklch(0.31 0.05 265);
   --summary: oklch(0.76 0.13 80);
@@ -167,6 +181,12 @@
   --health-soft: oklch(0.31 0.05 10);
   --trip: oklch(0.70 0.12 240);
   --trip-soft: oklch(0.30 0.04 240);
+
+  /* semantic accents */
+  --favorite: oklch(0.8 0.14 82);
+  --favorite-soft: oklch(0.32 0.06 82);
+  --success: oklch(0.7 0.13 160);
+  --success-soft: oklch(0.3 0.05 160);
 }
 
 @layer base {
@@ -183,14 +203,6 @@
     font-family: var(--font-serif);
     letter-spacing: -0.01em;
     font-weight: 400;
-  }
-  /* Fraunces carries real weight — 500 reads as substantial without shouting, and its
-     optical-size axis keeps tile-sized names crisp. */
-  .font-display {
-    font-family: var(--font-display);
-    font-optical-sizing: auto;
-    letter-spacing: -0.015em;
-    font-weight: 500;
   }
 }
 

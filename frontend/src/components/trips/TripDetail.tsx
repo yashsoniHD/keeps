@@ -130,7 +130,7 @@ export function TripDetail({
               aria-pressed={favorite}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-amber-400 text-white"
+                  ? "border-transparent bg-favorite text-white"
                   : "border-border bg-card text-ink hover:bg-trip-soft"
               }`}
             >
@@ -252,7 +252,7 @@ export function TripDetail({
           type="button"
           onClick={remove}
           disabled={deleting}
-          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-red-500 disabled:opacity-60 ${FOCUS_RING} rounded`}
+          className={`inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-destructive disabled:opacity-60 ${FOCUS_RING} rounded`}
         >
           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           Remove from trips

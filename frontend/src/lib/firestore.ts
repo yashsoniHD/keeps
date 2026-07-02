@@ -557,6 +557,19 @@ export async function getToolCounts(userId: string): Promise<ToolCounts> {
   return counts;
 }
 
+// Count of hand-made notes (typed / photo / PDF / voice / video — everything that isn't a URL
+// capture) for the "Your notes" folder tile. A server-side aggregate: one cheap read instead of
+// streaming 200 note docs just to derive a number. Equality-only filters, so no composite index.
+export async function getManualNotesCount(userId: string): Promise<number> {
+  const q = query(
+    collection(db, "notes"),
+    where("user_id", "==", userId),
+    where("input_type", "in", ["text", "image", "pdf", "voice", "video"]),
+  );
+  const snap = await getCountFromServer(q);
+  return snap.data().count;
+}
+
 // The user's "where to watch" region (ISO-3166-1 alpha-2). Empty when never set.
 export async function getUserRegion(userId: string): Promise<string> {
   const snap = await getDoc(doc(db, "users", userId));

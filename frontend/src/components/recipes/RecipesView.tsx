@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import {
   ArrowDownUp,
   ChefHat,
@@ -16,6 +15,14 @@ import { watchRecipeItems } from "@/lib/firestore";
 import { updateRecipeItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
 import type { RecipeItem } from "@/lib/types";
+import {
+  IconSelect,
+  LoadMoreButton,
+  WALL_GRID,
+  WallError,
+  WallSkeleton,
+  useWallItems,
+} from "@/components/mini-apps/wall";
 import { RecipeCard } from "./RecipeCard";
 import { AddRecipeSheet } from "./AddRecipeSheet";
 import { GroceryListSheet } from "./GroceryListSheet";
@@ -23,46 +30,8 @@ import { GroceryListSheet } from "./GroceryListSheet";
 type SortKey = "added" | "time";
 type TimeBucket = "all" | "u30" | "30_60" | "60p";
 
-// A compact icon filter: a round button showing only an icon, with the native <select> overlaid
-// transparently on top (mirrors the wishlist's IconSelect). The icon fills with the recipe accent
-// while a non-default value is active, so active filters stay visible.
-function IconSelect({
-  icon,
-  value,
-  active,
-  onChange,
-  title,
-  children,
-}: {
-  icon: ReactNode;
-  value: string;
-  active: boolean;
-  onChange: (v: string) => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <span
-        aria-hidden
-        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-          active ? "border-transparent bg-recipe text-white" : "border-border bg-card text-ink-soft"
-        } ${FOCUS_RING}`}
-      >
-        {icon}
-      </span>
-      <select
-        aria-label={title}
-        title={title}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      >
-        {children}
-      </select>
-    </div>
-  );
-}
+// Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
+const ACCENT_ACTIVE = "bg-recipe text-white";
 
 const dedupeKey = (i: RecipeItem) =>
   i.source_url?.trim().toLowerCase() ||
@@ -121,8 +90,13 @@ function inBucket(mins: number | null, bucket: TimeBucket): boolean {
 // time) + a Favorites ⭐ toggle. A "grocery list" mode turns the wall into a multi-select for
 // building a combined, checkable shopping list from the selected recipes' ingredients.
 export function RecipesView({ uid }: { uid: string }) {
-  const [items, setItems] = useState<RecipeItem[] | null>(null);
+  const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<RecipeItem>(
+    uid,
+    watchRecipeItems,
+  );
   const [query, setQuery] = useState("");
+  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
+  const deferredQuery = useDeferredValue(query);
   const [cuisine, setCuisine] = useState("all");
   const [difficulty, setDifficulty] = useState("all");
   const [time, setTime] = useState<TimeBucket>("all");
@@ -133,8 +107,6 @@ export function RecipesView({ uid }: { uid: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showList, setShowList] = useState(false);
 
-  useEffect(() => watchRecipeItems(uid, setItems), [uid]);
-
   const deduped = useMemo(() => dedupeItems(items ?? []), [items]);
 
   const cuisineNames = useMemo(() => {
@@ -143,26 +115,37 @@ export function RecipesView({ uid }: { uid: string }) {
     return [...s].sort();
   }, [deduped]);
 
-  const patchLocal = (id: string, patch: Partial<RecipeItem>) =>
-    setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev);
+  // Stable identities (useCallback) so the memoized RecipeCards skip re-rendering when
+  // unrelated state (search text, filters) changes.
+  const patchLocal = useCallback(
+    (id: string, patch: Partial<RecipeItem>) =>
+      setItems((prev) => prev?.map((i) => (i.id === id ? { ...i, ...patch } : i)) ?? prev),
+    [setItems],
+  );
 
-  const onToggleFavorite = async (item: RecipeItem) => {
-    const next = !item.favorite;
-    patchLocal(item.id, { favorite: next });
-    try {
-      await updateRecipeItem(item.id, { favorite: next });
-    } catch {
-      patchLocal(item.id, { favorite: item.favorite }); // revert on failure
-    }
-  };
+  const onToggleFavorite = useCallback(
+    async (item: RecipeItem) => {
+      const next = !item.favorite;
+      patchLocal(item.id, { favorite: next });
+      try {
+        await updateRecipeItem(item.id, { favorite: next });
+      } catch {
+        patchLocal(item.id, { favorite: item.favorite }); // revert on failure
+      }
+    },
+    [patchLocal],
+  );
 
-  const onToggleSelect = (item: RecipeItem) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(item.id)) next.delete(item.id);
-      else next.add(item.id);
-      return next;
-    });
+  const onToggleSelect = useCallback(
+    (item: RecipeItem) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(item.id)) next.delete(item.id);
+        else next.add(item.id);
+        return next;
+      }),
+    [],
+  );
 
   const exitSelecting = () => {
     setSelecting(false);
@@ -171,7 +154,7 @@ export function RecipesView({ uid }: { uid: string }) {
 
   const filterSort = (list: RecipeItem[]) => {
     let out = list;
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     if (q)
       out = out.filter(
         (i) =>
@@ -192,13 +175,8 @@ export function RecipesView({ uid }: { uid: string }) {
     return sorted;
   };
 
-  if (items === null) {
-    return (
-      <div className="flex justify-center py-20">
-        <ChefHat className="h-6 w-6 animate-pulse text-ink-soft" />
-      </div>
-    );
-  }
+  if (error && items === null) return <WallError onRetry={retry} />;
+  if (items === null) return <WallSkeleton aspect="aspect-[4/3]" />;
 
   const favCount = deduped.filter((i) => i.favorite).length;
   const base = favOnly ? deduped.filter((i) => i.favorite) : deduped;
@@ -257,6 +235,7 @@ export function RecipesView({ uid }: { uid: string }) {
             title="Filter by cuisine"
             value={cuisine}
             active={cuisine !== "all"}
+            activeClass={ACCENT_ACTIVE}
             onChange={setCuisine}
           >
             <option value="all">Any cuisine</option>
@@ -272,6 +251,7 @@ export function RecipesView({ uid }: { uid: string }) {
           title="Filter by effort"
           value={difficulty}
           active={difficulty !== "all"}
+          activeClass={ACCENT_ACTIVE}
           onChange={setDifficulty}
         >
           <option value="all">Any effort</option>
@@ -284,6 +264,7 @@ export function RecipesView({ uid }: { uid: string }) {
           title="Filter by time"
           value={time}
           active={time !== "all"}
+          activeClass={ACCENT_ACTIVE}
           onChange={(v) => setTime(v as TimeBucket)}
         >
           <option value="all">Any time</option>
@@ -296,6 +277,7 @@ export function RecipesView({ uid }: { uid: string }) {
           title="Sort"
           value={sort}
           active={sort !== "added"}
+          activeClass={ACCENT_ACTIVE}
           onChange={(v) => setSort(v as SortKey)}
         >
           <option value="added">Newest</option>
@@ -319,18 +301,21 @@ export function RecipesView({ uid }: { uid: string }) {
       </div>
 
       {shown.length > 0 ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {shown.map((i) => (
-            <RecipeCard
-              key={i.id}
-              item={i}
-              selecting={selecting}
-              selected={selected.has(i.id)}
-              onToggleSelect={onToggleSelect}
-              onToggleFavorite={onToggleFavorite}
-            />
-          ))}
-        </div>
+        <>
+          <div className={WALL_GRID}>
+            {shown.map((i) => (
+              <RecipeCard
+                key={i.id}
+                item={i}
+                selecting={selecting}
+                selected={selected.has(i.id)}
+                onToggleSelect={onToggleSelect}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </div>
+          {canLoadMore && <LoadMoreButton onClick={loadMore} />}
+        </>
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">
           No recipes match your filters.

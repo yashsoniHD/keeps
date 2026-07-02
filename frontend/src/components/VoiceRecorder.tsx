@@ -164,7 +164,7 @@ export function VoiceRecorder({
         </p>
       </div>
 
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 
       {(phase === "recorded" || phase === "saving") && (
         <div className="mt-3 flex gap-2">

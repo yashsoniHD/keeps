@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ArrowDownUp,
@@ -14,6 +14,14 @@ import {
 import { watchPlaceItems } from "@/lib/firestore";
 import { FOCUS_RING } from "@/lib/ui";
 import type { PlaceItem } from "@/lib/types";
+import {
+  IconSelect,
+  LoadMoreButton,
+  WALL_GRID,
+  WallError,
+  WallSkeleton,
+  useWallItems,
+} from "@/components/mini-apps/wall";
 import { PlaceCard } from "./PlaceCard";
 import { PlaceRow } from "./PlaceCard";
 import { AddPlaceSheet } from "./AddPlaceSheet";
@@ -22,47 +30,8 @@ type SortKey = "added" | "rating";
 type Tab = "saved" | "starred";
 type ViewMode = "grid" | "list";
 
-// Compact icon filter — round button with a transparent native <select> on top (mirrors the
-// wishlist/watchlist IconSelect). Fills with the place accent while a non-default value is active.
-function IconSelect({
-  icon,
-  value,
-  active,
-  onChange,
-  title,
-  children,
-}: {
-  icon: ReactNode;
-  value: string;
-  active: boolean;
-  onChange: (v: string) => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <span
-        aria-hidden
-        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-          active
-            ? "border-transparent bg-itinerary text-white"
-            : "border-border bg-card text-ink-soft"
-        } ${FOCUS_RING}`}
-      >
-        {icon}
-      </span>
-      <select
-        aria-label={title}
-        title={title}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      >
-        {children}
-      </select>
-    </div>
-  );
-}
+// Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
+const ACCENT_ACTIVE = "bg-place text-white";
 
 const STATUS_RANK: Record<PlaceItem["place_status"], number> = {
   visited: 2,
@@ -104,7 +73,7 @@ const EMPTY: Record<Tab, { title: string; body: string }> = {
 
 function Grid({ items }: { items: PlaceItem[] }) {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+    <div className={WALL_GRID}>
       {items.map((i) => (
         <PlaceCard key={i.id} item={i} />
       ))}
@@ -127,16 +96,19 @@ function ListView({ items }: { items: PlaceItem[] }) {
 // Grid / List views plus city/category filters and a search picker. Cards are lean (tap to open);
 // all actions live on the detail page. Owns the place_items listener.
 export function PlacesView({ uid }: { uid: string }) {
-  const [items, setItems] = useState<PlaceItem[] | null>(null);
+  const { items, error, retry, canLoadMore, loadMore } = useWallItems<PlaceItem>(
+    uid,
+    watchPlaceItems,
+  );
   const [tab, setTab] = useState<Tab>("saved");
   const [view, setView] = useState<ViewMode>("grid");
   const [query, setQuery] = useState("");
+  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
+  const deferredQuery = useDeferredValue(query);
   const [city, setCity] = useState<string>("all");
   const [category, setCategory] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("added");
   const [adding, setAdding] = useState(false);
-
-  useEffect(() => watchPlaceItems(uid, setItems), [uid]);
 
   const deduped = useMemo(() => dedupeItems(items ?? []), [items]);
 
@@ -154,7 +126,7 @@ export function PlacesView({ uid }: { uid: string }) {
 
   const filterSort = (list: PlaceItem[]) => {
     let out = list;
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     if (q)
       out = out.filter(
         (i) =>
@@ -169,13 +141,8 @@ export function PlacesView({ uid }: { uid: string }) {
     return sorted;
   };
 
-  if (items === null) {
-    return (
-      <div className="flex justify-center py-20">
-        <MapPin className="h-6 w-6 animate-pulse text-ink-soft" />
-      </div>
-    );
-  }
+  if (error && items === null) return <WallError onRetry={retry} />;
+  if (items === null) return <WallSkeleton aspect="aspect-[4/3]" />;
 
   const counts = {
     saved: deduped.length,
@@ -205,7 +172,7 @@ export function PlacesView({ uid }: { uid: string }) {
               type="button"
               onClick={() => setTab(t.key)}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
-                tab === t.key ? "bg-itinerary text-white" : "text-ink-soft hover:text-ink"
+                tab === t.key ? "bg-place text-white" : "text-ink-soft hover:text-ink"
               }`}
             >
               {t.label} · {counts[t.key]}
@@ -215,7 +182,7 @@ export function PlacesView({ uid }: { uid: string }) {
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className={`inline-flex items-center gap-1.5 rounded-full bg-itinerary px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 rounded-full bg-place px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
         >
           <Plus className="h-3.5 w-3.5" />
           Add place
@@ -244,7 +211,7 @@ export function PlacesView({ uid }: { uid: string }) {
               aria-label={v.label}
               onClick={() => setView(v.key)}
               className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${FOCUS_RING} ${
-                view === v.key ? "bg-itinerary text-white" : "text-ink-soft hover:text-ink"
+                view === v.key ? "bg-place text-white" : "text-ink-soft hover:text-ink"
               }`}
             >
               {v.icon}
@@ -258,6 +225,7 @@ export function PlacesView({ uid }: { uid: string }) {
             title="Filter by city"
             value={city}
             active={city !== "all"}
+            activeClass={ACCENT_ACTIVE}
             onChange={setCity}
           >
             <option value="all">Any city</option>
@@ -274,6 +242,7 @@ export function PlacesView({ uid }: { uid: string }) {
             title="Filter by category"
             value={category}
             active={category !== "all"}
+            activeClass={ACCENT_ACTIVE}
             onChange={setCategory}
           >
             <option value="all">Any type</option>
@@ -289,6 +258,7 @@ export function PlacesView({ uid }: { uid: string }) {
           title="Sort"
           value={sort}
           active={sort !== "added"}
+          activeClass={ACCENT_ACTIVE}
           onChange={(v) => setSort(v as SortKey)}
         >
           <option value="added">Newest</option>
@@ -297,11 +267,10 @@ export function PlacesView({ uid }: { uid: string }) {
       </div>
 
       {shown.length > 0 ? (
-        view === "grid" ? (
-          <Grid items={shown} />
-        ) : (
-          <ListView items={shown} />
-        )
+        <>
+          {view === "grid" ? <Grid items={shown} /> : <ListView items={shown} />}
+          {canLoadMore && <LoadMoreButton onClick={loadMore} />}
+        </>
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">No places match your filters.</div>
       ) : (

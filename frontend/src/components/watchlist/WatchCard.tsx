@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Clapperboard, Tv, Eye, CheckCircle2, Star, Plus } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
@@ -33,7 +33,7 @@ function PosterImage({ item }: { item: WatchItem }) {
 // One poster card. Tapping the poster opens the movie-detail page; the watched toggle and the
 // "+ Watchlist" promote action (Saved items only) write through the backend (optimistic — handled
 // by the parent). Rating is set on the detail page and shown here read-only.
-export function WatchCard({
+export const WatchCard = memo(function WatchCard({
   item,
   onToggleWatched,
   onAddToWatchlist,
@@ -50,7 +50,11 @@ export function WatchCard({
   const flatrate = (item.providers ?? []).filter((p) => p.type === "flatrate");
 
   const poster = (
-    <Link to="/watchlist/$itemId" params={{ itemId: item.id }} className="block">
+    <Link
+      to="/watchlist/$itemId"
+      params={{ itemId: item.id }}
+      className={`press block rounded-xl shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}
+    >
       <PosterImage item={item} />
     </Link>
   );
@@ -81,7 +85,7 @@ export function WatchCard({
             onClick={() => onToggleFavorite(item)}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
               favorite
-                ? "border-transparent bg-amber-400 text-white"
+                ? "border-transparent bg-favorite text-white"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
             }`}
           >
@@ -145,10 +149,10 @@ export function WatchCard({
       {/* Rating — read-only badge on watched items the user has rated */}
       {watched && item.rating ? (
         <div className="flex items-center gap-1 text-xs text-ink-soft">
-          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+          <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
           <span>{item.rating}/5</span>
         </div>
       ) : null}
     </div>
   );
-}
+});

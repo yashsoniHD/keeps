@@ -71,7 +71,7 @@ export function AddProductSheet({ onClose }: { onClose: () => void }) {
                 placeholder="https://…"
                 className={`w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
               />
-              {error && <p className="text-xs text-red-500">{error}</p>}
+              {error && <p className="text-xs text-destructive">{error}</p>}
               <button
                 type="button"
                 onClick={submit}

@@ -166,10 +166,10 @@ export function NoteHeader({
             aria-label={note.is_favorite ? "Remove favorite" : "Favorite"}
             title={note.is_favorite ? "Favorited" : "Favorite"}
             className={`${HEADER_BTN} ${FOCUS_RING} ${
-              note.is_favorite ? "text-amber-500" : "text-ink-soft hover:text-ink"
+              note.is_favorite ? "text-favorite" : "text-ink-soft hover:text-ink"
             }`}
           >
-            <Star className={`h-4 w-4 ${note.is_favorite ? "fill-amber-400" : ""}`} />
+            <Star className={`h-4 w-4 ${note.is_favorite ? "fill-favorite" : ""}`} />
           </button>
           <button
             type="button"

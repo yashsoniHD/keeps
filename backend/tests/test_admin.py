@@ -6,6 +6,12 @@ import routers.admin as admin_mod
 from config import settings
 
 
+@pytest.fixture(autouse=True)
+def _admin_allowlist(monkeypatch):
+    """ADMIN_EMAILS has no baked-in default (unset ⇒ admin closed) — give tests one."""
+    monkeypatch.setattr(settings, "ADMIN_EMAILS", {"admin@test.dev"})
+
+
 # ---------------- require_admin gating ----------------
 
 async def test_no_header_is_401():

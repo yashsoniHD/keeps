@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ChefHat, Clock, Star, Check } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
@@ -46,7 +46,7 @@ function RecipeImage({ item }: { item: RecipeItem }) {
 // One recipe card. Tapping the image opens the recipe-detail page; in grocery mode the card becomes
 // a selection toggle (for building a combined shopping list) instead of a link. The ⭐ toggle writes
 // through the backend (optimistic — handled by the parent).
-export function RecipeCard({
+export const RecipeCard = memo(function RecipeCard({
   item,
   selecting,
   selected,
@@ -87,7 +87,7 @@ export function RecipeCard({
           </button>
         ) : (
           <>
-            <Link to="/recipes/$itemId" params={{ itemId: item.id }} className="block">
+            <Link to="/recipes/$itemId" params={{ itemId: item.id }} className={`press block rounded-xl shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}>
               <RecipeImage item={item} />
             </Link>
             <button
@@ -97,7 +97,7 @@ export function RecipeCard({
               onClick={() => onToggleFavorite(item)}
               className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-amber-400 text-white"
+                  ? "border-transparent bg-favorite text-white"
                   : "border-border bg-background/80 text-ink-soft hover:text-ink"
               }`}
             >
@@ -136,4 +136,4 @@ export function RecipeCard({
       </div>
     </div>
   );
-}
+});

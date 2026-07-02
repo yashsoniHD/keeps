@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { MapPin, Star } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
@@ -39,7 +39,7 @@ function visitsLabel(item: PlaceItem): string | null {
 // Lean venue card — tap to open the detail page, where all actions (star / Been / directions /
 // rate / note) live. The card itself is intentionally minimal: photo, name, category + city,
 // rating, and a small star + Been-count adornment. No inline buttons.
-export function PlaceCard({ item }: { item: PlaceItem }) {
+export const PlaceCard = memo(function PlaceCard({ item }: { item: PlaceItem }) {
   const subtitle = [item.category, item.city].filter(Boolean).join(" · ");
   const visits = visitsLabel(item);
 
@@ -47,20 +47,20 @@ export function PlaceCard({ item }: { item: PlaceItem }) {
     <Link
       to="/places/$itemId"
       params={{ itemId: item.id }}
-      className={`group flex min-w-0 flex-col gap-2 ${FOCUS_RING} rounded-xl`}
+      className={`press group flex min-w-0 flex-col gap-2 rounded-xl ${FOCUS_RING}`}
     >
-      <div className="relative">
+      <div className="relative rounded-xl shadow-sm transition-shadow group-hover:shadow-md">
         <PlaceImage item={item} />
         {item.favorite && (
           <span
             aria-label="Starred"
-            className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-400 text-white shadow-sm"
+            className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-favorite text-white shadow-sm"
           >
             <Star className="h-3.5 w-3.5 fill-current" />
           </span>
         )}
         {visits && (
-          <span className="absolute left-1.5 top-1.5 rounded-full bg-itinerary px-2 py-0.5 text-[10px] font-medium text-white">
+          <span className="absolute left-1.5 top-1.5 rounded-full bg-place px-2 py-0.5 text-[10px] font-medium text-white">
             {visits}
           </span>
         )}
@@ -77,12 +77,12 @@ export function PlaceCard({ item }: { item: PlaceItem }) {
       <div className="flex items-center justify-between gap-2">
         {item.place_status === "visited" && item.user_rating ? (
           <span className="inline-flex items-center gap-0.5 text-xs text-ink-soft">
-            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
             {item.user_rating}/5 · you
           </span>
         ) : item.rating ? (
           <span className="inline-flex items-center gap-0.5 text-xs text-ink-soft">
-            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
             {item.rating}
           </span>
         ) : (
@@ -92,18 +92,18 @@ export function PlaceCard({ item }: { item: PlaceItem }) {
       </div>
     </Link>
   );
-}
+});
 
 // Lean list row — the compact counterpart of PlaceCard, same tap-to-open, no inline action row.
-export function PlaceRow({ item }: { item: PlaceItem }) {
+export const PlaceRow = memo(function PlaceRow({ item }: { item: PlaceItem }) {
   const visits = visitsLabel(item);
   return (
     <Link
       to="/places/$itemId"
       params={{ itemId: item.id }}
-      className={`flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-colors hover:bg-itinerary-soft ${FOCUS_RING}`}
+      className={`flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-colors hover:bg-place-soft ${FOCUS_RING}`}
     >
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-itinerary-soft">
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-place-soft">
         {item.photo_url ? (
           <img
             src={item.photo_url}
@@ -113,14 +113,14 @@ export function PlaceRow({ item }: { item: PlaceItem }) {
           />
         ) : (
           <div className="flex h-full items-center justify-center">
-            <MapPin className="h-5 w-5 text-itinerary/50" />
+            <MapPin className="h-5 w-5 text-place/50" />
           </div>
         )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <p className="truncate text-sm font-medium text-ink">{item.name}</p>
-          {item.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
+          {item.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-favorite text-favorite" />}
         </div>
         <p className="truncate text-xs text-ink-soft">
           {[item.category, item.city].filter(Boolean).join(" · ")}
@@ -128,14 +128,14 @@ export function PlaceRow({ item }: { item: PlaceItem }) {
         <div className="flex items-center gap-2 text-xs text-ink-soft">
           {item.rating ? (
             <span className="inline-flex items-center gap-0.5">
-              <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+              <Star className="h-3 w-3 fill-favorite text-favorite" />
               {item.rating}
               {item.price_level ? ` · ${item.price_level}` : ""}
             </span>
           ) : null}
-          {visits && <span className="text-itinerary">{visits}</span>}
+          {visits && <span className="text-place">{visits}</span>}
         </div>
       </div>
     </Link>
   );
-}
+});

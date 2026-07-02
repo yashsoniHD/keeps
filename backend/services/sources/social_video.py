@@ -63,8 +63,16 @@ def _ydl_opts(download: bool) -> dict:
         "overwrites": True,
         "skip_download": not download,
         "max_filesize": settings.MAX_MEDIA_DOWNLOAD_MB * 1024 * 1024,
+        # yt-dlp has no default socket timeout — an unresponsive host would otherwise pin
+        # the worker thread until the Cloud Run deadline (a 5xx → paid Cloud Tasks retry).
+        "socket_timeout": 30,
     }
     return opts
+
+
+# Wall-clock budget for a full social-video download. On expiry the capture walks the same
+# fallback ladder as a blocked download (Apify → og-caption), so nothing is lost.
+DOWNLOAD_TIMEOUT_SECONDS = 240
 
 
 def _download(url: str) -> tuple[str | None, dict]:
@@ -295,7 +303,8 @@ async def acquire(url: str) -> ContentBundle:
     file_path = None
     try:
         try:
-            file_path, info = await asyncio.to_thread(_download, url)
+            file_path, info = await asyncio.wait_for(asyncio.to_thread(_download, url),
+                                                     timeout=DOWNLOAD_TIMEOUT_SECONDS)
         except Exception as e:
             # Download blocked (Instagram's "login required / rate-limit reached" wall is
             # routine from datacenter IPs without cookies). Don't let it raise to the

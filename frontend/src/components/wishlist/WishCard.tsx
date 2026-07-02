@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ShoppingBag, Check, Star, Tag } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
@@ -33,7 +33,7 @@ function ProductImage({ item }: { item: WishItem }) {
 
 // One product card. Tapping the image opens the product-detail page; the bought toggle and the
 // favorite star write through the backend (optimistic — handled by the parent).
-export function WishCard({
+export const WishCard = memo(function WishCard({
   item,
   onToggleBought,
   onToggleFavorite,
@@ -53,7 +53,7 @@ export function WishCard({
   return (
     <div className="group relative flex min-w-0 flex-col gap-2">
       <div className="relative">
-        <Link to="/wishlist/$itemId" params={{ itemId: item.id }} className="block">
+        <Link to="/wishlist/$itemId" params={{ itemId: item.id }} className={`press block rounded-xl shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}>
           <ProductImage item={item} />
         </Link>
         {/* Overlay actions (top-right): bought toggle + favorite star */}
@@ -78,7 +78,7 @@ export function WishCard({
             onClick={() => onToggleFavorite(item)}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
               favorite
-                ? "border-transparent bg-amber-400 text-white"
+                ? "border-transparent bg-favorite text-white"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
             }`}
           >
@@ -87,7 +87,7 @@ export function WishCard({
         </div>
         {/* Deal-met chip */}
         {dealMet && !bought && (
-          <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-medium text-white">
+          <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-medium text-white">
             <Tag className="h-3 w-3" />
             Target hit
           </span>
@@ -110,11 +110,11 @@ export function WishCard({
         )}
         {item.rating ? (
           <span className="inline-flex items-center gap-0.5 text-xs text-ink-soft">
-            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
             {item.rating}
           </span>
         ) : null}
       </div>
     </div>
   );
-}
+});

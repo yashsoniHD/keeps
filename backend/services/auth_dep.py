@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import bcrypt
 from fastapi import Header, HTTPException
+from google.cloud import firestore as fs
 
 from services.firebase import get_db, verify_firebase_token
 
@@ -31,7 +32,8 @@ async def _verify_pat(token: str) -> str:
         bcrypt.checkpw, secret.encode(), data.get("token_hash", "").encode()
     )
     if not ok:
-        await snap.reference.update({"failed_attempts": failed + 1})
+        # Atomic: concurrent brute-force attempts must not undercount via read-modify-write.
+        await snap.reference.update({"failed_attempts": fs.Increment(1)})
         raise HTTPException(401, "Invalid token")
     update = {"last_used_at": datetime.now(timezone.utc)}
     if failed:

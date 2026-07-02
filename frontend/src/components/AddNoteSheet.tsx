@@ -115,7 +115,7 @@ export function AddNoteSheet({
 
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="font-display text-3xl text-ink">New note</h2>
+            <h2 className="font-serif text-3xl text-ink">New note</h2>
             <p className="mt-1 text-sm text-ink-soft">Paste a link, write, upload, or record.</p>
           </div>
           <button
@@ -205,7 +205,7 @@ export function AddNoteSheet({
           </div>
         )}
 
-        {fileError && <p className="mt-3 text-sm text-red-600">{fileError}</p>}
+        {fileError && <p className="mt-3 text-sm text-destructive">{fileError}</p>}
 
         {/* Actions: attach + voice on the left, submit on the right. */}
         <div className="mt-4 flex items-center gap-2">

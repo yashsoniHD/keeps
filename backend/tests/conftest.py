@@ -1,6 +1,22 @@
 """Minimal in-memory Firestore double — just the surface the code under test touches."""
 import pytest
 
+try:
+    from google.cloud.firestore_v1.transforms import Increment as _Increment
+except Exception:  # pragma: no cover — firestore absent in a minimal env
+    _Increment = None
+
+
+def _resolve_transforms(base: dict, data: dict) -> dict:
+    """Apply Firestore field transforms (Increment) against the current doc so tests read
+    plain numbers, matching what the real server materializes."""
+    out = dict(data)
+    if _Increment is not None:
+        for k, v in data.items():
+            if isinstance(v, _Increment):
+                out[k] = (base.get(k) or 0) + v.value
+    return out
+
 
 class FakeSnap:
     def __init__(self, data, ref):
@@ -29,12 +45,14 @@ class FakeDocRef:
         return FakeSnap(self._db.docs.get(self._key), self)
 
     async def update(self, data):
-        self._db.docs[self._key] = {**self._db.docs.get(self._key, {}), **data}
+        base = self._db.docs.get(self._key, {})
+        data = _resolve_transforms(base, data)
+        self._db.docs[self._key] = {**base, **data}
         self._db.updates.append((self._key, dict(data)))
 
     async def set(self, data, merge=False):
         base = self._db.docs.get(self._key, {}) if merge else {}
-        self._db.docs[self._key] = {**base, **data}
+        self._db.docs[self._key] = {**base, **_resolve_transforms(base, data)}
 
     async def delete(self):
         self._db.docs.pop(self._key, None)
@@ -136,6 +154,22 @@ class FakeCollectionGroup:
                 yield FakeSnap(data, FakeDocRef(self._db, coll, doc_id))
 
 
+class FakeTransaction:
+    """Pairs with the autouse identity stub on fs.async_transactional: reads go through
+    ref.get(transaction=tx) as usual; writes apply immediately (no commit phase)."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def set(self, ref, data, merge=False):
+        base = self._db.docs.get(ref._key, {}) if merge else {}
+        self._db.docs[ref._key] = {**base, **_resolve_transforms(base, data)}
+
+    def update(self, ref, data):
+        base = self._db.docs.get(ref._key, {})
+        self._db.docs[ref._key] = {**base, **_resolve_transforms(base, data)}
+
+
 class FakeDb:
     def __init__(self):
         self.docs: dict[tuple[str, str], dict] = {}
@@ -143,6 +177,9 @@ class FakeDb:
 
     def collection(self, name):
         return FakeCollection(self, name)
+
+    def transaction(self):
+        return FakeTransaction(self)
 
     def collection_group(self, name):
         # Matches every subcollection whose leaf name is `name` (keys like
@@ -156,6 +193,16 @@ class FakeDb:
 @pytest.fixture
 def fake_db():
     return FakeDb()
+
+
+@pytest.fixture(autouse=True)
+def _stub_transactional(monkeypatch):
+    """Run @fs.async_transactional bodies directly against FakeTransaction — the real
+    decorator needs a live Firestore transaction (begin/commit/rollback RPCs)."""
+    try:
+        monkeypatch.setattr("google.cloud.firestore.async_transactional", lambda f: f)
+    except Exception:  # pragma: no cover — firestore absent in a minimal env
+        pass
 
 
 @pytest.fixture(autouse=True)

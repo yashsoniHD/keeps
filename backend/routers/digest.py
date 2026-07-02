@@ -30,7 +30,12 @@ DIGEST_MAX_NOTES = 12
 
 def _unsub_secret() -> str:
     # Dedicated secret if set; otherwise fall back to the Resend key (also server-only).
-    return settings.DIGEST_UNSUB_SECRET or settings.RESEND_API_KEY or "clipnote-dev-unsub"
+    # No literal fallback — a known constant would make unsubscribe tokens forgeable. With
+    # neither configured, sends are already no-ops, so failing loud here is safe.
+    secret = settings.DIGEST_UNSUB_SECRET or settings.RESEND_API_KEY
+    if not secret:
+        raise RuntimeError("Set DIGEST_UNSUB_SECRET (or RESEND_API_KEY) to sign unsubscribe links")
+    return secret
 
 
 def _unsub_token(uid: str) -> str:

@@ -35,9 +35,17 @@ def _probe(url: str) -> dict:
         "writesubtitles": True,
         "writeautomaticsub": True,
         "subtitleslangs": ["en.*"],
+        # yt-dlp has no default socket timeout — an unresponsive host would otherwise pin
+        # the worker thread until the Cloud Run deadline (a 5xx → paid Cloud Tasks retry).
+        "socket_timeout": 30,
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False) or {}
+
+
+# Wall-clock budget for the metadata probe. On expiry the probe falls to the oEmbed path —
+# the probe is enrichment, not load-bearing (Gemini ingests the URL directly either way).
+PROBE_TIMEOUT_SECONDS = 60
 
 
 def _extract_transcript(info: dict) -> str | None:
@@ -96,7 +104,8 @@ async def acquire(url: str) -> ContentBundle:
     # bot-blocks yt-dlp on datacenter IPs, so a failed probe degrades to oEmbed
     # metadata + the direct path (duration unknown → cost is bounded by user caps).
     try:
-        info = await asyncio.to_thread(_probe, url)
+        info = await asyncio.wait_for(asyncio.to_thread(_probe, url),
+                                      timeout=PROBE_TIMEOUT_SECONDS)
     except Exception as e:
         log.info("probe blocked/failed (%s); falling back to oEmbed", str(e)[:120])
         info = {}

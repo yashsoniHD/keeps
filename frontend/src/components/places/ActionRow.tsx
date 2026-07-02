@@ -35,7 +35,7 @@ export function ActionRow({
             rel="noopener noreferrer"
             title={a.label}
             onClick={(e) => e.stopPropagation()}
-            className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-xs text-ink-soft transition-colors hover:bg-itinerary-soft hover:text-ink ${FOCUS_RING}`}
+            className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-xs text-ink-soft transition-colors hover:bg-place-soft hover:text-ink ${FOCUS_RING}`}
           >
             <Icon className="h-3.5 w-3.5" />
             {!compact && <span>{a.label}</span>}
