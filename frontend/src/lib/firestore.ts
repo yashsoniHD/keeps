@@ -107,34 +107,6 @@ export function watchRecent(
   );
 }
 
-// The Library "recent saves" list: one row per CAPTURE (job), not per fanned-out item — a reel
-// that produced five watchlist titles is still one save. Reads the newest completed jobs; each
-// row routes via `destination`. Over-fetches (pending/failed jobs share the query) then trims.
-export function watchRecentSaves(
-  userId: string,
-  callback: (jobs: Job[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 8, onError } = opts;
-  const q = query(
-    collection(db, "jobs"),
-    where("user_id", "==", userId),
-    orderBy("created_at", "desc"),
-    limit(max + 10),
-  );
-  return onSnapshot(
-    q,
-    (snap) =>
-      callback(
-        snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }) as Job)
-          .filter((j) => j.status === "completed")
-          .slice(0, max),
-      ),
-    (err) => onError?.(err),
-  );
-}
-
 export async function getNote(noteId: string): Promise<Note | null> {
   const snap = await getDoc(doc(db, "notes", noteId));
   if (!snap.exists()) return null;

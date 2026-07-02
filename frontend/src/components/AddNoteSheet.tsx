@@ -1,48 +1,23 @@
 import { useRef, useState } from "react";
-import { ArrowLeft, Sparkles, Sparkle, Link2, AlignLeft, ImagePlus, Mic } from "lucide-react";
+import { Sparkle, Sparkles, Paperclip, Mic, ArrowUp, Link2, X } from "lucide-react";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { FOCUS_RING } from "@/lib/ui";
 
-// The four capture modes shown in the picker. Upload jumps straight to the file dialog
-// (no sub-view); the others open a focused sub-view. Tints reuse the note-type theme
-// tokens so the icon tiles work in dark mode for free.
-const CAPTURE_MODES = [
-  {
-    key: "link",
-    icon: Link2,
-    tile: "bg-tech-soft text-tech",
-    title: "Paste a link",
-    desc: "Article, video, post",
-  },
-  {
-    key: "text",
-    icon: AlignLeft,
-    tile: "bg-muted text-ink-soft",
-    title: "Write a note",
-    desc: "Type or paste text",
-  },
-  {
-    key: "upload",
-    icon: ImagePlus,
-    tile: "bg-itinerary-soft text-itinerary",
-    title: "Upload a file",
-    desc: "Image, video, audio, PDF, text",
-  },
-  {
-    key: "voice",
-    icon: Mic,
-    tile: "bg-health-soft text-health",
-    title: "Voice note",
-    desc: "Record & transcribe",
-  },
-] as const;
+// One trimmed token that reads as a web address → capture it as a link. Anything with
+// whitespace or newlines is a written note. Keeps the composer's link-vs-text decision
+// automatic so the user never has to pick a "mode".
+function looksLikeUrl(s: string): boolean {
+  const t = s.trim();
+  if (!t || /\s/.test(t)) return false;
+  if (/^https?:\/\//i.test(t)) return true;
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(t); // bare domain, e.g. nytimes.com/…
+}
 
-// Shared capture composer used by both the Notes feed and the Library home. Purely
-// presentational: the caller supplies the ingest handlers, so each screen wires its own
-// optimistic/confirmation behaviour.
+// Unified capture composer used by both the Notes feed and the Library home. One field takes a
+// link OR free text (auto-detected); attach + voice sit inline. Purely presentational — the
+// caller supplies the ingest handlers, so each screen wires its own optimistic/confirm behaviour.
 export function AddNoteSheet({
   url,
-  setUrl,
   onCancel,
   onSubmit,
   onSubmitText,
@@ -50,36 +25,48 @@ export function AddNoteSheet({
   onUploadVoice,
 }: {
   url: string;
-  setUrl: (v: string) => void;
+  setUrl: (v: string) => void; // kept for API compatibility; the composer holds its own draft
   onCancel: () => void;
   onSubmit: (u: string) => void;
   onSubmitText: (text: string, title?: string, processAI?: boolean) => void;
   onUploadFile: (file: File, kind: "image" | "pdf" | "video" | "voice") => Promise<void>;
   onUploadVoice: (blob: Blob) => Promise<void>;
 }) {
-  // Menu-first: the sheet opens on the picker, never on an input — so no keyboard springs
-  // up and (since we no longer read the clipboard on mount) no desktop "Paste" prompt fires.
-  const [view, setView] = useState<"menu" | "link" | "text" | "voice">("menu");
-  const [text, setText] = useState("");
+  // Seed the draft from any pre-filled URL (PWA share target / paste), then own it locally.
+  const [content, setContent] = useState(url);
   const [title, setTitle] = useState("");
-  // Whether a typed note is structured by Clip AI (default) or saved verbatim.
+  // Whether a typed note is structured by Clip AI (default) or saved verbatim. Links are always
+  // structured, so the toggle only shows in text mode.
   const [processAI, setProcessAI] = useState(true);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const isUrl = looksLikeUrl(content);
+  const isText = content.trim().length > 0 && !isUrl;
+  const canSubmit = content.trim().length > 0;
+
+  const submit = () => {
+    const v = content.trim();
+    if (!v) return;
+    if (isUrl)
+      onSubmit(v); // link path → shell's CaptureModal
+    else onSubmitText(v, title.trim() || undefined, processAI);
+  };
+
   const onFilePicked = async (file: File | undefined) => {
     if (!file) return;
-    // Plain-text files have no bytes worth uploading — read them client-side and save
-    // through the typed-note path (which Clip AI then structures).
+    // Plain-text files have no bytes worth uploading — read them client-side and save through
+    // the typed-note path (which Clip AI then structures).
     const isTextFile = file.type.startsWith("text/") || /\.(txt|md|markdown)$/i.test(file.name);
     if (isTextFile) {
       setFileError(null);
       setUploading(true);
       try {
-        const content = await file.text();
-        if (!content.trim()) throw new Error("That file is empty.");
-        onSubmitText(content, file.name.replace(/\.(txt|md|markdown)$/i, ""), true); // closes the sheet
+        const text = await file.text();
+        if (!text.trim()) throw new Error("That file is empty.");
+        onSubmitText(text, file.name.replace(/\.(txt|md|markdown)$/i, ""), true); // closes the sheet
       } catch (e) {
         setUploading(false);
         setFileError(e instanceof Error ? e.message : "Couldn't read that file.");
@@ -109,22 +96,7 @@ export function AddNoteSheet({
     }
   };
 
-  const pick = (key: (typeof CAPTURE_MODES)[number]["key"]) => {
-    if (key === "upload") fileRef.current?.click();
-    else setView(key);
-  };
-
-  // A back arrow that returns to the picker — sub-views are one tap from the menu.
-  const Back = () => (
-    <button
-      type="button"
-      onClick={() => setView("menu")}
-      aria-label="Back"
-      className="-ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink"
-    >
-      <ArrowLeft className="h-5 w-5" />
-    </button>
-  );
+  const iconBtn = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-paper text-ink-soft transition-colors hover:text-ink hover:bg-accent disabled:opacity-50 ${FOCUS_RING}`;
 
   return (
     <div
@@ -132,8 +104,7 @@ export function AddNoteSheet({
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
     >
       <div className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-3xl border border-border bg-card p-5 shadow-2xl">
-        {/* Hidden file input lives at the top level so the "Upload a file" card can trigger it
-            from the menu without a dedicated sub-view. */}
+        {/* Hidden file input, triggered by the attach button. */}
         <input
           ref={fileRef}
           type="file"
@@ -142,165 +113,144 @@ export function AddNoteSheet({
           onChange={(e) => onFilePicked(e.target.files?.[0])}
         />
 
-        {view === "menu" && (
-          <>
-            <h2 className="font-serif text-3xl text-ink">New note</h2>
-            <p className="mt-1 text-sm text-ink-soft">What are you saving?</p>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              {CAPTURE_MODES.map((m) => {
-                const Icon = m.icon;
-                const busy = m.key === "upload" && uploading;
-                return (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => pick(m.key)}
-                    disabled={busy}
-                    className={`flex flex-col gap-3 rounded-2xl border border-border bg-paper p-4 text-left transition-colors hover:bg-accent disabled:opacity-60 ${FOCUS_RING}`}
-                  >
-                    <span
-                      className={`flex h-11 w-11 items-center justify-center rounded-xl ${m.tile}`}
-                    >
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span>
-                      <span className="block font-semibold text-ink">{m.title}</span>
-                      <span className="mt-0.5 block text-sm text-ink-soft">
-                        {busy ? "Adding…" : m.desc}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {fileError && <p className="mt-3 text-sm text-red-600">{fileError}</p>}
-            <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-sm text-product">
-              <Sparkles className="h-4 w-4 shrink-0" />
-              Whatever you pick, Clipnote titles and tags it for you
-            </p>
-          </>
-        )}
-
-        {view === "link" && (
-          <>
-            <div className="flex items-center gap-2">
-              <Back />
-              <h2 className="font-serif text-2xl text-ink">Paste a link</h2>
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (url.trim()) onSubmit(url.trim());
-              }}
-              className="mt-4 space-y-3"
-            >
-              <input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://…"
-                inputMode="url"
-                autoComplete="off"
-                spellCheck={false}
-                className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
-              />
-              <button
-                type="submit"
-                disabled={!url.trim()}
-                className="w-full rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
-              >
-                Capture
-              </button>
-            </form>
-          </>
-        )}
-
-        {view === "text" && (
-          <>
-            <div className="flex items-center gap-2">
-              <Back />
-              <h2 className="font-serif text-2xl text-ink">Write a note</h2>
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (text.trim()) onSubmitText(text.trim(), title.trim() || undefined, processAI);
-              }}
-              className="mt-4 space-y-3"
-            >
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Title (optional)"
-                autoComplete="off"
-                className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
-              />
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Type or paste anything…"
-                rows={6}
-                className="min-h-[34vh] w-full resize-none rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink sm:min-h-[9rem]"
-              />
-              {/* Default: Clip AI titles/tags/structures the note. Toggle off to keep the
-                  text exactly as written (still editable later). */}
-              <button
-                type="button"
-                role="switch"
-                aria-checked={processAI}
-                onClick={() => setProcessAI((v) => !v)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-paper px-4 py-3 text-left"
-              >
-                <span className="flex items-center gap-2.5">
-                  <Sparkle className="h-4 w-4 shrink-0 text-product" />
-                  <span>
-                    <span className="block text-sm font-medium text-ink">
-                      Let Clip AI structure it
-                    </span>
-                    <span className="block text-xs text-ink-soft">
-                      {processAI
-                        ? "Titled, tagged & formatted for you"
-                        : "Saved exactly as written"}
-                    </span>
-                  </span>
-                </span>
-                <span
-                  className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${processAI ? "bg-ink" : "bg-border"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-paper shadow transition-transform ${processAI ? "translate-x-[1.125rem]" : "translate-x-0.5"}`}
-                  />
-                </span>
-              </button>
-              <button
-                type="submit"
-                disabled={!text.trim()}
-                className="w-full rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
-              >
-                {processAI ? "Save note" : "Save as is"}
-              </button>
-            </form>
-          </>
-        )}
-
-        {view === "voice" && (
-          <>
-            <div className="flex items-center gap-2">
-              <Back />
-              <h2 className="font-serif text-2xl text-ink">Voice note</h2>
-            </div>
-            <VoiceRecorder onSave={onUploadVoice} className="mt-4" />
-          </>
-        )}
-
-        {view === "menu" && (
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-display text-3xl text-ink">New note</h2>
+            <p className="mt-1 text-sm text-ink-soft">Paste a link, write, upload, or record.</p>
+          </div>
           <button
             type="button"
             onClick={onCancel}
-            className="mt-4 w-full rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink"
+            aria-label="Close"
+            className={`-mr-1 -mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
           >
-            Cancel
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Optional title — only meaningful for a written note. */}
+        {isText && (
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Title (optional)"
+            autoComplete="off"
+            className="mt-4 w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
+          />
+        )}
+
+        {/* The one field: a link or free text. */}
+        <div
+          className={`mt-3 rounded-2xl border bg-paper transition-colors focus-within:border-ink ${isUrl ? "border-tech/50" : "border-border"}`}
+        >
+          {/* No autoFocus: opening the sheet must not spring the mobile keyboard (a deliberate
+              call from the menu-era design). The field is the obvious tap target. */}
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter submits a link (single line); text needs Cmd/Ctrl+Enter so newlines work.
+              const submitCombo = isUrl || e.metaKey || e.ctrlKey;
+              if (e.key === "Enter" && submitCombo && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="Paste a link or write a note…"
+            inputMode="text"
+            spellCheck={!isUrl}
+            rows={isText ? 6 : 3}
+            className="w-full resize-none rounded-2xl bg-transparent px-4 py-3 text-base outline-none placeholder:text-ink-soft"
+          />
+          {isUrl && (
+            <p className="flex items-center gap-1.5 px-4 pb-2.5 text-xs text-tech">
+              <Link2 className="h-3.5 w-3.5" />
+              Looks like a link — Clipnote will fetch and structure the page.
+            </p>
+          )}
+        </div>
+
+        {/* Structure toggle — text only; links are always structured. */}
+        {isText && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={processAI}
+            onClick={() => setProcessAI((v) => !v)}
+            className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-paper px-4 py-3 text-left"
+          >
+            <span className="flex items-center gap-2.5">
+              <Sparkle className="h-4 w-4 shrink-0 text-product" />
+              <span>
+                <span className="block text-sm font-medium text-ink">Let Clip AI structure it</span>
+                <span className="block text-xs text-ink-soft">
+                  {processAI ? "Titled, tagged & formatted for you" : "Saved exactly as written"}
+                </span>
+              </span>
+            </span>
+            <span
+              className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${processAI ? "bg-ink" : "bg-border"}`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-paper shadow transition-transform ${processAI ? "translate-x-[1.125rem]" : "translate-x-0.5"}`}
+              />
+            </span>
           </button>
         )}
+
+        {/* Inline voice recorder — expands in place; saving it ingests + closes the sheet. */}
+        {voiceOpen && (
+          <div className="mt-3 rounded-2xl border border-border bg-paper p-4">
+            <VoiceRecorder onSave={onUploadVoice} />
+          </div>
+        )}
+
+        {fileError && <p className="mt-3 text-sm text-red-600">{fileError}</p>}
+
+        {/* Actions: attach + voice on the left, submit on the right. */}
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            aria-label="Attach a file"
+            title="Attach an image, video, audio, PDF, or text file"
+            className={iconBtn}
+          >
+            <Paperclip className="h-4.5 w-4.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setVoiceOpen((v) => !v)}
+            aria-pressed={voiceOpen}
+            aria-label="Record a voice note"
+            title="Record a voice note"
+            className={`${iconBtn} ${voiceOpen ? "border-transparent bg-health-soft text-health" : ""}`}
+          >
+            <Mic className="h-4.5 w-4.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit || uploading}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-40 ${FOCUS_RING}`}
+          >
+            {uploading
+              ? "Adding…"
+              : isUrl
+                ? "Capture"
+                : isText && !processAI
+                  ? "Save as is"
+                  : "Save"}
+            {!uploading && <ArrowUp className="h-4 w-4" />}
+          </button>
+        </div>
+
+        <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-sm text-product">
+          <Sparkles className="h-4 w-4 shrink-0" />
+          Whatever you add, Clipnote titles and tags it for you
+        </p>
       </div>
     </div>
   );

@@ -44,9 +44,8 @@ function Watchlist() {
         </div>
 
         <WatchlistView uid={user.uid} />
-
-        {/* JustWatch attribution is mandatory wherever "where to watch" data is shown. */}
-        <p className="mt-12 text-center text-xs text-ink-soft/70">Streaming data by JustWatch</p>
+        {/* No JustWatch credit here — this wall shows no "where to watch" data. The mandatory
+            attribution lives in MovieDetail, gated behind the provider list that actually renders. */}
       </div>
     </AppShell>
   );

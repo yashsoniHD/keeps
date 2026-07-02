@@ -5,7 +5,6 @@ import {
   Clock,
   FolderPlus,
   Library as LibraryIcon,
-  Link2,
   PenLine,
   Plus,
   Search,
@@ -21,18 +20,18 @@ import {
   watchCollections,
   watchFavorites,
   watchNotes,
-  watchRecentSaves,
+  watchRecent,
   createCollection,
   getToolCounts,
   type ToolCounts,
 } from "@/lib/firestore";
 import { backfillCollection } from "@/lib/api";
-import { goToDestination } from "@/lib/nav";
+import { goToHit } from "@/lib/nav";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
 import { TOOLS, toolByApp } from "@/lib/collections-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import { AppShell, useCapture } from "@/components/AppShell";
-import type { Collection, Job } from "@/lib/types";
+import type { Collection, SearchHit } from "@/lib/types";
 
 // The Library is the home: everything the user saves is a collection — the app-backed tools
 // (Watchlist, Recipes, …), the Notes catch-all, virtual folders (Favorites, Your notes), and
@@ -81,30 +80,20 @@ function CollectionTile({
         )}
       </div>
       <span className="min-w-0">
-        <span className="block truncate font-serif text-lg leading-tight text-ink">{name}</span>
+        <span className="block truncate font-display text-xl leading-tight text-ink">{name}</span>
         <span className="mt-0.5 block truncate text-xs text-ink-soft">{sub}</span>
       </span>
     </Link>
   );
 }
 
-// One recent save — a CAPTURE (job), not a fanned-out item: a reel that produced five watchlist
-// titles is one row here. Routes to wherever the capture landed (note, item, or app index).
-function RecentSaveRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
-  const domain = useMemo(() => {
-    try {
-      return job.url ? new URL(job.url).hostname.replace(/^www\./, "") : "";
-    } catch {
-      return "";
-    }
-  }, [job.url]);
-
-  const tool = job.destination?.kind === "app" ? toolByApp(job.destination.app) : null;
-  const title = job.title || domain || "Saved item";
-  const subParts = [
-    domain,
-    job.item_count && job.item_count > 1 ? `${job.item_count} items` : null,
-  ].filter(Boolean);
+// One recent save, read from the search_index (one row per surviving note/item). Shows the real
+// title + a summary snippet + cover thumbnail, and routes reliably via `app`/`ref_id` — no dead
+// clicks on since-deleted notes, no bare URLs.
+function RecentSaveRow({ hit, onOpen }: { hit: SearchHit; onOpen: () => void }) {
+  const tool = toolByApp(hit.app); // always resolves (Notes for plain notes)
+  const FallbackIcon = tool.icon;
+  const summary = hit.summary?.trim();
 
   return (
     <button
@@ -112,27 +101,27 @@ function RecentSaveRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
       onClick={onOpen}
       className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60 ${FOCUS_RING}`}
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        {domain ? (
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
+        {hit.cover_image_url ? (
           <img
-            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+            src={hit.cover_image_url}
             alt=""
             loading="lazy"
-            className="h-4.5 w-4.5 rounded-sm"
+            className="h-full w-full object-cover"
           />
-        ) : job.title ? (
-          <PenLine className="h-4 w-4 text-ink-soft" />
         ) : (
-          <Link2 className="h-4 w-4 text-ink-soft" />
+          <span className={`flex h-full w-full items-center justify-center ${tool.soft}`}>
+            <FallbackIcon className="h-4.5 w-4.5" />
+          </span>
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-ink">{title}</span>
-        {subParts.length > 0 && (
-          <span className="block truncate text-xs text-ink-soft">{subParts.join(" · ")}</span>
-        )}
+        <span className="block truncate text-sm font-medium text-ink">
+          {hit.title || "Untitled"}
+        </span>
+        {summary && <span className="mt-0.5 block truncate text-xs text-ink-soft">{summary}</span>}
       </span>
-      {tool && (
+      {hit.app && (
         <span
           className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${tool.soft}`}
         >
@@ -228,13 +217,13 @@ function LibraryHomeContent({ uid }: { uid: string }) {
   const [favorites, setFavorites] = useState(0);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [manualCount, setManualCount] = useState(0);
-  const [recent, setRecent] = useState<Job[]>([]);
+  const [recent, setRecent] = useState<SearchHit[]>([]);
   const [counts, setCounts] = useState<ToolCounts>({});
 
   useEffect(() => {
     const unsubFav = watchFavorites(uid, (n) => setFavorites(n.length), { onError: () => {} });
     const unsubCol = watchCollections(uid, setCollections, { onError: () => {} });
-    const unsubRecent = watchRecentSaves(uid, setRecent, { max: 8, onError: () => {} });
+    const unsubRecent = watchRecent(uid, setRecent, { max: 6, onError: () => {} });
     const unsubNotes = watchNotes(
       uid,
       (all) => setManualCount(all.filter((n) => n.input_type && n.input_type !== "url").length),
@@ -291,7 +280,7 @@ function LibraryHomeContent({ uid }: { uid: string }) {
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
               <Sparkles className="h-4 w-4" />
             </span>
-            <span className="font-serif text-2xl text-ink">Clipnote</span>
+            <span className="font-display text-2xl text-ink">Clipnote</span>
           </div>
           <div className="flex items-center gap-1">
             <Link to="/search" aria-label="Search" title="Search" className={ICON_BTN}>
@@ -354,11 +343,11 @@ function LibraryHomeContent({ uid }: { uid: string }) {
           <section>
             <SectionTitle icon={Clock}>Recent saves</SectionTitle>
             <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-              {recent.map((j) => (
+              {recent.map((h) => (
                 <RecentSaveRow
-                  key={j.id}
-                  job={j}
-                  onOpen={() => goToDestination(navigate, j.destination, j.note_id)}
+                  key={h.id}
+                  hit={h}
+                  onOpen={() => goToHit(navigate, h.app, h.ref_id)}
                 />
               ))}
             </div>

@@ -11,6 +11,7 @@ import {
   FileText,
   Loader2,
   Plus,
+  Play,
 } from "lucide-react";
 import { watchWatchItem, getNote, getJob } from "@/lib/firestore";
 import { getWatchItemDetails, updateWatchItem, deleteWatchItem } from "@/lib/api";
@@ -41,6 +42,19 @@ function domainOf(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+// A recognisable call-to-action for the link a title was saved from. Video platforms get a
+// "Watch on …" label with a play glyph; anything else is a neutral "View source".
+function sourceCta(domain: string | null): { label: string; video: boolean } {
+  const d = (domain ?? "").toLowerCase();
+  if (d.includes("instagram")) return { label: "Watch on Instagram", video: true };
+  if (d.includes("youtube") || d.includes("youtu.be"))
+    return { label: "Watch on YouTube", video: true };
+  if (d.includes("tiktok")) return { label: "Watch on TikTok", video: true };
+  if (d.includes("facebook") || d === "fb.watch")
+    return { label: "Watch on Facebook", video: true };
+  return { label: domain ? `View on ${domain}` : "View source", video: false };
 }
 
 // The movie/show detail page: backdrop hero, overview, cast, where-to-watch, your status +
@@ -201,18 +215,26 @@ export function MovieDetail({
             ) : null}
           </div>
 
-          {/* The video/page this title was saved from */}
-          {sourceUrl && (
-            <a
-              href={sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`mt-2 inline-flex items-center gap-1 rounded text-xs text-ink-soft transition-colors hover:text-ink hover:underline ${FOCUS_RING}`}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              From {sourceDomain ?? "source"}
-            </a>
-          )}
+          {/* The video/page this title was saved from — a clear CTA, not a footnote. */}
+          {sourceUrl &&
+            (() => {
+              const cta = sourceCta(sourceDomain);
+              return (
+                <a
+                  href={sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-media-soft hover:text-media ${FOCUS_RING}`}
+                >
+                  {cta.video ? (
+                    <Play className="h-4 w-4 fill-current" />
+                  ) : (
+                    <ExternalLink className="h-4 w-4" />
+                  )}
+                  {cta.label}
+                </a>
+              );
+            })()}
 
           {genres.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">

@@ -15,8 +15,9 @@
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
-  /* `font-display` call sites (from the launchpad era) render in the house serif. */
-  --font-display: var(--font-serif);
+  /* Display face for collection names + big headings: Fraunces has the weight and character
+     Instrument Serif lacks at tile sizes, while staying in the warm serif house style. */
+  --font-display: "Fraunces Variable", "Instrument Serif", ui-serif, Georgia, serif;
 
   --color-background: var(--background);
   --color-brand: var(--brand);
@@ -178,11 +179,18 @@
     font-family: var(--font-sans);
     font-feature-settings: "ss01", "cv11";
   }
-  .font-serif,
-  .font-display {
+  .font-serif {
     font-family: var(--font-serif);
     letter-spacing: -0.01em;
     font-weight: 400;
+  }
+  /* Fraunces carries real weight — 500 reads as substantial without shouting, and its
+     optical-size axis keeps tile-sized names crisp. */
+  .font-display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.015em;
+    font-weight: 500;
   }
 }
 
