@@ -25,9 +25,21 @@ async def assign_unassigned_to_collection(db, user_id: str, collection_id: str,
                                           name: str, description: str = "") -> dict:
     """Assign this user's currently-unassigned notes that match `name`/`description` into the
     collection. Returns a small summary. Best-effort; never raises for a matching miss."""
-    text = "\n".join(p for p in (name, description) if p).strip()
+    # Dedupe: the creation UI historically copied the name into the description, so "AI\nAI"
+    # was the whole query. Collapse identical parts before judging how thin the text is.
+    parts = [p.strip() for p in (name, description) if p and p.strip()]
+    if len(parts) == 2 and parts[0].lower() == parts[1].lower():
+        parts = parts[:1]
+    text = "\n".join(parts)
     if not text:
         return {"assigned": 0, "reason": "empty name/description"}
+    # A short name/description embeds too thin to clear the cosine threshold ("AI" matches
+    # nothing at ≤0.45). Expand it into a real semantic query first — best-effort, one lite call.
+    if len(text) < settings.COLLECTION_QUERY_EXPAND_BELOW:
+        from services.gemini import gemini_service  # late import: avoid module-load cycle
+        expanded = await gemini_service.expand_collection_query(name, description)
+        if expanded:
+            text = f"{text}\n{expanded}"
     try:
         qvec = await embedding_service.embed_query(text)
     except Exception as e:  # noqa: BLE001
@@ -45,18 +57,21 @@ async def assign_unassigned_to_collection(db, user_id: str, collection_id: str,
         distance_result_field="_distance",
     )
     assigned = 0
+    already_filed = 0  # matched, but living in another bucket (single-home) — surfaced to the UI
     async for doc in query.stream():
         d = doc.to_dict() or {}
-        # Only sweep up notes that don't already belong to a bucket (single-home).
-        if d.get("collection_id"):
-            continue
         # COSINE distance = 1 - similarity; keep only close matches.
         dist = d.get("_distance")
         if dist is not None and dist > settings.COLLECTION_BACKFILL_MAX_DISTANCE:
+            continue
+        # Only sweep up notes that don't already belong to a bucket (single-home).
+        if d.get("collection_id"):
+            already_filed += 1
             continue
         await doc.reference.update({"collection_id": collection_id})
         merged = {**d, "collection_id": collection_id}
         await search_index.upsert_for_note(db, doc.id, merged, d.get("embedding"))
         assigned += 1
-    log.info("collection backfill for %s → %s: %d notes", user_id, collection_id, assigned)
-    return {"assigned": assigned}
+    log.info("collection backfill for %s → %s: %d notes (%d matched but already filed)",
+             user_id, collection_id, assigned, already_filed)
+    return {"assigned": assigned, "already_filed": already_filed}

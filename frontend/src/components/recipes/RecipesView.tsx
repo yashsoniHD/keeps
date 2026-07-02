@@ -1,8 +1,12 @@
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowDownUp,
+  ArrowRight,
   ChefHat,
   Clock,
+  Dices,
+  Flame,
   Globe,
   Gauge,
   Plus,
@@ -85,6 +89,64 @@ function inBucket(mins: number | null, bucket: TimeBucket): boolean {
   return mins > 60; // "60p"
 }
 
+// "Tonight's pick": one dish pulled out of the cookbook and put on the counter — weeknight-quick
+// (≤45 min) when possible, re-rollable with the dice. Answers the question a recipe wall exists
+// for: "what should I actually cook?"
+function TonightsPick({ item, onReroll }: { item: RecipeItem; onReroll: () => void }) {
+  return (
+    <section className="relative overflow-hidden rounded-3xl border border-recipe/15 bg-recipe-soft">
+      <div className="flex items-stretch">
+        <div className="min-w-0 flex-1 p-4 sm:p-5">
+          <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-recipe">
+            <Flame className="h-3.5 w-3.5" />
+            Tonight’s pick
+          </p>
+          <Link
+            to="/recipes/$itemId"
+            params={{ itemId: item.id }}
+            className={`mt-1 block truncate font-serif text-2xl leading-tight text-ink hover:underline ${FOCUS_RING}`}
+          >
+            {item.title}
+          </Link>
+          <p className="mt-1 flex items-center gap-2 text-xs text-ink-soft">
+            {item.cuisine && <span className="font-serif italic text-recipe">{item.cuisine}</span>}
+            {item.total_time && (
+              <span className="inline-flex items-center gap-0.5">
+                <Clock className="h-3 w-3" />
+                {item.total_time}
+              </span>
+            )}
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <Link
+              to="/recipes/$itemId"
+              params={{ itemId: item.id }}
+              className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-3.5 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+            >
+              Start cooking
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+            <button
+              type="button"
+              onClick={onReroll}
+              title="Pick another"
+              aria-label="Pick another recipe"
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border border-recipe/20 bg-card text-recipe transition-transform hover:rotate-180 ${FOCUS_RING}`}
+            >
+              <Dices className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        {item.image_url && (
+          <div className="relative w-32 shrink-0 sm:w-48">
+            <img src={item.image_url} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // The Recipes mini-app body: a live cookbook wall over the user's recipe_items. Unlike the other
 // mini-apps there's no status workflow — recipes are organised by filters (cuisine / difficulty /
 // time) + a Favorites ⭐ toggle. A "grocery list" mode turns the wall into a multi-select for
@@ -103,6 +165,8 @@ export function RecipesView({ uid }: { uid: string }) {
   const [sort, setSort] = useState<SortKey>("added");
   const [favOnly, setFavOnly] = useState(false);
   const [adding, setAdding] = useState(false);
+  // Random-but-stable index for Tonight's pick; the dice re-rolls it.
+  const [pickSeed, setPickSeed] = useState(() => Math.floor(Math.random() * 1_000_000));
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showList, setShowList] = useState(false);
@@ -182,6 +246,23 @@ export function RecipesView({ uid }: { uid: string }) {
   const base = favOnly ? deduped.filter((i) => i.favorite) : deduped;
   const shown = filterSort(base);
   const selectedItems = deduped.filter((i) => selected.has(i.id));
+
+  // Tonight's pick: prefer weeknight-quick dishes (≤45 min), fall back to the whole cookbook.
+  // Only on the pristine browse view — never over search/filter results or grocery mode.
+  const pristine =
+    !selecting &&
+    !favOnly &&
+    !deferredQuery.trim() &&
+    cuisine === "all" &&
+    difficulty === "all" &&
+    time === "all";
+  const quick = deduped.filter((i) => {
+    const m = parseMinutes(i.total_time);
+    return m != null && m <= 45;
+  });
+  const pickPool = quick.length > 0 ? quick : deduped;
+  const pick =
+    pristine && pickPool.length > 0 ? pickPool[Math.abs(pickSeed) % pickPool.length] : undefined;
 
   return (
     <div className="space-y-6">
@@ -302,6 +383,12 @@ export function RecipesView({ uid }: { uid: string }) {
 
       {shown.length > 0 ? (
         <>
+          {pick && (
+            <TonightsPick
+              item={pick}
+              onReroll={() => setPickSeed(Math.floor(Math.random() * 1_000_000))}
+            />
+          )}
           <div className={WALL_GRID}>
             {shown.map((i) => (
               <RecipeCard

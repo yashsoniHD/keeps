@@ -4,7 +4,7 @@ import { Check, FolderPlus, Loader2, Plus, X } from "lucide-react";
 import type { Collection, Note } from "@/lib/types";
 import { createCollection } from "@/lib/firestore";
 import { moveNoteToCollection } from "@/lib/api";
-import { iconByName, paletteAccent } from "@/lib/note-meta";
+import { defaultPaletteFor, iconByName, paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
 // "Move to collection" sheet — shared by the feed card menu and the note detail header.
@@ -43,7 +43,8 @@ export function CollectionPicker({
     if (!n || !uid || busy) return;
     setBusy(true);
     try {
-      const cid = await createCollection(uid, n, { description: n });
+      // Hash the name to a colour so even quick-created collections get a colored home tile.
+      const cid = await createCollection(uid, n, { description: n, palette: defaultPaletteFor(n) });
       await moveNoteToCollection(note.id, cid);
       setCurrentCid(cid);
       setName("");

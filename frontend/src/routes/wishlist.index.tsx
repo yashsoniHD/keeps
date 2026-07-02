@@ -4,6 +4,7 @@ import { ShoppingBag } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { AppShell } from "@/components/AppShell";
 import { MiniAppHeader } from "@/components/mini-apps/MiniAppHeader";
+import { toolByKey } from "@/lib/collections-meta";
 import { WishlistView } from "@/components/wishlist/WishlistView";
 
 export const Route = createFileRoute("/wishlist/")({ component: Wishlist });
@@ -26,12 +27,7 @@ function Wishlist() {
 
   return (
     <AppShell>
-      <MiniAppHeader
-        icon={<ShoppingBag className="h-4.5 w-4.5" />}
-        iconClass="bg-product-soft text-product"
-        title="Wishlist"
-        subtitle="Products you’re tracking"
-      />
+      <MiniAppHeader tool={toolByKey("wishlist")} subtitle="Products you’re tracking" />
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">
         <WishlistView uid={user.uid} />
       </main>

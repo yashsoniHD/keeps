@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { ArrowDownUp, Clapperboard, Film, Plus, Search, Star, Tv } from "lucide-react";
 import { watchWatchItems } from "@/lib/firestore";
 import { updateWatchItem } from "@/lib/api";
@@ -76,6 +77,61 @@ const EMPTY: Record<Queue, { title: string; body: string }> = {
     body: "Mark a title watched and it moves here, where you can rate it.",
   },
 };
+
+// The cinema moment: the freshest title with real TMDB art becomes a wide backdrop "marquee"
+// above the poster shelf — title, year & genres over a dark scrim, provider logos in the corner.
+// Fixed black scrim (not ink/…) so it reads identically in dark mode, where ink flips to white.
+function Marquee({ item, eyebrow }: { item: WatchItem; eyebrow: string }) {
+  const flatrate = (item.providers ?? []).filter((p) => p.type === "flatrate" && p.logo_url);
+  return (
+    <Link
+      to="/watchlist/$itemId"
+      params={{ itemId: item.id }}
+      className={`press group relative block overflow-hidden rounded-3xl border border-media/15 shadow-md transition-shadow hover:shadow-lg ${FOCUS_RING}`}
+    >
+      <div className="relative aspect-[16/8] w-full bg-media-soft sm:aspect-[16/5]">
+        {item.backdrop_url && (
+          <img
+            src={item.backdrop_url}
+            alt=""
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+          />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent" />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4 sm:p-5">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-white/70">
+            {eyebrow}
+          </p>
+          <p className="mt-0.5 truncate font-serif text-2xl leading-tight text-white sm:text-3xl">
+            {item.title}
+          </p>
+          {(item.year || (item.genres ?? []).length > 0) && (
+            <p className="mt-0.5 truncate text-xs text-white/70">
+              {[item.year, ...(item.genres ?? []).slice(0, 2)].filter(Boolean).join(" · ")}
+            </p>
+          )}
+        </div>
+        {flatrate.length > 0 && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            {flatrate.slice(0, 3).map((p) => (
+              <img
+                key={p.name}
+                src={p.logo_url!}
+                alt={p.name}
+                title={p.name}
+                loading="lazy"
+                className="h-6 w-6 rounded-md shadow"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </Link>
+  );
+}
 
 function Grid({
   items,
@@ -217,6 +273,19 @@ export function WatchlistView({ uid }: { uid: string }) {
     : deduped.filter((i) => bucketOf(i) === queue);
   const shown = filterSort(base);
 
+  // Marquee: only on the browsable Saved/Watchlist views with nothing narrowing the list —
+  // never over filtered results (they must stay exact) or the Watched archive. The featured
+  // title is pulled out of the grid so it isn't shown twice.
+  const pristine =
+    !favOnly &&
+    queue !== "watched" &&
+    !deferredQuery.trim() &&
+    media === "all" &&
+    provider === "all" &&
+    effectiveSort === "added";
+  const marqueeItem = pristine ? shown.find((i) => i.backdrop_url) : undefined;
+  const gridItems = marqueeItem ? shown.filter((i) => i.id !== marqueeItem.id) : shown;
+
   const TABS: { key: Queue; label: string }[] = [
     { key: "saved", label: "Saved" },
     { key: "to_watch", label: "Watchlist" },
@@ -326,8 +395,14 @@ export function WatchlistView({ uid }: { uid: string }) {
 
       {shown.length > 0 ? (
         <>
+          {marqueeItem && (
+            <Marquee
+              item={marqueeItem}
+              eyebrow={queue === "to_watch" ? "Up next" : "Latest save"}
+            />
+          )}
           <Grid
-            items={shown}
+            items={gridItems}
             onToggleWatched={onToggleWatched}
             onAddToWatchlist={onAddToWatchlist}
             onToggleFavorite={onToggleFavorite}

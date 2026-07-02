@@ -2,9 +2,9 @@ import { useDeferredValue, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ArrowDownUp,
-  Building2,
   Grid3x3,
   List,
+  Map as MapIcon,
   MapPin,
   Plus,
   Search,
@@ -24,11 +24,12 @@ import {
 } from "@/components/mini-apps/wall";
 import { PlaceCard } from "./PlaceCard";
 import { PlaceRow } from "./PlaceCard";
+import { PlacesMap } from "./PlacesMap";
 import { AddPlaceSheet } from "./AddPlaceSheet";
 
 type SortKey = "added" | "rating";
 type Tab = "saved" | "starred";
-type ViewMode = "grid" | "list";
+type ViewMode = "grid" | "list" | "map";
 
 // Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
 const ACCENT_ACTIVE = "bg-place text-white";
@@ -159,6 +160,7 @@ export function PlacesView({ uid }: { uid: string }) {
   const VIEWS: { key: ViewMode; icon: ReactNode; label: string }[] = [
     { key: "grid", icon: <Grid3x3 className="h-4 w-4" />, label: "Grid" },
     { key: "list", icon: <List className="h-4 w-4" />, label: "List" },
+    { key: "map", icon: <MapIcon className="h-4 w-4" />, label: "Map" },
   ];
 
   return (
@@ -219,23 +221,6 @@ export function PlacesView({ uid }: { uid: string }) {
           ))}
         </div>
 
-        {cities.length > 0 && (
-          <IconSelect
-            icon={<Building2 className="h-4 w-4" />}
-            title="Filter by city"
-            value={city}
-            active={city !== "all"}
-            activeClass={ACCENT_ACTIVE}
-            onChange={setCity}
-          >
-            <option value="all">Any city</option>
-            {cities.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </IconSelect>
-        )}
         {categories.length > 0 && (
           <IconSelect
             icon={<Tag className="h-4 w-4" />}
@@ -266,10 +251,36 @@ export function PlacesView({ uid }: { uid: string }) {
         </IconSelect>
       </div>
 
+      {/* City chips — the way you actually browse places ("what did I save in Goa?"). */}
+      {cities.length > 1 && (
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+          {["all", ...cities].map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCity(c)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${FOCUS_RING} ${
+                city === c
+                  ? "border-transparent bg-place text-white"
+                  : "border-border bg-card text-ink-soft hover:text-ink"
+              }`}
+            >
+              {c === "all" ? "Everywhere" : c}
+            </button>
+          ))}
+        </div>
+      )}
+
       {shown.length > 0 ? (
         <>
-          {view === "grid" ? <Grid items={shown} /> : <ListView items={shown} />}
-          {canLoadMore && <LoadMoreButton onClick={loadMore} />}
+          {view === "grid" ? (
+            <Grid items={shown} />
+          ) : view === "list" ? (
+            <ListView items={shown} />
+          ) : (
+            <PlacesMap items={shown} heightClass="h-[65vh]" />
+          )}
+          {view !== "map" && canLoadMore && <LoadMoreButton onClick={loadMore} />}
         </>
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">No places match your filters.</div>

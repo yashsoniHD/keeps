@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
-import { ArrowDownUp, Globe, Plus, Search, ShoppingBag, Star } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ArrowDownUp, Globe, Plus, Search, ShoppingBag, Star, Tag } from "lucide-react";
 import { watchWishItems } from "@/lib/firestore";
 import { updateWishItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
@@ -55,6 +56,43 @@ const EMPTY: Record<Queue, { title: string; body: string }> = {
     body: "Mark a product bought and it moves here, so Saved stays to what you still want.",
   },
 };
+
+// Pinned deals strip: every un-bought product whose price has met its target, surfaced above
+// the wall in a success-tinted rail — the "your patience paid off" moment a shopper checks for.
+function DealsRail({ items }: { items: WishItem[] }) {
+  return (
+    <section className="rounded-3xl border border-success/25 bg-success-soft/50 p-4">
+      <h3 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-success">
+        <Tag className="h-3.5 w-3.5" />
+        Below your target
+      </h3>
+      <div className="-mx-1 mt-3 flex gap-3 overflow-x-auto px-1 pb-1">
+        {items.map((i) => (
+          <Link
+            key={i.id}
+            to="/wishlist/$itemId"
+            params={{ itemId: i.id }}
+            className={`press flex w-44 shrink-0 items-center gap-2.5 rounded-2xl border border-border bg-card p-2 shadow-sm ${FOCUS_RING}`}
+          >
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-product-soft/60">
+              {i.image_url ? (
+                <img src={i.image_url} alt="" loading="lazy" className="h-full w-full object-contain p-1" />
+              ) : (
+                <ShoppingBag className="h-4 w-4 text-product" />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-medium text-ink">{i.title}</span>
+              <span className="block truncate text-sm font-semibold text-success">
+                {i.price_raw}
+              </span>
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 function Grid({
   items,
@@ -184,6 +222,18 @@ export function WishlistView({ uid }: { uid: string }) {
     : deduped.filter((i) => inQueue(i, queue));
   const shown = filterSort(base);
 
+  // Deals rail: shown on the pristine Saved view only (never over filtered/search results).
+  const deals =
+    queue === "saved" && !favOnly && !deferredQuery.trim() && store === "all"
+      ? deduped.filter(
+          (i) =>
+            i.wish_status !== "purchased" &&
+            i.target_price != null &&
+            i.price_amount != null &&
+            i.price_amount <= i.target_price,
+        )
+      : [];
+
   const TABS: { key: Queue; label: string }[] = [
     { key: "saved", label: "Saved" },
     { key: "purchased", label: "Bought" },
@@ -283,6 +333,7 @@ export function WishlistView({ uid }: { uid: string }) {
 
       {shown.length > 0 ? (
         <>
+          {deals.length > 0 && <DealsRail items={deals} />}
           <Grid items={shown} onToggleBought={onToggleBought} onToggleFavorite={onToggleFavorite} />
           {canLoadMore && <LoadMoreButton onClick={loadMore} />}
         </>

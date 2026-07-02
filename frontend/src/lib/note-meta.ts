@@ -57,6 +57,8 @@ export interface NoteAccent {
   text: string;
   soft: string;
   border: string;
+  /** tile surface: domain-tinted card background + matching border (home collection tiles). */
+  wash: string;
 }
 
 const PALETTES: NoteAccent[] = [
@@ -67,6 +69,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-recipe",
     soft: "bg-recipe-soft/40",
     border: "border-recipe",
+    wash: "border-recipe/15 bg-recipe-soft",
   },
   {
     dot: "bg-place",
@@ -75,6 +78,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-place",
     soft: "bg-place-soft/40",
     border: "border-place",
+    wash: "border-place/15 bg-place-soft",
   },
   {
     dot: "bg-product",
@@ -83,6 +87,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-product",
     soft: "bg-product-soft/40",
     border: "border-product",
+    wash: "border-product/15 bg-product-soft",
   },
   {
     dot: "bg-summary",
@@ -91,6 +96,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-summary",
     soft: "bg-summary-soft/60",
     border: "border-summary",
+    wash: "border-summary/15 bg-summary-soft",
   },
   {
     dot: "bg-media",
@@ -99,6 +105,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-media",
     soft: "bg-media-soft/40",
     border: "border-media",
+    wash: "border-media/15 bg-media-soft",
   },
   {
     dot: "bg-tech",
@@ -107,6 +114,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-tech",
     soft: "bg-tech-soft/40",
     border: "border-tech",
+    wash: "border-tech/15 bg-tech-soft",
   },
   {
     dot: "bg-business",
@@ -115,6 +123,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-business",
     soft: "bg-business-soft/40",
     border: "border-business",
+    wash: "border-business/15 bg-business-soft",
   },
   {
     dot: "bg-health",
@@ -123,6 +132,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-health",
     soft: "bg-health-soft/40",
     border: "border-health",
+    wash: "border-health/15 bg-health-soft",
   },
   {
     dot: "bg-trip",
@@ -131,6 +141,7 @@ const PALETTES: NoteAccent[] = [
     text: "text-trip",
     soft: "bg-trip-soft/40",
     border: "border-trip",
+    wash: "border-trip/15 bg-trip-soft",
   },
 ];
 
@@ -241,6 +252,12 @@ export function iconByName(name: string | null | undefined): LucideIcon | null {
 // The accent for a specific palette index (for picker previews), safely wrapped.
 export function paletteAccent(index: number): NoteAccent {
   return PALETTES[((index % PALETTES.length) + PALETTES.length) % PALETTES.length];
+}
+
+// A stable default palette for a user-named thing (collections): the name hashes to a colour
+// so nothing ever renders gray-by-omission, while an explicit pick still wins.
+export function defaultPaletteFor(name: string): number {
+  return hashSlug(name.trim().toLowerCase()) % PALETTES.length;
 }
 
 // AI-invented categories get a stable icon + palette without any code change — unless the

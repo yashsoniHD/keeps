@@ -320,10 +320,20 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
         <RemoveButton onClick={() => remove(n.id)} label="Remove from collection" />
       )}
       empty={
-        <p className="rounded-2xl border border-dashed border-border bg-card/50 px-4 py-10 text-center text-sm text-ink-soft">
-          No notes here yet. New saves that match this collection are filed here automatically — or
-          move a note in from its menu.
-        </p>
+        <div className="rounded-2xl border border-dashed border-border bg-card/50 px-4 py-10 text-center">
+          <span
+            className={`mx-auto flex h-12 w-12 items-center justify-center rounded-2xl ${
+              accent ? `${accent.dot} text-white` : "bg-secondary text-ink-soft"
+            }`}
+          >
+            <Icon className="h-5 w-5" />
+          </span>
+          <p className="mt-3 font-serif text-lg text-ink">Nothing filed here yet</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
+            New saves that match this collection land here automatically — or move a note in from
+            its ⋯ menu.
+          </p>
+        </div>
       }
     />
   );

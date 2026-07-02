@@ -4,6 +4,7 @@ import { MapPin } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { AppShell } from "@/components/AppShell";
 import { MiniAppHeader } from "@/components/mini-apps/MiniAppHeader";
+import { toolByKey } from "@/lib/collections-meta";
 import { PlacesView } from "@/components/places/PlacesView";
 
 export const Route = createFileRoute("/places/")({ component: Places });
@@ -26,12 +27,7 @@ function Places() {
 
   return (
     <AppShell>
-      <MiniAppHeader
-        icon={<MapPin className="h-4.5 w-4.5" />}
-        iconClass="bg-place-soft text-place"
-        title="Places"
-        subtitle="Restaurants, cafés & bars to try"
-      />
+      <MiniAppHeader tool={toolByKey("places")} subtitle="Restaurants, cafés & bars to try" />
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">
         <PlacesView uid={user.uid} />
       </main>

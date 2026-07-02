@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
+import { TOOLS } from "@/lib/collections-meta";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -44,10 +45,21 @@ function LoginPage() {
           <Sparkles className="h-8 w-8" />
         </div>
         <h1 className="font-serif text-4xl text-ink">Clipnote</h1>
-        <p className="mx-auto mt-2 max-w-xs text-sm text-ink-soft">
-          Save anything — reels, products, places, recipes — and it becomes a living collection you
-          can actually use.
+        <p className="mx-auto mt-3 max-w-xs font-serif text-xl leading-snug text-ink">
+          Save anything. It becomes a living collection.
         </p>
+        {/* The promise, shown not told: the five domain collections in their own colors. */}
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
+          {TOOLS.filter((t) => t.app != null).map((t) => (
+            <span
+              key={t.key}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${t.soft}`}
+            >
+              <t.icon className="h-3.5 w-3.5" />
+              {t.label}
+            </span>
+          ))}
+        </div>
         <button
           onClick={handleSignIn}
           className="mt-8 flex w-full items-center justify-center gap-3 rounded-full bg-ink px-6 py-3.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"

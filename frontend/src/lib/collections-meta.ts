@@ -36,6 +36,8 @@ export interface ToolMeta {
   text: string;
   /** the small swatch dot. */
   dot: string;
+  /** tile surface: domain-tinted card background + matching border. */
+  wash: string;
 }
 
 export const TOOLS: ToolMeta[] = [
@@ -51,6 +53,7 @@ export const TOOLS: ToolMeta[] = [
     soft: "bg-muted text-ink-soft",
     text: "text-ink-soft",
     dot: "bg-ink",
+    wash: "border-border bg-secondary/70",
   },
   {
     key: "watchlist",
@@ -63,6 +66,7 @@ export const TOOLS: ToolMeta[] = [
     soft: "bg-media-soft text-media",
     text: "text-media",
     dot: "bg-media",
+    wash: "border-media/15 bg-media-soft",
   },
   {
     key: "wishlist",
@@ -75,6 +79,7 @@ export const TOOLS: ToolMeta[] = [
     soft: "bg-product-soft text-product",
     text: "text-product",
     dot: "bg-product",
+    wash: "border-product/15 bg-product-soft",
   },
   {
     key: "places",
@@ -87,6 +92,7 @@ export const TOOLS: ToolMeta[] = [
     soft: "bg-place-soft text-place",
     text: "text-place",
     dot: "bg-place",
+    wash: "border-place/15 bg-place-soft",
   },
   {
     key: "recipes",
@@ -99,6 +105,7 @@ export const TOOLS: ToolMeta[] = [
     soft: "bg-recipe-soft text-recipe",
     text: "text-recipe",
     dot: "bg-recipe",
+    wash: "border-recipe/15 bg-recipe-soft",
   },
   {
     key: "trips",
@@ -111,6 +118,7 @@ export const TOOLS: ToolMeta[] = [
     soft: "bg-trip-soft text-trip",
     text: "text-trip",
     dot: "bg-trip",
+    wash: "border-trip/15 bg-trip-soft",
   },
 ];
 
@@ -121,6 +129,13 @@ const BY_APP = new Map<AppKey, ToolMeta>(
 /** Resolve a mini-app `app` value (from a search hit / item) to its tool identity. */
 export function toolByApp(app: string | null | undefined): ToolMeta {
   return (app && BY_APP.get(app as AppKey)) || TOOLS[0]; // fall back to Notes
+}
+
+const BY_KEY = new Map<ToolKey, ToolMeta>(TOOLS.map((t) => [t.key, t]));
+
+/** A tool by its own key — for screens that ARE the tool (wall headers etc.). */
+export function toolByKey(key: ToolKey): ToolMeta {
+  return BY_KEY.get(key) ?? TOOLS[0];
 }
 
 /** Resolve a search hit's `kind` (`note`/`watch`/`wish`/…) or `app` to its tool. */

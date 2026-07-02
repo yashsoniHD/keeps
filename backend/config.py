@@ -89,6 +89,9 @@ class Settings:
     COLLECTION_BACKFILL_K: int = int(os.getenv("COLLECTION_BACKFILL_K", "50"))
     COLLECTION_BACKFILL_MAX_DISTANCE: float = float(
         os.getenv("COLLECTION_BACKFILL_MAX_DISTANCE", "0.45"))
+    # Name+description shorter than this is too thin to embed well ("AI") — expand it into a
+    # descriptive query via one lite-model call before the vector sweep.
+    COLLECTION_QUERY_EXPAND_BELOW: int = int(os.getenv("COLLECTION_QUERY_EXPAND_BELOW", "48"))
 
     # --- Agent (orchestrator + subagents + tools) ---
     # Master kill switch: when false, /api/ask/stream answers with no tools (falls back to

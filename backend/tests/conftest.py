@@ -206,6 +206,20 @@ def _stub_transactional(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _stub_collection_expansion(monkeypatch):
+    """The collection backfill expands thin names via one lite Gemini call — never real in
+    tests. Default: no expansion (raw-text fallback); tests that assert on the expansion
+    monkeypatch their own return value on top."""
+    async def fake_expand(name, description=""):
+        return ""
+    try:
+        from services.gemini import gemini_service
+        monkeypatch.setattr(gemini_service, "expand_collection_query", fake_expand)
+    except Exception:  # pragma: no cover — gemini deps absent in a minimal env
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _stub_embeddings(monkeypatch):
     """No test should make a real Vertex embedding call. search_index (wired into every ingest /
     note write) embeds via the shared singleton, so stub it globally with a deterministic vector.

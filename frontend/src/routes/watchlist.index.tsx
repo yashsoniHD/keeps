@@ -4,6 +4,7 @@ import { Clapperboard } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { AppShell } from "@/components/AppShell";
 import { MiniAppHeader } from "@/components/mini-apps/MiniAppHeader";
+import { toolByKey } from "@/lib/collections-meta";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
 
 export const Route = createFileRoute("/watchlist/")({ component: Watchlist });
@@ -26,12 +27,7 @@ function Watchlist() {
 
   return (
     <AppShell>
-      <MiniAppHeader
-        icon={<Clapperboard className="h-4.5 w-4.5" />}
-        iconClass="bg-media-soft text-media"
-        title="Watchlist"
-        subtitle="Movies & shows you’re tracking"
-      />
+      <MiniAppHeader tool={toolByKey("watchlist")} subtitle="Movies & shows you’re tracking" />
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">
         <WatchlistView uid={user.uid} />
         {/* No JustWatch credit here — this wall shows no "where to watch" data. The mandatory

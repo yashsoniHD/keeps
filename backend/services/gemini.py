@@ -186,6 +186,14 @@ an id from the provided list.
 Return JSON: {"content_type":"slug","collection_id":"<id>" or null}."""
 
 
+COLLECTION_QUERY_SYSTEM = """You expand a user's collection name into a semantic search query.
+The user named a folder for their saved notes; write 2-3 sentences describing what content
+belongs in it — topics, typical note subjects, related terms and synonyms. Be concrete and
+broad within the theme. Return ONLY the description text, no preamble, no quotes.
+Example: "AI" → Artificial intelligence and machine learning: AI tools and products, LLMs and
+chatbots like ChatGPT, ML research papers and tutorials, prompt engineering, AI news."""
+
+
 TITLES_FROM_NOTE_SYSTEM = """You extract the movie and TV show titles named in a saved note.
 Return ONLY valid JSON:
 {"titles":[{"title":str,"year"?:str,"mediaType":"movie|tv|unknown","why"?:"one short line"}]}
@@ -671,6 +679,29 @@ class GeminiService:
         except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
             log.warning("title backfill extract failed: %s: %s", type(e).__name__, e)
             return []
+
+    async def expand_collection_query(self, name: str, description: str = "") -> str:
+        """Expand a thin collection name/description into a descriptive semantic query for the
+        backfill embedding. A two-letter name like "AI" embeds almost nothing — the expansion is
+        the difference between sweeping in matching notes and silently matching zero. Lite model,
+        plain text; returns "" on any failure (caller falls back to the raw text)."""
+        prompt = f"Collection name: {name}"
+        if description and description.strip().lower() != name.strip().lower():
+            prompt += f"\nUser's description: {description}"
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=settings.GEMINI_LITE_MODEL,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    system_instruction=COLLECTION_QUERY_SYSTEM,
+                ),
+            )
+            record_usage(settings.GEMINI_LITE_MODEL, response)
+            return (response.text or "").strip()
+        except Exception as e:  # noqa: BLE001 — expansion is best-effort.
+            log.warning("collection query expansion failed: %s: %s", type(e).__name__, e)
+            return ""
 
     async def extract_venues_from_note(self, title: str, ai_summary: str,
                                        data: dict | None) -> list[dict]:

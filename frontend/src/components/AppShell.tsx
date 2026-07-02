@@ -14,8 +14,11 @@ const CHROMELESS_PREFIXES = ["/login", "/share", "/p/"];
 
 // --- Capture: owned by the shell, opened from anywhere -------------------------------------
 // The capture flow (paste a link / write / upload / record) lives in the shell so every screen
-// can trigger it through one context, instead of each screen re-wiring it.
-type CaptureCtx = { openCapture: (url?: string) => void };
+// can trigger it through one context, instead of each screen re-wiring it. `mode` lets a
+// quick-action chip open the composer already set up for its input (focused field, file
+// picker, or the voice recorder) instead of the neutral sheet.
+export type CaptureMode = "link" | "text" | "file" | "voice";
+type CaptureCtx = { openCapture: (url?: string, mode?: CaptureMode) => void };
 const CaptureContext = createContext<CaptureCtx>({ openCapture: () => {} });
 export const useCapture = () => useContext(CaptureContext);
 
@@ -91,15 +94,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Shell-owned capture state.
   const [showAdd, setShowAdd] = useState(false);
   const [pendingUrl, setPendingUrl] = useState("");
+  const [pendingMode, setPendingMode] = useState<CaptureMode | undefined>(undefined);
   const [capturingUrl, setCapturingUrl] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
 
   const chromeless =
     !user || CHROMELESS_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 
-  const openCapture = (url?: string) => {
+  const openCapture = (url?: string, mode?: CaptureMode) => {
     setIngestError(null);
     setPendingUrl(url ?? "");
+    setPendingMode(mode);
     setShowAdd(true);
   };
   const onSubmitUrl = (raw: string) => {
@@ -161,6 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <AddNoteSheet
           url={pendingUrl}
           setUrl={setPendingUrl}
+          initialMode={pendingMode}
           onCancel={() => setShowAdd(false)}
           onSubmit={onSubmitUrl}
           onSubmitText={onSubmitText}

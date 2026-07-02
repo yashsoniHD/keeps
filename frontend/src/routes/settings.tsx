@@ -12,7 +12,8 @@ import {
   Share2,
   Moon,
   Sun,
-  Clapperboard,
+  ChevronDown,
+  Globe,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { getUserRegion, setUserRegion } from "@/lib/firestore";
@@ -114,11 +115,12 @@ function Settings() {
           </div>
         </section>
 
-        <CategoriesSection />
-
+        {/* Preferences first (region + theme), then organisation, then device setup. */}
         <WatchRegionSection uid={user.uid} />
 
         <AppearanceSection />
+
+        <CategoriesSection />
 
         <ConnectPhone />
 
@@ -222,30 +224,39 @@ function WatchRegionSection({ uid }: { uid: string }) {
   return (
     <section className="mt-4 rounded-3xl border border-border bg-card p-6">
       <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        <Clapperboard className="h-3.5 w-3.5" />
-        Movies &amp; shows
+        <Globe className="h-3.5 w-3.5" />
+        Region
       </h2>
-      <label className="mt-4 flex items-center justify-between gap-3">
-        <span>
-          <span className="block text-sm font-medium text-ink">Region</span>
+      <label className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-ink">Where you watch &amp; go out</span>
           <span className="block text-xs text-ink-soft">
-            Sets your Watchlist streaming availability and your Places reservation/delivery links
-            for this country.
-            {saved && <span className="ml-1 text-media">Saved</span>}
+            Streaming availability and reservation links use this country.
+            {saved && (
+              <span className="ml-1 inline-flex items-center gap-0.5 text-success">
+                <Check className="h-3 w-3" />
+                Saved
+              </span>
+            )}
           </span>
         </span>
-        <select
-          value={region}
-          onChange={(e) => handleChange(e.target.value)}
-          className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-ink"
-          aria-label="Where to watch region"
-        >
-          {WATCH_REGIONS.map((r) => (
-            <option key={r.code} value={r.code}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+        {/* Native select for the platform picker UX, dressed as a house pill; the chevron is
+            ours because appearance-none strips the inconsistent platform arrow. */}
+        <span className="relative inline-flex shrink-0">
+          <select
+            value={region}
+            onChange={(e) => handleChange(e.target.value)}
+            className="h-10 appearance-none rounded-full border border-border bg-background py-0 pl-4 pr-9 text-sm text-ink"
+            aria-label="Region for streaming and reservation links"
+          >
+            {WATCH_REGIONS.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+        </span>
       </label>
     </section>
   );

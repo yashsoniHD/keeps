@@ -7,7 +7,6 @@ import type { TripItem } from "@/lib/types";
 import {
   IconSelect,
   LoadMoreButton,
-  WALL_GRID,
   WallError,
   WallSkeleton,
   useWallItems,
@@ -242,7 +241,9 @@ export function TripsView({ uid }: { uid: string }) {
 
       {shown.length > 0 ? (
         <>
-          <div className={WALL_GRID}>
+          {/* Journey cards are wide (photo + trip shape), so the wall is 1-up mobile / 2-up
+              desktop — not the dense poster grid the other apps use. */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {shown.map((i) => (
               <TripCard key={i.id} item={i} onToggleFavorite={onToggleFavorite} />
             ))}

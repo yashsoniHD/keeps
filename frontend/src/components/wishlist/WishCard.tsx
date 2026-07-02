@@ -92,28 +92,44 @@ export const WishCard = memo(function WishCard({
             Target hit
           </span>
         )}
+        {/* Price tag ON the image — the number a shopper scans for, worn like a shelf label. */}
+        {item.price_raw && (
+          <span
+            className={`absolute bottom-1.5 left-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold shadow-sm backdrop-blur ${
+              dealMet && !bought
+                ? "border-success/30 bg-success-soft/90 text-success"
+                : "border-border bg-card/90 text-ink"
+            }`}
+          >
+            {item.price_raw}
+          </span>
+        )}
       </div>
 
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-ink" title={item.title}>
           {item.title}
         </p>
-        {item.brand && <p className="truncate text-xs text-ink-soft">{item.brand}</p>}
-      </div>
-
-      {/* Price + review rating */}
-      <div className="flex items-center justify-between gap-2">
-        {item.price_raw ? (
-          <span className="text-sm font-semibold text-ink">{item.price_raw}</span>
-        ) : (
-          <span className="text-xs text-ink-soft">No price</span>
-        )}
-        {item.rating ? (
-          <span className="inline-flex items-center gap-0.5 text-xs text-ink-soft">
-            <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
-            {item.rating}
+        {/* Brand + store favicon on one quiet line, with the review rating opposite. */}
+        <div className="mt-0.5 flex items-center justify-between gap-2">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-ink-soft">
+            {item.domain && (
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${item.domain}&sz=32`}
+                alt=""
+                loading="lazy"
+                className="h-3.5 w-3.5 shrink-0 rounded-sm"
+              />
+            )}
+            <span className="truncate">{item.brand || item.domain || ""}</span>
           </span>
-        ) : null}
+          {item.rating ? (
+            <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-ink-soft">
+              <Star className="h-3.5 w-3.5 fill-favorite text-favorite" />
+              {item.rating}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   );

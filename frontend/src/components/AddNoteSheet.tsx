@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkle, Sparkles, Paperclip, Mic, ArrowUp, Link2, X } from "lucide-react";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { FOCUS_RING } from "@/lib/ui";
+import type { CaptureMode } from "@/components/AppShell";
 
 // One trimmed token that reads as a web address → capture it as a link. Anything with
 // whitespace or newlines is a written note. Keeps the composer's link-vs-text decision
@@ -18,6 +19,7 @@ function looksLikeUrl(s: string): boolean {
 // caller supplies the ingest handlers, so each screen wires its own optimistic/confirm behaviour.
 export function AddNoteSheet({
   url,
+  initialMode,
   onCancel,
   onSubmit,
   onSubmitText,
@@ -26,6 +28,8 @@ export function AddNoteSheet({
 }: {
   url: string;
   setUrl: (v: string) => void; // kept for API compatibility; the composer holds its own draft
+  /** Pre-arm the composer for a specific input (quick-action chips). Undefined = neutral open. */
+  initialMode?: CaptureMode;
   onCancel: () => void;
   onSubmit: (u: string) => void;
   onSubmitText: (text: string, title?: string, processAI?: boolean) => void;
@@ -38,10 +42,19 @@ export function AddNoteSheet({
   // Whether a typed note is structured by Clip AI (default) or saved verbatim. Links are always
   // structured, so the toggle only shows in text mode.
   const [processAI, setProcessAI] = useState(true);
-  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(initialMode === "voice");
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+
+  // Quick-action chips open the sheet already set up: Link/Note focus the field (the user
+  // explicitly chose to type, so springing the keyboard is right — unlike the neutral open,
+  // which deliberately doesn't autofocus); Photo goes straight to the file picker.
+  useEffect(() => {
+    if (initialMode === "file") fileRef.current?.click();
+    else if (initialMode === "link" || initialMode === "text") textRef.current?.focus();
+  }, [initialMode]);
 
   const isUrl = looksLikeUrl(content);
   const isText = content.trim().length > 0 && !isUrl;
@@ -146,6 +159,7 @@ export function AddNoteSheet({
           {/* No autoFocus: opening the sheet must not spring the mobile keyboard (a deliberate
               call from the menu-era design). The field is the obvious tap target. */}
           <textarea
+            ref={textRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={(e) => {

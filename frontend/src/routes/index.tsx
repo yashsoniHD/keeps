@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
-  Check,
+  Camera,
   Clock,
   FolderPlus,
   Library as LibraryIcon,
+  Link2,
+  Mic,
   PenLine,
   Plus,
   Search,
@@ -20,16 +22,15 @@ import {
   watchCollections,
   watchFavorites,
   watchRecent,
-  createCollection,
   getManualNotesCount,
   getToolCounts,
   type ToolCounts,
 } from "@/lib/firestore";
-import { backfillCollection } from "@/lib/api";
+import { NewCollectionSheet } from "@/components/library/NewCollectionSheet";
 import { goToHit } from "@/lib/nav";
-import { iconByName, paletteAccent } from "@/lib/note-meta";
+import { formatDateShort, iconByName, paletteAccent } from "@/lib/note-meta";
 import { TOOLS, toolByApp } from "@/lib/collections-meta";
-import { FOCUS_RING, TILE } from "@/lib/ui";
+import { FOCUS_RING } from "@/lib/ui";
 import { AppShell, useCapture } from "@/components/AppShell";
 import type { Collection, SearchHit } from "@/lib/types";
 
@@ -49,31 +50,39 @@ function SectionTitle({ icon: Icon, children }: { icon: LucideIcon; children: Re
   );
 }
 
-// A collection card: white card, tinted icon square, serif name, quiet count.
-// Every collection — tool, folder, or smart bucket — wears this shape.
+// A collection card: a soft wash of the collection's domain color, a saturated icon chip,
+// serif name, and a color-matched count. Every collection — tool, folder, or smart bucket —
+// wears this shape; only the hue changes, so the grid reads as one colorful family.
 function CollectionTile({
   to,
   icon: Icon,
-  tint,
+  wash,
+  chip,
+  countClass,
   name,
   sub,
   count,
 }: {
   to: string;
   icon: LucideIcon;
-  tint: string; // soft chip classes, e.g. "bg-media-soft text-media"
+  wash: string; // tile surface, e.g. "border-media/15 bg-media-soft"
+  chip: string; // saturated icon square, e.g. "bg-media text-white"
+  countClass: string; // colored count, e.g. "text-media"
   name: string;
   sub: string;
   count?: number;
 }) {
   return (
-    <Link to={to} className={`${TILE} flex h-28 flex-col justify-between p-4 sm:h-32`}>
+    <Link
+      to={to}
+      className={`press ${FOCUS_RING} flex h-28 flex-col justify-between rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md sm:h-32 ${wash}`}
+    >
       <div className="flex items-start justify-between">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tint}`}>
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-sm ${chip}`}>
           <Icon className="h-4.5 w-4.5" />
         </span>
         {count !== undefined && count > 0 && (
-          <span className="text-sm tabular-nums text-ink-soft">{count}</span>
+          <span className={`text-sm font-medium tabular-nums ${countClass}`}>{count}</span>
         )}
       </div>
       <span className="min-w-0">
@@ -98,7 +107,7 @@ function RecentSaveRow({ hit, onOpen }: { hit: SearchHit; onOpen: () => void }) 
       onClick={onOpen}
       className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60 ${FOCUS_RING}`}
     >
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
         {hit.cover_image_url ? (
           <img
             src={hit.cover_image_url}
@@ -118,42 +127,28 @@ function RecentSaveRow({ hit, onOpen }: { hit: SearchHit; onOpen: () => void }) 
         </span>
         {summary && <span className="mt-0.5 block truncate text-xs text-ink-soft">{summary}</span>}
       </span>
-      {hit.app && (
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${tool.soft}`}
-        >
-          {tool.label}
+      <span className="flex shrink-0 flex-col items-end gap-1">
+        {hit.app && (
+          <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${tool.soft}`}>
+            {tool.label}
+          </span>
+        )}
+        <span className="text-[11px] tabular-nums text-ink-soft">
+          {formatDateShort(hit.created_at)}
         </span>
-      )}
+      </span>
     </button>
   );
 }
 
-// Inline "create a collection" tile — names + describes a bucket, then sweeps in matching existing
-// notes via the backend backfill. The description also steers the AI classifier for future saves.
+// "Create a collection" tile — opens the full creation sheet (name + description + icon/colour),
+// which awaits the backfill sweep and reports what it filed in. The old inline name-only input
+// created silent, empty, gray collections; the sheet is the fix.
 function NewCollectionTile({ uid }: { uid: string }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  const create = async () => {
-    const n = name.trim();
-    if (!n || busy) return;
-    setBusy(true);
-    try {
-      const id = await createCollection(uid, n, { description: n });
-      backfillCollection(id).catch(() => {});
-      setName("");
-      setOpen(false);
-    } catch {
-      /* leave the input; the user can retry */
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!open) {
-    return (
+  return (
+    <>
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -162,53 +157,36 @@ function NewCollectionTile({ uid }: { uid: string }) {
         <FolderPlus className="h-5 w-5" />
         <span className="text-sm font-medium">New collection</span>
       </button>
-    );
-  }
-
-  return (
-    <div className="flex h-28 flex-col justify-center gap-2 rounded-2xl border border-border bg-card p-4 sm:h-32">
-      <input
-        autoFocus
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") create();
-          if (e.key === "Escape") {
-            setName("");
-            setOpen(false);
-          }
-        }}
-        placeholder="e.g. Software"
-        className="w-full rounded-full border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-ink-soft"
-      />
-      <div className="flex justify-end gap-1.5">
-        <button
-          type="button"
-          onClick={() => {
-            setName("");
-            setOpen(false);
-          }}
-          aria-label="Cancel"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-soft hover:text-ink"
-        >
-          <X className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={create}
-          aria-label="Create collection"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ink text-paper active:scale-95"
-        >
-          <Check className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+      {open && <NewCollectionSheet uid={uid} onClose={() => setOpen(false)} />}
+    </>
   );
+}
+
+// Quick-action chips under the hero composer — each opens the capture sheet pre-armed for
+// its input type, wearing a different domain tint so the row reads as a colorful invitation.
+const QUICK_ACTIONS: Array<{
+  mode: "link" | "text" | "file" | "voice";
+  icon: LucideIcon;
+  label: string;
+  tint: string;
+}> = [
+  { mode: "link", icon: Link2, label: "Link", tint: "bg-tech-soft text-tech" },
+  { mode: "text", icon: PenLine, label: "Note", tint: "bg-summary-soft text-summary" },
+  { mode: "file", icon: Camera, label: "Photo", tint: "bg-place-soft text-place" },
+  { mode: "voice", icon: Mic, label: "Voice", tint: "bg-health-soft text-health" },
+];
+
+function greetingForHour(h: number): string {
+  if (h < 5) return "Up late";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 // The home content — a child of AppShell so it can trigger the shell-owned capture flow.
 function LibraryHomeContent({ uid }: { uid: string }) {
   useCategoryMeta(); // reflect category icon/colour overrides on collection tiles
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { openCapture } = useCapture();
   const [favorites, setFavorites] = useState(0);
@@ -243,13 +221,22 @@ function LibraryHomeContent({ uid }: { uid: string }) {
 
   // Virtual folders (Favorites / Your notes) sit alongside real collections. Empty ones hide.
   const folders = useMemo(() => {
-    const out: Array<{ id: string; icon: LucideIcon; tint: string; name: string; count?: number }> =
-      [];
+    const out: Array<{
+      id: string;
+      icon: LucideIcon;
+      wash: string;
+      chip: string;
+      countClass: string;
+      name: string;
+      count?: number;
+    }> = [];
     if (favorites > 0)
       out.push({
         id: "favorites",
         icon: Star,
-        tint: "bg-favorite-soft text-favorite",
+        wash: "border-favorite/20 bg-favorite-soft",
+        chip: "bg-favorite text-white",
+        countClass: "text-favorite",
         name: "Favorites",
         count: favorites,
       });
@@ -257,7 +244,9 @@ function LibraryHomeContent({ uid }: { uid: string }) {
       out.push({
         id: "manual",
         icon: PenLine,
-        tint: "bg-secondary text-ink-soft",
+        wash: "border-border bg-secondary/70",
+        chip: "bg-ink text-paper",
+        countClass: "text-ink-soft",
         name: "Your notes",
         count: manualCount,
       });
@@ -266,7 +255,9 @@ function LibraryHomeContent({ uid }: { uid: string }) {
       out.push({
         id: c.id,
         icon: iconByName(c.icon) ?? FolderPlus,
-        tint: accent ? accent.chip : "bg-secondary text-ink-soft",
+        wash: accent ? accent.wash : "border-border bg-secondary/70",
+        chip: accent ? `${accent.dot} text-white` : "bg-ink text-paper",
+        countClass: accent ? accent.text : "text-ink-soft",
         name: c.name,
       });
     }
@@ -318,17 +309,55 @@ function LibraryHomeContent({ uid }: { uid: string }) {
           </div>
         )}
 
-        {/* Capture: one friendly, always-visible entry point styled like a search field. */}
-        <button
-          type="button"
-          onClick={() => openCapture()}
-          className={`press flex w-full items-center gap-3 rounded-full border border-border bg-card px-5 py-3.5 text-left text-ink-soft shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}
-        >
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-paper">
-            <Plus className="h-4 w-4" />
-          </span>
-          <span className="text-sm">Save a link, note, photo, or voice memo…</span>
-        </button>
+        {/* Greeting: a small editorial moment that makes the home feel personal, not a dashboard. */}
+        <section className="-mb-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-ink-soft">
+            {new Date().toLocaleDateString("en-IN", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
+          </p>
+          <h1 className="mt-1 font-serif text-3xl leading-tight text-ink">
+            {greetingForHour(new Date().getHours())}
+            {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
+          </h1>
+        </section>
+
+        {/* Capture: the hero of the home — a proper composer card with quick-action chips,
+            not a quiet search-field pill. */}
+        <section className="rounded-3xl border border-border bg-card p-3 shadow-sm sm:p-4">
+          <button
+            type="button"
+            onClick={() => openCapture()}
+            className={`group flex w-full items-center gap-4 rounded-2xl p-2 text-left transition-colors hover:bg-muted/50 ${FOCUS_RING}`}
+          >
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-ink text-paper shadow-md transition-transform group-hover:scale-105">
+              <Plus className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-serif text-xl leading-tight text-ink">
+                Save anything
+              </span>
+              <span className="mt-0.5 block truncate text-sm text-ink-soft">
+                A link, a thought, a photo, a voice memo…
+              </span>
+            </span>
+          </button>
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {QUICK_ACTIONS.map((a) => (
+              <button
+                key={a.mode}
+                type="button"
+                onClick={() => openCapture(undefined, a.mode)}
+                className={`press flex items-center justify-center gap-1.5 rounded-full px-2 py-2 text-sm font-medium ${a.tint} ${FOCUS_RING}`}
+              >
+                <a.icon className="h-4 w-4" />
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section>
           <SectionTitle icon={LibraryIcon}>Collections</SectionTitle>
@@ -338,7 +367,9 @@ function LibraryHomeContent({ uid }: { uid: string }) {
                 key={t.key}
                 to={t.to}
                 icon={t.icon}
-                tint={t.soft}
+                wash={t.wash}
+                chip={t.fill}
+                countClass={t.text}
                 name={t.label}
                 sub={t.desc}
                 count={counts[t.key]}
@@ -349,7 +380,9 @@ function LibraryHomeContent({ uid }: { uid: string }) {
                 key={f.id}
                 to={`/library/${f.id}`}
                 icon={f.icon}
-                tint={f.tint}
+                wash={f.wash}
+                chip={f.chip}
+                countClass={f.countClass}
                 name={f.name}
                 sub={
                   f.count !== undefined

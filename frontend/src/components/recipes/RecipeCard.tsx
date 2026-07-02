@@ -39,6 +39,13 @@ function RecipeImage({ item }: { item: RecipeItem }) {
           onError={() => setFailed(true)}
         />
       )}
+      {/* Cook time worn on the photo like a cookbook margin note. */}
+      {item.total_time && (
+        <span className="pointer-events-none absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-full border border-border bg-card/90 px-2 py-0.5 text-[11px] font-medium text-ink shadow-sm backdrop-blur">
+          <Clock className="h-3 w-3" />
+          {item.total_time}
+        </span>
+      )}
     </div>
   );
 }
@@ -112,14 +119,12 @@ export const RecipeCard = memo(function RecipeCard({
           {item.title}
         </p>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-soft">
-          {item.cuisine && <span className="truncate">{item.cuisine}</span>}
-          {item.cuisine && item.total_time && <span className="opacity-40">·</span>}
-          {item.total_time && (
-            <span className="inline-flex items-center gap-0.5">
-              <Clock className="h-3 w-3" />
-              {item.total_time}
-            </span>
+          {/* Cuisine in the serif italic voice — a cookbook whisper (time moved onto the photo). */}
+          {item.cuisine && (
+            <span className="truncate font-serif italic text-recipe">{item.cuisine}</span>
           )}
+          {item.difficulty && item.cuisine && <span className="opacity-40">·</span>}
+          {item.difficulty && <span className="capitalize">{item.difficulty}</span>}
           {domain && (
             <img
               src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}

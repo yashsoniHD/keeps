@@ -26,6 +26,8 @@ function PosterImage({ item }: { item: WatchItem }) {
           onError={() => setFailed(true)}
         />
       )}
+      {/* One-sheet depth: a whisper of a bottom scrim (fixed black — ink flips in dark mode). */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/25 to-transparent" />
     </div>
   );
 }
