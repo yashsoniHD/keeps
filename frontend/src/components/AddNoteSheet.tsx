@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkle, Sparkles, Paperclip, Mic, ArrowUp, Link2, X } from "lucide-react";
+import { Sparkle, Paperclip, Mic, ArrowUp, Link2, X } from "lucide-react";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { FOCUS_RING } from "@/lib/ui";
 import type { CaptureMode } from "@/components/AppShell";
@@ -261,10 +261,6 @@ export function AddNoteSheet({
           </button>
         </div>
 
-        <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-sm text-product">
-          <Sparkles className="h-4 w-4 shrink-0" />
-          Whatever you add, Clipnote titles and tags it for you
-        </p>
       </div>
     </div>
   );

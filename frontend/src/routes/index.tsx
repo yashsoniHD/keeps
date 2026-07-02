@@ -75,9 +75,15 @@ function CollectionTile({
   return (
     <Link
       to={to}
-      className={`press ${FOCUS_RING} flex h-28 flex-col justify-between rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md sm:h-32 ${wash}`}
+      className={`press ${FOCUS_RING} group relative flex h-28 flex-col justify-between overflow-hidden rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md sm:h-32 ${wash}`}
     >
-      <div className="flex items-start justify-between">
+      {/* Oversized watermark bleeding off the corner — each collection's icon as its texture,
+          so the grid reads as nine distinct objects instead of nine pastel rectangles. */}
+      <Icon
+        aria-hidden
+        className={`absolute -bottom-4 -right-4 h-20 w-20 opacity-[0.09] transition-transform duration-300 group-hover:scale-110 sm:h-24 sm:w-24 ${countClass}`}
+      />
+      <div className="relative flex items-start justify-between">
         <span className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-sm ${chip}`}>
           <Icon className="h-4.5 w-4.5" />
         </span>
@@ -85,8 +91,10 @@ function CollectionTile({
           <span className={`text-sm font-medium tabular-nums ${countClass}`}>{count}</span>
         )}
       </div>
-      <span className="min-w-0">
-        <span className="block truncate font-serif text-xl leading-tight text-ink">{name}</span>
+      <span className="relative min-w-0">
+        <span className="block truncate font-serif text-[1.375rem] leading-tight text-ink">
+          {name}
+        </span>
         <span className="mt-0.5 block truncate text-xs text-ink-soft">{sub}</span>
       </span>
     </Link>
@@ -278,6 +286,16 @@ function LibraryHomeContent({ uid }: { uid: string }) {
             <Link to="/search" aria-label="Search" title="Search" className={ICON_BTN}>
               <Search className="h-4 w-4" />
             </Link>
+            {/* Capture lives in the header — the one filled button in the row, always a tap away. */}
+            <button
+              type="button"
+              onClick={() => openCapture()}
+              aria-label="Save anything"
+              title="Save anything"
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-full bg-ink text-paper shadow-sm transition-transform hover:scale-105 active:scale-95 ${FOCUS_RING}`}
+            >
+              <Plus className="h-4.5 w-4.5" />
+            </button>
             <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
               <Settings className="h-4 w-4" />
             </Link>
@@ -309,8 +327,9 @@ function LibraryHomeContent({ uid }: { uid: string }) {
           </div>
         )}
 
-        {/* Greeting: a small editorial moment that makes the home feel personal, not a dashboard. */}
-        <section className="-mb-3">
+        {/* Greeting + capture: an editorial opening line, then one slim row of tinted
+            quick-capture chips. The "+" itself lives in the header. */}
+        <section>
           <p className="text-xs font-medium uppercase tracking-wider text-ink-soft">
             {new Date().toLocaleDateString("en-IN", {
               weekday: "long",
@@ -322,35 +341,13 @@ function LibraryHomeContent({ uid }: { uid: string }) {
             {greetingForHour(new Date().getHours())}
             {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
           </h1>
-        </section>
-
-        {/* Capture: the hero of the home — a proper composer card with quick-action chips,
-            not a quiet search-field pill. */}
-        <section className="rounded-3xl border border-border bg-card p-3 shadow-sm sm:p-4">
-          <button
-            type="button"
-            onClick={() => openCapture()}
-            className={`group flex w-full items-center gap-4 rounded-2xl p-2 text-left transition-colors hover:bg-muted/50 ${FOCUS_RING}`}
-          >
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-ink text-paper shadow-md transition-transform group-hover:scale-105">
-              <Plus className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
-            </span>
-            <span className="min-w-0">
-              <span className="block font-serif text-xl leading-tight text-ink">
-                Save anything
-              </span>
-              <span className="mt-0.5 block truncate text-sm text-ink-soft">
-                A link, a thought, a photo, a voice memo…
-              </span>
-            </span>
-          </button>
-          <div className="mt-2 grid grid-cols-4 gap-2">
+          <div className="mt-4 grid grid-cols-4 gap-2">
             {QUICK_ACTIONS.map((a) => (
               <button
                 key={a.mode}
                 type="button"
                 onClick={() => openCapture(undefined, a.mode)}
-                className={`press flex items-center justify-center gap-1.5 rounded-full px-2 py-2 text-sm font-medium ${a.tint} ${FOCUS_RING}`}
+                className={`press flex items-center justify-center gap-1.5 rounded-full px-2 py-2.5 text-sm font-medium shadow-sm ${a.tint} ${FOCUS_RING}`}
               >
                 <a.icon className="h-4 w-4" />
                 {a.label}
