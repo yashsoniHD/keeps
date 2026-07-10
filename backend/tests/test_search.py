@@ -45,17 +45,19 @@ async def test_search_cap_hit_is_429_before_any_embedding(fake_db, monkeypatch):
     assert exc.value.status_code == 429
 
 
-async def test_search_returns_index_hits(fake_db, monkeypatch):
+async def test_search_returns_index_hits_with_content_type(fake_db, monkeypatch):
     from services import search_index
-    fake_db.seed(search_index.COLLECTION, "e1",
-                 {"user_id": "u", "kind": "recipe", "app": "recipes", "ref_id": "r_1",
-                  "title": "Butter chicken", "summary": "Slow-cooked.",
-                  "cover_image_url": None, "embedding": [0.0] * 8})
+    fake_db.seed(search_index.COLLECTION, "note-n1",
+                 {"user_id": "u", "kind": "note", "ref_id": "n1",
+                  "content_type": "recipe", "title": "Butter chicken",
+                  "summary": "Slow-cooked.", "cover_image_url": None,
+                  "embedding": [0.0] * 8})
 
     async def fake_flush(uid, meter):
         return None
     monkeypatch.setattr(search_mod, "flush_usage", fake_flush)
 
     result = await search_mod.search(q="butter chicken", user_id="u")
-    assert [r["ref_id"] for r in result["results"]] == ["r_1"]
-    assert result["results"][0]["app"] == "recipes"
+    assert [r["ref_id"] for r in result["results"]] == ["n1"]
+    # Note hits carry their real content_type (drives the result-row icon/accent).
+    assert result["results"][0]["content_type"] == "recipe"

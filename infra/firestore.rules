@@ -6,45 +6,6 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
-    // Watchlist items (per-title, TMDB-enriched): owner reads live via onSnapshot.
-    // Backend-write-only — the worker writes enrichment, and watched/rating go through the
-    // /api/watch-items endpoints — so the client can never tamper with poster/provider data.
-    match /users/{uid}/watch_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Wishlist items (per-product, fanned out from product notes): same shape as watch_items.
-    // Owner reads live via onSnapshot; backend-write-only so the client can't tamper with the
-    // worker-written price/image/buy-url fields — promote/purchase/target-price go through
-    // /api/wish-items.
-    match /users/{uid}/wish_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Places items (per-venue, fanned out from place notes, Google-Places-enriched): same shape.
-    // Owner reads live via onSnapshot; backend-write-only so the client can't tamper with the
-    // worker-written photo/rating/coords fields — promote/visit/rating/notes go through
-    // /api/place-items. (places_cache, like tmdb_cache, is backend-only via default-deny.)
-    match /users/{uid}/place_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Recipe items (per-recipe, fanned out from recipe notes; no external API — a pure copy of the
-    // note's structured ingredients/steps): same shape. Owner reads live via onSnapshot;
-    // backend-write-only so the client can't tamper with the worker-written fields — the favorite
-    // toggle goes through /api/recipe-items.
-    match /users/{uid}/recipe_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Trip items (per-trip, fanned out from itinerary notes; a near-pure copy of the note's
-    // structured days/stops, with stops geocoded for the map): same shape. Owner reads live via
-    // onSnapshot; backend-write-only so the client can't tamper with the worker-written fields —
-    // the favorite toggle goes through /api/trip-items.
-    match /users/{uid}/trip_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
     // Notes: owner reads/deletes; anyone may read a note the owner has shared
     // (is_public == true) — that powers the public /p/{id} link. Created and updated
     // only by the backend (which toggles is_public via the admin SDK).
@@ -64,9 +25,9 @@ service cloud.firestore {
       allow update:       if request.auth != null && request.auth.uid == resource.data.user_id
                           && request.resource.data.user_id == resource.data.user_id;
     }
-    // Unified search index (one doc per note OR mini-app item). Backend-write-only — the worker
-    // keeps it in sync (upsert on create/edit, delete on delete). Owner reads live via onSnapshot
-    // to power the Library "recent saves" strip; semantic search + Clip AI query it server-side.
+    // Search index (one doc per note). Backend-write-only — the worker keeps it in sync
+    // (upsert on create/edit, delete on delete). Owner reads live via onSnapshot to power the
+    // "recent saves" strip; semantic search + Clip AI query it server-side.
     match /search_index/{entryId} {
       allow read:  if request.auth != null && request.auth.uid == resource.data.user_id;
       allow write: if false;

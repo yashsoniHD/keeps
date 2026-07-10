@@ -15,6 +15,7 @@ import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import { WithNoteMenu } from "@/components/NoteContextMenu";
+import { SaveSnap } from "@/components/ClipMark";
 
 // One debounced window-resize notifier shared by every card. Card width only changes when
 // the viewport does (the responsive column count), so a lone resize listener replaces the
@@ -339,28 +340,38 @@ function StatusIcon({ label, className }: { label: string; className: string }) 
 
 export function ProcessingCard({ job, label = "Processing" }: { job: Job; label?: string }) {
   const domain = jobDomain(job.url);
-  const waiting = label !== "Processing"; // not actively processing → no pulsing spinner
+  const waiting = label !== "Processing"; // parked (queued/offline) → skeleton, not the save motion
   return (
     <div
-      className="relative flex min-w-0 animate-pulse flex-col rounded-2xl border border-dashed border-border bg-card p-4"
+      className="relative flex min-w-0 flex-col rounded-2xl border border-dashed border-border bg-card p-4"
       aria-label={waiting ? `Capture ${label.toLowerCase()}` : "Note processing"}
     >
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-ink-soft">
           <StatusIcon label={label} className="h-3 w-3" />
-          {label}
+          {waiting ? label : "Saving"}
         </span>
         <span className="text-[11px] text-ink-soft">just now</span>
       </div>
 
-      <div className="mt-3 min-h-[2.5em] space-y-2">
-        <div className="h-4 w-3/4 rounded bg-muted" />
-        <div className="h-4 w-1/2 rounded bg-muted" />
-      </div>
-      <div className="mt-2 min-h-[4.3em] space-y-2">
-        <div className="h-3 w-full rounded bg-muted" />
-        <div className="h-3 w-5/6 rounded bg-muted" />
-      </div>
+      {waiting ? (
+        <div className="animate-pulse">
+          <div className="mt-3 min-h-[2.5em] space-y-2">
+            <div className="h-4 w-3/4 rounded bg-muted" />
+            <div className="h-4 w-1/2 rounded bg-muted" />
+          </div>
+          <div className="mt-2 min-h-[4.3em] space-y-2">
+            <div className="h-3 w-full rounded bg-muted" />
+            <div className="h-3 w-5/6 rounded bg-muted" />
+          </div>
+        </div>
+      ) : (
+        // A freshly-captured note: the clip snaps onto a note card while Gemini works.
+        <div className="flex min-h-[6.8em] flex-1 flex-col items-center justify-center py-2">
+          <SaveSnap />
+          <p className="mt-3 text-sm text-ink-soft">Saving your note…</p>
+        </div>
+      )}
 
       <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
@@ -476,16 +487,23 @@ export function ProcessingRow({ job, label = "Processing" }: { job: Job; label?:
   const waiting = label !== "Processing";
   return (
     <div
-      className="flex w-full min-w-0 animate-pulse items-center gap-3.5 px-4 py-3"
+      className="flex w-full min-w-0 items-center gap-3.5 px-4 py-3"
       aria-label={waiting ? `Capture ${label.toLowerCase()}` : "Note processing"}
     >
-      <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-muted text-ink-soft">
-        <StatusIcon label={label} className="h-5 w-5" />
-      </span>
+      {waiting ? (
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-muted text-ink-soft">
+          <StatusIcon label={label} className="h-5 w-5" />
+        </span>
+      ) : (
+        // The clip snaps onto a note while this fresh capture processes.
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start overflow-hidden rounded-lg bg-muted">
+          <SaveSnap scale={0.42} />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
-        <div className="h-4 w-2/3 rounded bg-muted" />
+        <div className={`h-4 w-2/3 rounded bg-muted ${waiting ? "animate-pulse" : ""}`} />
         <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-soft">
-          <span className="font-medium">{label}</span>
+          <span className="font-medium">{waiting ? label : "Saving"}</span>
           <span>·</span>
           <span className="truncate capitalize">{sourceLabel(domain)}</span>
         </div>

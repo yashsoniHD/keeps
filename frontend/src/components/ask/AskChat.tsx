@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { goToHit } from "@/lib/nav";
+import { goToNote } from "@/lib/nav";
 import {
   AlertCircle,
   ArrowUp,
@@ -77,13 +77,12 @@ function CitationChip({
   const navigate = useNavigate();
   const accent = noteAccent(citation.content_type);
   const Icon = noteIcon(citation.content_type);
-  // A citation is either a plain note or a mini-app item (app + ref_id) → route accordingly.
   return (
     <button
       type="button"
       onClick={() => {
         onNavigate?.();
-        goToHit(navigate, citation.app, citation.ref_id || citation.id);
+        goToNote(navigate, citation.ref_id || citation.id);
       }}
       className="flex max-w-[220px] shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent"
     >
@@ -649,7 +648,9 @@ export function AskChat({
                               }
                               resumeConversation(c.id);
                             }}
-                            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && resumeConversation(c.id)}
+                            onKeyDown={(e) =>
+                              (e.key === "Enter" || e.key === " ") && resumeConversation(c.id)
+                            }
                             onTouchStart={(e) => {
                               if (swipedId && swipedId !== c.id) setSwipedId(null);
                               swipeTouchStart.current = {

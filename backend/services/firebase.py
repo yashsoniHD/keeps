@@ -338,30 +338,6 @@ async def reserve_image_slot(user_id: str) -> bool:
         return False
 
 
-async def reserve_backfill_run(user_id: str, app: str) -> bool:
-    """Transactionally claim one mini-app backfill run for today (per user, per app).
-    Backfill writes are idempotent but their Gemini / enrichment-API spend re-incurs on
-    every run, so repeats are capped (MAX_BACKFILLS_PER_APP_PER_DAY). Returns False when
-    today's budget for this app is used up — the router turns that into a 429."""
-    from google.cloud import firestore as fs
-
-    db = get_db()
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
-    field = f"backfill_{app}_count"
-
-    @fs.async_transactional
-    async def _claim(tx) -> bool:
-        ref = db.collection("usage").document(f"{user_id}-{today}")
-        snap = await ref.get(transaction=tx)
-        n = (snap.to_dict() or {}).get(field, 0)
-        if n >= settings.MAX_BACKFILLS_PER_APP_PER_DAY:
-            return False
-        tx.set(ref, {"user_id": user_id, "date": today, field: n + 1}, merge=True)
-        return True
-
-    return await _claim(db.transaction())
-
-
 async def reserve_apify_slot() -> bool:
     """Transactionally claim one paid-scrape (Apify) slot for today against the global
     daily cap. Returns True if claimed (caller may call Apify), False if the cap is hit

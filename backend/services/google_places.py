@@ -7,7 +7,7 @@ price level, coordinates, opening hours, website, phone, and a Google Maps link.
 Auth is the runtime service account via Application Default Credentials (the same way Vertex and
 Firestore authenticate) — no API key to manage. When credentials are unavailable or ENABLE_PLACES
 is off, every public function is a graceful no-op (returns None / []), so a place note still saves
-and its place_items render from the raw venue name.
+and its venues render from the raw venue name.
 
 Cost discipline (the budget guardrail): the Places API (New) bills per request and requires an
 explicit X-Goog-FieldMask (omitting it 400s). We keep masks to Essentials-tier fields and cache

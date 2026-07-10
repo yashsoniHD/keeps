@@ -1,8 +1,8 @@
-"""Worker routing after the library-first restructure (Phase 1).
+"""Worker routing after the notes-first collapse.
 
-Mini-app captures (recipe/movie/product/place/trip) must NOT create a note — they fan out into
-their app's item(s) and the job records an app `destination`. Everything else creates a note with
-the AI-assigned `collection_id` and a note `destination`.
+Every capture creates a note — mini-app families included. Family captures get their `data`
+enriched in place (TMDB/Places/price) before the note is written, and a poster/photo is
+adopted as the cover only when the note would otherwise be coverless.
 """
 import routers.process as process
 from models.note import ContentBundle, NoteExtraction
@@ -12,7 +12,8 @@ class DummyRequest:
     headers = {}
 
 
-def _wire(monkeypatch, fake_db, *, content_type, collection_id=None, data=None, item_ids=None):
+def _wire(monkeypatch, fake_db, *, content_type, collection_id=None, data=None,
+          enriched_data=None, cover_override=None):
     monkeypatch.setattr(process, "_verify_oidc", lambda request: None)
     monkeypatch.setattr(process, "get_db", lambda: fake_db)
 
@@ -36,60 +37,63 @@ def _wire(monkeypatch, fake_db, *, content_type, collection_id=None, data=None, 
         return ContentBundle(kind="text", text="x" * 60, metadata={"platform": "web"},
                              strategy="web_scrape")
 
+    enrich_calls = []
+
+    async def fake_enrich(user_id, ct, d, cover):
+        enrich_calls.append((user_id, ct, d, cover))
+        return (enriched_data if enriched_data is not None else d,
+                cover_override if not cover else None)
+
     monkeypatch.setattr(process, "get_user_categories", cats)
     monkeypatch.setattr(process, "get_user_collections", cols)
     monkeypatch.setattr(process, "add_user_category", _noop)
     monkeypatch.setattr(process, "add_user_source", _noop)
     monkeypatch.setattr(process, "touch_user_activity", _noop)
     monkeypatch.setattr(process, "_note_embedding", _noop)
+    monkeypatch.setattr(process, "enrich_note_data", fake_enrich)
     monkeypatch.setattr(process.gemini_service, "classify", classify)
     monkeypatch.setattr(process.gemini_service, "extract_async", extract)
     monkeypatch.setattr(process.sources, "acquire", acquire)
-
-    # Capture fan-out args and return canned item ids per family.
-    async def fake_titles(uid, source_id, titles, region=None,
-                          source_url=None, source_domain=None):
-        return item_ids or []
-
-    async def fake_places(uid, source_id, venues, region=None):
-        return item_ids or []
-
-    async def fake_recipe(uid, source_id, **k):
-        return (item_ids or [None])[0]
-
-    monkeypatch.setattr(process, "enrich_titles", fake_titles)
-    monkeypatch.setattr(process, "enrich_places", fake_places)
-    monkeypatch.setattr(process, "enrich_recipe_item", fake_recipe)
+    return enrich_calls
 
 
 def _notes(fake_db):
     return [v for (c, _), v in fake_db.docs.items() if c == "notes"]
 
 
-async def test_recipe_capture_makes_no_note(fake_db, monkeypatch):
+async def test_recipe_capture_creates_a_note(fake_db, monkeypatch):
     _wire(monkeypatch, fake_db, content_type="recipe",
-          data={"ingredients": [{"items": ["dal", "rice"]}], "steps": ["cook"]},
-          item_ids=["r_1"])
+          data={"ingredients": [{"items": ["dal", "rice"]}], "steps": ["cook"]})
     fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
                                "url": "https://ex.com/dal"})
     res = await process.process_job("j", DummyRequest())
-    assert _notes(fake_db) == []                       # no note doc for a mini-app capture
-    assert res["destination"] == {"kind": "app", "app": "recipes", "item_id": "r_1"}
-    assert fake_db.docs[("jobs", "j")]["note_id"] is None
+    notes = _notes(fake_db)
+    assert len(notes) == 1                              # a family capture IS a note again
+    assert notes[0]["template"] == "recipe"
+    assert res["destination"] == {"kind": "note", "note_id": res["note_id"]}
+    assert fake_db.docs[("jobs", "j")]["note_id"] == res["note_id"]
 
 
-async def test_multi_item_capture_lands_on_app_index(fake_db, monkeypatch):
-    _wire(monkeypatch, fake_db, content_type="movie",
-          data={"titles": [{"title": "A"}, {"title": "B"}]}, item_ids=["m_1", "m_2"])
+async def test_entertainment_capture_gets_enriched_data_and_poster_cover(fake_db, monkeypatch):
+    enriched = {"titles": [{"title": "Dune", "poster_url": "https://img/d.jpg",
+                            "providers": [{"name": "Netflix"}]}]}
+    calls = _wire(monkeypatch, fake_db, content_type="movie",
+                  data={"titles": [{"title": "Dune", "why": "a stunning sci-fi epic"}]},
+                  enriched_data=enriched, cover_override="https://img/d.jpg")
     fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
                                "url": "https://ex.com/films"})
     res = await process.process_job("j", DummyRequest())
-    assert _notes(fake_db) == []
-    # Several items → no single item_id, land on the app index.
-    assert res["destination"] == {"kind": "app", "app": "watchlist"}
+    notes = _notes(fake_db)
+    assert len(notes) == 1
+    assert notes[0]["data"] == enriched                 # enrichment landed on the note itself
+    assert notes[0]["cover_image_url"] == "https://img/d.jpg"  # coverless → poster adopted
+    assert calls and calls[0][1] == "movie"
+    assert res["destination"]["kind"] == "note"
+    # Indexed for search.
+    assert any(c == "search_index" for (c, _) in fake_db.docs)
 
 
-async def test_non_miniapp_creates_note_with_collection(fake_db, monkeypatch):
+async def test_non_family_note_keeps_collection(fake_db, monkeypatch):
     _wire(monkeypatch, fake_db, content_type="article", collection_id="col_software")
     fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
                                "url": "https://ex.com/post"})
@@ -98,16 +102,13 @@ async def test_non_miniapp_creates_note_with_collection(fake_db, monkeypatch):
     assert len(notes) == 1
     assert notes[0]["collection_id"] == "col_software"
     assert res["destination"] == {"kind": "note", "note_id": res["note_id"]}
-    # Indexed for search.
-    assert any(c == "search_index" for (c, _) in fake_db.docs)
 
 
-async def test_miniapp_with_no_item_falls_back_to_note(fake_db, monkeypatch):
-    # A recipe slug whose extraction yields no cookable data → fan-out returns nothing → note.
-    _wire(monkeypatch, fake_db, content_type="recipe",
-          data={"facts": [{"note": "x" * 50}]}, item_ids=[])
-    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
-                               "url": "https://ex.com/vague"})
+async def test_save_as_is_skips_enrichment(fake_db, monkeypatch):
+    calls = _wire(monkeypatch, fake_db, content_type="note")
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "text",
+                               "url": "", "text": "my raw text", "process_ai": False})
     res = await process.process_job("j", DummyRequest())
-    assert len(_notes(fake_db)) == 1                   # nothing materialized → saved as a note
+    assert len(_notes(fake_db)) == 1
+    assert calls == []                                  # no-AI path never calls enrichment
     assert res["destination"]["kind"] == "note"

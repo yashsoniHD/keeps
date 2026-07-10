@@ -46,17 +46,12 @@ from services.firebase import (
     reserve_image_slot,
     touch_user_activity,
 )
-from services.gemini import (gemini_service, is_entertainment, is_itinerary, is_places, is_recipe,
-                             is_shopping, match_existing, normalize_slug)
+from services.enrich import enrich_note_data
+from services.gemini import gemini_service, match_existing, normalize_slug
 from services.imagen import generate_cover
-from services.itineraries import enrich_trip_item
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.oidc import verify_oidc
-from services.places import enrich_places
-from services.recipes import enrich_recipe_item
 from services.usage_meter import start_metering
-from services.watchlist import enrich_titles
-from services.wishlist import enrich_wish_item
 
 router = APIRouter(tags=["process"])
 log = logging.getLogger("clipnote.process")
@@ -75,22 +70,6 @@ async def _note_embedding(title: str, ai_summary: str = "") -> Vector | None:
         log.warning("note embedding failed, writing note without it: %s: %s",
                     type(e).__name__, e)
         return None
-
-# Maps a content_type to the mini-app that owns it (or None for a plain note). Priority-ordered so
-# a slug is filed under exactly one app — its capture becomes item(s), not a note.
-def _mini_app_family(content_type: str) -> str | None:
-    if is_entertainment(content_type):
-        return "watchlist"
-    if is_shopping(content_type):
-        return "wishlist"
-    if is_places(content_type):
-        return "places"
-    if is_recipe(content_type):
-        return "recipes"
-    if is_itinerary(content_type):
-        return "trips"
-    return None
-
 
 # A transient failure below this many attempts re-raises as 500 (Cloud Tasks retries,
 # max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
@@ -352,8 +331,23 @@ async def process_job(job_id: str, request: Request):
             # Skip frames we already extracted (those are covers-bucket URLs).
             if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
                 cover_image_url = await persist_cover(cover_image_url) or cover_image_url
-            # Last resort: generate a cover with Imagen (gated, capped). Only when the note
-            # would otherwise be coverless — real source imagery always wins. A miss (off,
+        # source_url/domain only describe URL captures; a typed note or uploaded file has
+        # no web source, so they stay "" (the same empty-source convention AI notes use) and
+        # the UI omits the "View source" affordance.
+        source_url = url if input_type == "url" else ""
+        source_domain = (url.split("/")[2].replace("www.", "")
+                         if input_type == "url" and "://" in url else "")
+
+        # Enrich the note's own data per its content family (TMDB providers, Places
+        # photos/coords + action links, stop geocoding, price parsing). Best-effort: a miss
+        # leaves a valid plain note. A poster/photo is adopted as cover only when the note
+        # would otherwise be coverless.
+        if process_ai:
+            extracted.data, cover_override = await enrich_note_data(
+                user_id, extracted.content_type, extracted.data, cover_image_url)
+            cover_image_url = cover_override or cover_image_url
+            # Last resort: generate a cover with Imagen (gated, capped). Only when the note is
+            # still coverless after source imagery AND enrichment posters/photos. A miss (off,
             # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
             if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
                 if await reserve_image_slot(user_id):
@@ -362,74 +356,8 @@ async def process_job(job_id: str, request: Request):
                     )
                     if cover_image_url:
                         await record_image_generated(user_id)
-        # source_url/domain only describe URL captures; a typed note or uploaded file has
-        # no web source, so they stay "" (the same empty-source convention AI notes use) and
-        # the UI omits the "View source" affordance.
-        source_url = url if input_type == "url" else ""
-        source_domain = (url.split("/")[2].replace("www.", "")
-                         if input_type == "url" and "://" in url else "")
 
-        # Mini-app captures (recipes/movies/products/places/trips) don't create a note — they fan
-        # out into their app's item(s), which carry the data and are searchable via search_index.
-        # A matched family that yields NO item (e.g. a shopping slug with no buyable data) falls
-        # back to a plain note below, so a capture is never lost.
-        family = _mini_app_family(extracted.content_type) if process_ai else None
-        item_ids: list[str] = []
-        if family:
-            data = extracted.data or {}
-            try:
-                if family == "watchlist":
-                    item_ids = await enrich_titles(
-                        user_id, job_id, data.get("titles") or [],
-                        source_url=source_url, source_domain=source_domain)
-                elif family == "wishlist":
-                    iid = await enrich_wish_item(
-                        user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
-                        source_domain=source_domain, data=data, ai_summary=extracted.ai_summary)
-                    item_ids = [iid] if iid else []
-                elif family == "places":
-                    item_ids = await enrich_places(user_id, job_id, data.get("venues") or [])
-                elif family == "recipes":
-                    iid = await enrich_recipe_item(
-                        user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
-                        source_url=source_url, source_domain=source_domain, data=data,
-                        ai_summary=extracted.ai_summary)
-                    item_ids = [iid] if iid else []
-                elif family == "trips":
-                    iid = await enrich_trip_item(
-                        user_id, job_id, title=extracted.title, cover_image_url=cover_image_url,
-                        source_url=source_url, source_domain=source_domain, data=data,
-                        ai_summary=extracted.ai_summary)
-                    item_ids = [iid] if iid else []
-            except Exception as e:  # noqa: BLE001 — fan-out failure falls back to a note below.
-                log.warning("%s fan-out failed: %s: %s", family, type(e).__name__, e,
-                            extra={"job_id": job_id, "user_id": user_id, "url": url})
-                item_ids = []
-            if not item_ids:
-                family = None  # nothing materialized — save a normal note instead
-
-        if family:
-            # Item-only capture: no note doc. Route to the produced item (when exactly one) or app.
-            destination: dict = {"kind": "app", "app": family}
-            if len(item_ids) == 1:
-                destination["item_id"] = item_ids[0]
-            if source_domain:
-                await add_user_source(user_id, source_domain)
-            # Stamp the capture's display identity on the job — the Library "recent saves"
-            # list is job-backed (one row per capture, not per fanned-out item).
-            await job_ref.update({"status": "completed", "note_id": None,
-                                  "destination": destination,
-                                  "title": extracted.title,
-                                  "item_count": len(item_ids),
-                                  "updated_at": datetime.now(timezone.utc)})
-            await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
-            log.info("mini-app capture (%s, %d item[s]) via %s", family, len(item_ids),
-                     bundle.strategy,
-                     extra={"job_id": job_id, "user_id": user_id, "url": url,
-                            "strategy": bundle.strategy})
-            return {"status": "completed", "destination": destination}
-
-        # Plain note path (everything that isn't a mini-app capture).
+        # Every capture is a note.
         note_id = _stable_id("note", job_id)
         embedding = await _note_embedding(extracted.title, extracted.ai_summary)
         note_doc = {

@@ -1,8 +1,25 @@
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
+import {
+  ChefHat,
+  Clapperboard,
+  MapPin,
+  Plane,
+  ShoppingBag,
+  Sparkles,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
-import { TOOLS } from "@/lib/collections-meta";
+
+// The promise, shown not told: the kinds of saves that become rich structured notes, each in
+// its domain color. (Literal class strings — Tailwind's JIT needs them spelled out.)
+const DOMAIN_CHIPS: { label: string; icon: LucideIcon; cls: string }[] = [
+  { label: "Movies", icon: Clapperboard, cls: "bg-media-soft text-media" },
+  { label: "Products", icon: ShoppingBag, cls: "bg-product-soft text-product" },
+  { label: "Places", icon: MapPin, cls: "bg-place-soft text-place" },
+  { label: "Recipes", icon: ChefHat, cls: "bg-recipe-soft text-recipe" },
+  { label: "Trips", icon: Plane, cls: "bg-trip-soft text-trip" },
+];
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -46,14 +63,13 @@ function LoginPage() {
         </div>
         <h1 className="font-serif text-4xl text-ink">Clipnote</h1>
         <p className="mx-auto mt-3 max-w-xs font-serif text-xl leading-snug text-ink">
-          Save anything. It becomes a living collection.
+          Save anything. It becomes a note worth re-reading.
         </p>
-        {/* The promise, shown not told: the five domain collections in their own colors. */}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
-          {TOOLS.filter((t) => t.app != null).map((t) => (
+          {DOMAIN_CHIPS.map((t) => (
             <span
-              key={t.key}
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${t.soft}`}
+              key={t.label}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${t.cls}`}
             >
               <t.icon className="h-3.5 w-3.5" />
               {t.label}

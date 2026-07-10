@@ -33,7 +33,7 @@ RESULT_FIELDS = ("id", "content_type", "title", "ai_summary", "source_domain", "
 
 
 def _project(doc_id: str, d: dict) -> dict:
-    """Project a plain note. app=None + ref_id=id → the UI routes it to /notes/$id."""
+    """Project a note doc. `ref_id` = the note id the UI routes to (/notes/$id)."""
     return {
         "id": doc_id,
         "content_type": d.get("content_type", ""),
@@ -41,24 +41,21 @@ def _project(doc_id: str, d: dict) -> dict:
         "ai_summary": d.get("ai_summary", ""),
         "source_domain": d.get("source_domain", ""),
         "cover_image_url": d.get("cover_image_url"),
-        "app": None,
         "ref_id": doc_id,
     }
 
 
 def _project_index(d: dict) -> dict:
-    """Project a search_index hit (note OR mini-app item). For items, `app` + `ref_id` let the UI
-    route to /<app>/$itemId; notes carry app=None. `id` is the underlying doc id (ref_id)."""
+    """Project a search_index hit (one per note). Older index docs predate the stored
+    content_type and fall back to "" — a backfill re-index fills them in."""
     ref_id = d.get("ref_id", "")
-    app = d.get("app")  # None for notes
     return {
         "id": ref_id,
-        "content_type": d.get("kind") if app else "",
+        "content_type": d.get("content_type", ""),
         "title": d.get("title", ""),
         "ai_summary": d.get("summary", ""),
         "source_domain": "",
         "cover_image_url": d.get("cover_image_url"),
-        "app": app,
         "ref_id": ref_id,
     }
 
@@ -131,8 +128,6 @@ async def search(
             log.error("query embedding failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
             query_vec = None
         if query_vec:
-            # Search the unified index so results span notes AND mini-app items (recipes, movies,
-            # products, places, trips) that no longer create note docs.
             vector_query = db.collection(search_index.COLLECTION).where(
                 "user_id", "==", user_id).find_nearest(
                 vector_field="embedding",

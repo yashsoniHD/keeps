@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { searchNotes, type SearchResult } from "@/lib/api";
-import { goToHit } from "@/lib/nav";
-import { TOOLS, toolForHit, type ToolMeta } from "@/lib/collections-meta";
+import { goToNote } from "@/lib/nav";
+import { noteAccent, noteIcon } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import { AppShell } from "@/components/AppShell";
 
-// Global search across EVERYTHING saved — notes AND mini-app items (movies, recipes, places,
-// products, trips) — via the unified search_index (GET /api/search). Results are grouped by the
-// tool they belong to and each routes to its own detail. This is the app's real search entry
-// (the old header icon merely linked to the notes feed, whose inline search hid mini-app items).
+// Global semantic search across everything saved (GET /api/search over the search_index).
+// One flat, relevance-ranked list of notes; each row opens /notes/$id.
 export const Route = createFileRoute("/search")({ component: SearchScreen });
 
 const MIN_CHARS = 2;
@@ -20,8 +18,8 @@ const DEBOUNCE_MS = 300;
 type Status = "idle" | "searching" | "done" | "error";
 
 function ResultRow({ hit, onOpen }: { hit: SearchResult; onOpen: () => void }) {
-  const tool = toolForHit(hit.app);
-  const Icon = tool.icon;
+  const accent = noteAccent(hit.content_type);
+  const Icon = noteIcon(hit.content_type);
   return (
     <button
       type="button"
@@ -37,8 +35,8 @@ function ResultRow({ hit, onOpen }: { hit: SearchResult; onOpen: () => void }) {
             className="h-full w-full object-cover"
           />
         ) : (
-          <span className={`flex h-full w-full items-center justify-center ${tool.soft}`}>
-            <Icon className="h-5 w-5" />
+          <span className={`flex h-full w-full items-center justify-center ${accent.soft}`}>
+            <Icon className={`h-5 w-5 ${accent.text}`} />
           </span>
         )}
       </span>
@@ -49,35 +47,6 @@ function ResultRow({ hit, onOpen }: { hit: SearchResult; onOpen: () => void }) {
         )}
       </span>
     </button>
-  );
-}
-
-function Group({
-  tool,
-  hits,
-  onOpen,
-}: {
-  tool: ToolMeta;
-  hits: SearchResult[];
-  onOpen: (h: SearchResult) => void;
-}) {
-  return (
-    <section>
-      <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-ink-soft">
-        <tool.icon className={`h-3.5 w-3.5 ${tool.text}`} />
-        {tool.label}
-        <span className="text-ink-soft">· {hits.length}</span>
-      </h2>
-      <div className="space-y-2">
-        {hits.map((h) => (
-          <ResultRow
-            key={`${h.app ?? "note"}-${h.ref_id ?? h.id}`}
-            hit={h}
-            onOpen={() => onOpen(h)}
-          />
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -118,15 +87,7 @@ function SearchScreen() {
     return () => clearTimeout(handle);
   }, [trimmed]);
 
-  // Group hits by tool, in the canonical tool order, dropping empty groups.
-  const groups = useMemo(() => {
-    return TOOLS.map((tool) => ({
-      tool,
-      hits: results.filter((r) => toolForHit(r.app).key === tool.key),
-    })).filter((g) => g.hits.length > 0);
-  }, [results]);
-
-  const open = (h: SearchResult) => goToHit(navigate, h.app, h.ref_id ?? h.id);
+  const open = (h: SearchResult) => goToNote(navigate, h.ref_id ?? h.id);
 
   return (
     <AppShell>
@@ -134,7 +95,7 @@ function SearchScreen() {
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 md:px-8">
           <Link
             to="/"
-            aria-label="Back to Library"
+            aria-label="Back home"
             className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
           >
             <ArrowLeft className="h-5 w-5" />
@@ -171,7 +132,7 @@ function SearchScreen() {
           <div className="flex flex-col items-center gap-3 py-24 text-center text-ink-soft">
             <SearchIcon className="h-8 w-8" />
             <p className="max-w-xs text-sm">
-              Search across everything — your notes, movies, recipes, places, products, and trips.
+              Search everything you've saved — by topic, title, or place name.
             </p>
           </div>
         ) : status === "searching" ? (
@@ -183,7 +144,7 @@ function SearchScreen() {
           <div className="rounded-2xl bg-destructive/10 p-4 text-center text-sm text-destructive">
             Search didn't work just now. Try again.
           </div>
-        ) : groups.length === 0 ? (
+        ) : results.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-24 text-center text-ink-soft">
             <p className="text-sm">
               Nothing matched “<span className="text-ink">{trimmed}</span>”.
@@ -191,9 +152,9 @@ function SearchScreen() {
             <p className="text-xs">Try a different word, a title, or a place name.</p>
           </div>
         ) : (
-          <div className="space-y-8">
-            {groups.map((g) => (
-              <Group key={g.tool.key} tool={g.tool} hits={g.hits} onOpen={open} />
+          <div className="space-y-2">
+            {results.map((h) => (
+              <ResultRow key={h.ref_id ?? h.id} hit={h} onOpen={() => open(h)} />
             ))}
           </div>
         )}

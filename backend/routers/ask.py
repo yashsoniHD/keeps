@@ -268,8 +268,7 @@ async def ask(body: AskRequest, user_id: str = Depends(require_user)):
                 content_type=by_id[cid].get("content_type", ""),
                 cover_image_url=by_id[cid].get("cover_image_url"),
                 source_domain=by_id[cid].get("source_domain", ""),
-                app=by_id[cid].get("app"),
-                ref_id=by_id[cid].get("ref_id"),
+                ref_id=cid,
             )
             for cid in dict.fromkeys(cited_ids)
             if cid in by_id
@@ -294,8 +293,7 @@ def _citations_from_ctx(ctx: AgentContext) -> list[Citation]:
             content_type=ctx.notes_by_id[cid].get("content_type", ""),
             cover_image_url=ctx.notes_by_id[cid].get("cover_image_url"),
             source_domain=ctx.notes_by_id[cid].get("source_domain", ""),
-            app=ctx.notes_by_id[cid].get("app"),
-            ref_id=ctx.notes_by_id[cid].get("ref_id"),
+            ref_id=cid,
         )
         for cid in ctx.cited_ids if cid in ctx.notes_by_id
     ]

@@ -1,13 +1,11 @@
-"""The unified search index — one doc per note OR mini-app item, each with its own embedding.
+"""The search index — one doc per note, each with its own embedding.
 
 It's the single backbone for three features: semantic search (`routers/search.py`), Clip AI
-grounding (`services/note_retrieval.py`), and the Library "recent saves" strip (client onSnapshot).
-Because mini-app captures no longer create note docs, this is how their content stays searchable and
-answerable.
+grounding (`services/note_retrieval.py`), and the "recent saves" strip (client onSnapshot).
 
-Doc id is `f"{kind}-{ref_id}"` so upsert/remove are O(1) and idempotent — re-saving a deduped movie
-updates its entry instead of duplicating it. All writes are best-effort: a miss just means that entry
-is briefly absent from search until a backfill re-indexes it; it must never break the capture.
+Doc id is `f"note-{note_id}"` so upsert/remove are O(1) and idempotent. All writes are
+best-effort: a miss just means that entry is briefly absent from search until a backfill
+re-indexes it; it must never break the capture.
 """
 import logging
 from datetime import datetime, timezone
@@ -19,15 +17,6 @@ from services.embeddings import embedding_service
 log = logging.getLogger("clipnote.search_index")
 
 COLLECTION = "search_index"
-
-# kind -> the mini-app it routes to (notes have no app).
-APP_BY_KIND = {
-    "watch": "watchlist",
-    "wish": "wishlist",
-    "recipe": "recipes",
-    "place": "places",
-    "trip": "trips",
-}
 
 
 def _doc_id(kind: str, ref_id: str) -> str:
@@ -52,9 +41,10 @@ async def _embed(title: str, summary: str, existing: Vector | None) -> Vector | 
 
 async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
                  summary: str = "", cover_image_url: str | None = None,
+                 content_type: str | None = None,
                  collection_id: str | None = None, created_at=None,
                  embedding: Vector | None = None) -> None:
-    """Create/replace the index entry for a note or item. Idempotent per (kind, ref_id)."""
+    """Create/replace the index entry for a note. Idempotent per (kind, ref_id)."""
     try:
         now = datetime.now(timezone.utc)
         vec = await _embed(title, summary, embedding)
@@ -62,7 +52,7 @@ async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
             "user_id": user_id,
             "kind": kind,
             "ref_id": ref_id,
-            "app": APP_BY_KIND.get(kind),  # None for plain notes
+            "content_type": content_type or "",
             "collection_id": collection_id,
             "title": title or "",
             "summary": summary or "",
@@ -80,18 +70,19 @@ async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
 
 async def upsert_for_note(db, note_id: str, note_doc: dict,
                           embedding: Vector | None = None) -> None:
-    """Index a plain note, reusing its already-computed embedding when available."""
+    """Index a note, reusing its already-computed embedding when available."""
     await upsert(
         db, user_id=note_doc["user_id"], kind="note", ref_id=note_id,
         title=note_doc.get("title", ""), summary=note_doc.get("ai_summary", ""),
         cover_image_url=note_doc.get("cover_image_url"),
+        content_type=note_doc.get("content_type", ""),
         collection_id=note_doc.get("collection_id"),
         created_at=note_doc.get("created_at"), embedding=embedding,
     )
 
 
 async def remove(db, kind: str, ref_id: str) -> None:
-    """Drop an index entry on note/item delete. Best-effort."""
+    """Drop an index entry on note delete. Best-effort."""
     try:
         await db.collection(COLLECTION).document(_doc_id(kind, ref_id)).delete()
     except Exception as e:  # noqa: BLE001

@@ -35,7 +35,7 @@ def normalize_slug(raw: str) -> str:
     return s or "summary"
 
 
-# The Watchlist mini-app's content family. Entertainment slugs are AI-invented and open
+# The entertainment content family. Entertainment slugs are AI-invented and open
 # (`entertainment-recommendations`, `movie`, `film`, `tv`, …), so the family is defined by a
 # keyword matcher rather than a fixed enum. Used to (a) route extraction through the
 # `entertainment` schema and (b) gate TMDB enrichment in the worker. Keep this list in sync
@@ -52,9 +52,9 @@ def is_entertainment(content_type: str) -> bool:
     return any(kw in slug for kw in ENTERTAINMENT_KEYWORDS)
 
 
-# The Wishlist mini-app's content family — the shopping counterpart of ENTERTAINMENT_KEYWORDS.
+# The shopping content family — the counterpart of ENTERTAINMENT_KEYWORDS.
 # Product slugs are AI-invented and open (`product`, `gadget`, `gift-guide`, `buying-guide`, …),
-# so the family is a keyword matcher. Used only to GATE the wishlist fan-out in the worker; it
+# so the family is a keyword matcher. Used only to GATE price-parse enrichment in the worker; it
 # does NOT reroute extraction (a roundup keeps its rich note rendering), and the fan-out itself
 # guards on a usable price/buy URL, so a composer note that merely matches a keyword is skipped.
 # Keep this list in sync with the frontend family matcher.
@@ -69,10 +69,10 @@ def is_shopping(content_type: str) -> bool:
     return any(kw in slug for kw in SHOPPING_KEYWORDS)
 
 
-# The Places mini-app's content family — the dining/going-out counterpart of the other families.
+# The places content family — the dining/going-out counterpart of the other families.
 # Place slugs are AI-invented and open (`place`, `restaurant`, `cafe`, `food-spots`, …), so the
 # family is a keyword matcher. Used to (a) route extraction through the `place` venues[] schema and
-# (b) gate the Google-Places fan-out in the worker. Keep this list in sync with the frontend family
+# (b) gate Google-Places enrichment in the worker. Keep this list in sync with the frontend family
 # matcher.
 PLACES_KEYWORDS = (
     "place", "restaurant", "cafe", "bar", "dining", "eatery", "bakery", "dessert",
@@ -95,9 +95,9 @@ def is_places(content_type: str) -> bool:
     return False
 
 
-# The Recipes mini-app's content family — the cooking counterpart of the other families. The
+# The recipe content family — the cooking counterpart of the other families. The
 # `recipe` TYPE_PROMPT already produces structured ingredients/steps, so (like the wishlist) this
-# only GATES the fan-out in the worker; it does not reroute extraction. The fan-out itself guards
+# only GATES enrichment in the worker; it does not reroute extraction. The fan-out itself guards
 # on a usable `data.ingredients`, so a slug that merely matches a keyword without cookable data is
 # skipped. "food"/"dessert" are deliberately excluded — they overlap with the Places family. Keep
 # this list in sync with the frontend family matcher.
@@ -110,10 +110,10 @@ def is_recipe(content_type: str) -> bool:
     return any(kw in slug for kw in RECIPE_KEYWORDS)
 
 
-# The Trips mini-app's content family — the travel counterpart of the other families. The classifier
-# deliberately separates `itinerary` (a day-by-day trip plan) from `place` (venues → Places app), and
+# The itinerary content family — the travel counterpart of the other families. The classifier
+# deliberately separates `itinerary` (a day-by-day trip plan) from `place` (venues), and
 # the `itinerary` TYPE_PROMPT already produces structured days[].stops[], so (like the recipes/
-# wishlist) this only GATES the fan-out in the worker; it does not reroute extraction. The fan-out
+# wishlist) this only GATES stop-geocoding in the worker; it does not reroute extraction. Enrichment
 # itself guards on a usable `data.days`, so a vague travel slug without a day plan is skipped. Keep
 # this list in sync with the frontend family matcher.
 ITINERARY_KEYWORDS = ("itinerary", "trip", "travel", "tour", "road-trip", "vacation", "getaway")
@@ -367,7 +367,7 @@ The note's own `title`/`ai_summary` should describe the reel/list as a whole."""
 
 This is a movie/show recommendation — a single title OR a list (a "5 films to watch" reel,
 a thread, a best-of article). Extract EVERY distinct work mentioned as its own entry so each
-becomes a trackable watchlist item. NEVER merge two different works into one entry, and NEVER
+renders as its own card on the note. NEVER merge two different works into one entry, and NEVER
 invent a title that is not named in the source.
 
 `data` schema for entertainment:
@@ -580,7 +580,7 @@ class GeminiService:
                        note_hint: str | None = None) -> tuple[str, str | None]:
         """One lite call that assigns the content_type AND (when the user has smart collections)
         files the note into at most one of them. Returns (content_type, collection_id|None).
-        collection_id is ignored by the worker for mini-app content (those don't become notes)."""
+        collection_id files the note into a smart collection (null → the Notes catch-all)."""
         collections = collections or []
         valid_ids = {c["id"] for c in collections}
         categories_str = ", ".join(existing_categories) if existing_categories else "none yet"

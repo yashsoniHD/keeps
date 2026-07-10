@@ -121,8 +121,7 @@ function ProsCons({
 }) {
   // Sage (itinerary) reads as "good", terracotta (recipe) as "caution" — both real
   // palette tokens, so they stay on-theme rather than introducing raw green/red.
-  const toneClass =
-    tone === "positive" ? "bg-place-soft text-place" : "bg-recipe-soft text-recipe";
+  const toneClass = tone === "positive" ? "bg-place-soft text-place" : "bg-recipe-soft text-recipe";
   return (
     <div className="flex flex-col rounded-2xl border border-border bg-card p-5">
       <h3 className="font-serif text-xl text-ink">{title}</h3>

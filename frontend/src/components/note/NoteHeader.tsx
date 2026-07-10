@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useCanGoBack, useRouter } from "@tanstack/react-router";
 import { Timestamp } from "firebase/firestore";
 import { ArrowLeft, FolderPlus, Pencil, Pin, Star } from "lucide-react";
 import type { Collection, Note } from "@/lib/types";
@@ -122,6 +122,14 @@ export function NoteHeader({
   onPatch?: (patch: Partial<Note>) => void;
 }) {
   const [picker, setPicker] = useState(false);
+  const router = useRouter();
+  const canGoBack = useCanGoBack();
+  // Back returns to wherever the note was opened from (home feed, search, …). Falls back to
+  // home when there's no history — e.g. a shared /notes/{id} link opened cold.
+  const goBack = () => {
+    if (canGoBack) router.history.back();
+    else router.navigate({ to: "/" });
+  };
 
   // Favorite / pin write through the backend (notes are server-write-only); onPatch updates
   // the local note optimistically and reverts on failure so the toggle feels instant.
@@ -152,13 +160,14 @@ export function NoteHeader({
   return (
     <header className="mb-8 flex flex-col gap-5">
       <div className="flex items-center justify-between">
-        <Link
-          to="/notes"
+        <button
+          type="button"
+          onClick={goBack}
           className="inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
-          Notes
-        </Link>
+          Back
+        </button>
         <div className="flex items-center gap-2">
           <button
             type="button"

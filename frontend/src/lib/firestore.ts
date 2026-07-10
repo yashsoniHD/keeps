@@ -20,17 +20,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
-import type {
-  Note,
-  Job,
-  WatchItem,
-  WishItem,
-  PlaceItem,
-  RecipeItem,
-  TripItem,
-  Collection,
-  SearchHit,
-} from "@/lib/types";
+import type { Note, Job, Collection } from "@/lib/types";
 
 // Record signup attribution on the user's own doc (rules allow owner writes). Merge so it
 // never clobbers backend-written fields; called once, on first sign-in.
@@ -85,28 +75,6 @@ export function watchNotes(
   );
 }
 
-// The Library "recent saves" strip: the newest items across ALL collections + mini-apps, read
-// from the unified search_index (one doc per note OR item). Each hit routes to its destination
-// (a note or a /<app>/$itemId) via `app`/`ref_id`. Backed by (user_id, created_at) on search_index.
-export function watchRecent(
-  userId: string,
-  callback: (hits: SearchHit[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 5, onError } = opts;
-  const q = query(
-    collection(db, "search_index"),
-    where("user_id", "==", userId),
-    orderBy("created_at", "desc"),
-    limit(max),
-  );
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SearchHit)),
-    (err) => onError?.(err),
-  );
-}
-
 export async function getNote(noteId: string): Promise<Note | null> {
   const snap = await getDoc(doc(db, "notes", noteId));
   if (!snap.exists()) return null;
@@ -118,14 +86,6 @@ export async function getNote(noteId: string): Promise<Note | null> {
 export async function getAnnotation(noteId: string): Promise<string> {
   const snap = await getDoc(doc(db, "annotations", noteId));
   return snap.exists() ? ((snap.data().user_note ?? "") as string) : "";
-}
-
-// One-shot job read (owner-only per rules) — used to recover the captured URL for older
-// mini-app items whose source_note_ids hold a job id (item-only captures create no note).
-export async function getJob(jobId: string): Promise<Job | null> {
-  const snap = await getDoc(doc(db, "jobs", jobId));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() } as Job;
 }
 
 export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): Unsubscribe {
@@ -342,221 +302,6 @@ export async function setOnboardingDone(userId: string): Promise<void> {
   await setDoc(doc(db, "users", userId), { onboarding_done: true }, { merge: true });
 }
 
-// --- Watchlist mini-app ---------------------------------------------------------
-
-// Live listener over the user's watch_items subcollection (read-only — writes go through
-// the backend). Ordered newest-first; the view splits To-Watch / Watched client-side.
-export function watchWatchItems(
-  userId: string,
-  callback: (items: WatchItem[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 200, onError } = opts;
-  const q = query(
-    collection(db, "users", userId, "watch_items"),
-    orderBy("created_at", "desc"),
-    limit(max),
-  );
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as WatchItem)),
-    (err) => onError?.(err),
-  );
-}
-
-// Live listener over a single watch item (for the detail page) so status/rating changes
-// reflect instantly. Calls back with null if the item is deleted or doesn't exist.
-export function watchWatchItem(
-  userId: string,
-  itemId: string,
-  callback: (item: WatchItem | null) => void,
-  opts: { onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  return onSnapshot(
-    doc(db, "users", userId, "watch_items", itemId),
-    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as WatchItem) : null),
-    (err) => opts.onError?.(err),
-  );
-}
-
-// --- Wishlist mini-app ----------------------------------------------------------
-
-// Live listener over the user's wish_items subcollection (read-only — writes go through the
-// backend). Ordered newest-first; the view splits Saved / Wishlist / Bought client-side.
-export function watchWishItems(
-  userId: string,
-  callback: (items: WishItem[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 200, onError } = opts;
-  const q = query(
-    collection(db, "users", userId, "wish_items"),
-    orderBy("created_at", "desc"),
-    limit(max),
-  );
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as WishItem)),
-    (err) => onError?.(err),
-  );
-}
-
-// Live listener over a single wish item (for the detail page) so status/target changes reflect
-// instantly. Calls back with null if the item is deleted or doesn't exist.
-export function watchWishItem(
-  userId: string,
-  itemId: string,
-  callback: (item: WishItem | null) => void,
-  opts: { onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  return onSnapshot(
-    doc(db, "users", userId, "wish_items", itemId),
-    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as WishItem) : null),
-    (err) => opts.onError?.(err),
-  );
-}
-
-// --- Places mini-app ------------------------------------------------------------
-
-// Live listener over the user's place_items subcollection (read-only — writes go through the
-// backend). Ordered newest-first; the view splits Saved / To-visit / Visited client-side.
-export function watchPlaceItems(
-  userId: string,
-  callback: (items: PlaceItem[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 200, onError } = opts;
-  const q = query(
-    collection(db, "users", userId, "place_items"),
-    orderBy("created_at", "desc"),
-    limit(max),
-  );
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PlaceItem)),
-    (err) => onError?.(err),
-  );
-}
-
-// Live listener over a single place item (for the detail page) so status/rating/notes changes
-// reflect instantly. Calls back with null if the item is deleted or doesn't exist.
-export function watchPlaceItem(
-  userId: string,
-  itemId: string,
-  callback: (item: PlaceItem | null) => void,
-  opts: { onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  return onSnapshot(
-    doc(db, "users", userId, "place_items", itemId),
-    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as PlaceItem) : null),
-    (err) => opts.onError?.(err),
-  );
-}
-
-// --- Recipes mini-app -----------------------------------------------------------
-
-// Live listener over the user's recipe_items subcollection (read-only — the favorite toggle goes
-// through the backend). Ordered newest-first; the cookbook view filters client-side (no buckets).
-export function watchRecipeItems(
-  userId: string,
-  callback: (items: RecipeItem[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 200, onError } = opts;
-  const q = query(
-    collection(db, "users", userId, "recipe_items"),
-    orderBy("created_at", "desc"),
-    limit(max),
-  );
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecipeItem)),
-    (err) => onError?.(err),
-  );
-}
-
-// Live listener over a single recipe item (for the detail page) so the favorite toggle reflects
-// instantly. Calls back with null if the item is deleted or doesn't exist.
-export function watchRecipeItem(
-  userId: string,
-  itemId: string,
-  callback: (item: RecipeItem | null) => void,
-  opts: { onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  return onSnapshot(
-    doc(db, "users", userId, "recipe_items", itemId),
-    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as RecipeItem) : null),
-    (err) => opts.onError?.(err),
-  );
-}
-
-// --- Trips mini-app -------------------------------------------------------------
-
-// Live listener over the user's trip_items subcollection (read-only — the favorite toggle goes
-// through the backend). Ordered newest-first; the wall filters client-side (no buckets).
-export function watchTripItems(
-  userId: string,
-  callback: (items: TripItem[]) => void,
-  opts: { max?: number; onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  const { max = 200, onError } = opts;
-  const q = query(
-    collection(db, "users", userId, "trip_items"),
-    orderBy("created_at", "desc"),
-    limit(max),
-  );
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TripItem)),
-    (err) => onError?.(err),
-  );
-}
-
-// Live listener over a single trip item (for the detail page) so the favorite toggle reflects
-// instantly. Calls back with null if the item is deleted or doesn't exist.
-export function watchTripItem(
-  userId: string,
-  itemId: string,
-  callback: (item: TripItem | null) => void,
-  opts: { onError?: (e: Error) => void } = {},
-): Unsubscribe {
-  return onSnapshot(
-    doc(db, "users", userId, "trip_items", itemId),
-    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as TripItem) : null),
-    (err) => opts.onError?.(err),
-  );
-}
-
-// Live counts for the Launchpad tool cards. Uses server-side aggregation (getCountFromServer),
-// so it's one cheap read per tool rather than streaming every item doc — a one-shot snapshot
-// refreshed on mount (the real-time "did my save land" signal is the Recent-saves strip). Keyed
-// by ToolKey strings; the Notes count is the whole notes collection (the catch-all feed).
-export type ToolCounts = Record<string, number>;
-
-export async function getToolCounts(userId: string): Promise<ToolCounts> {
-  // Item subcollections are already path-scoped to the user; only top-level `notes` needs a filter.
-  const specs: Array<[string, ReturnType<typeof query> | ReturnType<typeof collection>]> = [
-    ["notes", query(collection(db, "notes"), where("user_id", "==", userId))],
-    ["watchlist", collection(db, "users", userId, "watch_items")],
-    ["wishlist", collection(db, "users", userId, "wish_items")],
-    ["places", collection(db, "users", userId, "place_items")],
-    ["recipes", collection(db, "users", userId, "recipe_items")],
-    ["trips", collection(db, "users", userId, "trip_items")],
-  ];
-  const counts: ToolCounts = {};
-  await Promise.all(
-    specs.map(async ([key, ref]) => {
-      try {
-        const snap = await getCountFromServer(ref);
-        counts[key] = snap.data().count;
-      } catch {
-        counts[key] = 0;
-      }
-    }),
-  );
-  return counts;
-}
-
 // Count of hand-made notes (typed / photo / PDF / voice / video — everything that isn't a URL
 // capture) for the "Your notes" folder tile. A server-side aggregate: one cheap read instead of
 // streaming 200 note docs just to derive a number. Equality-only filters, so no composite index.
@@ -570,7 +315,8 @@ export async function getManualNotesCount(userId: string): Promise<number> {
   return snap.data().count;
 }
 
-// The user's "where to watch" region (ISO-3166-1 alpha-2). Empty when never set.
+// The user's region (ISO-3166-1 alpha-2) — feeds streaming availability and reservation
+// links on enriched notes. Empty when never set.
 export async function getUserRegion(userId: string): Promise<string> {
   const snap = await getDoc(doc(db, "users", userId));
   return snap.exists() ? ((snap.data().region ?? "") as string) : "";

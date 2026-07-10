@@ -96,8 +96,8 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
               {created.assigned > 0 ? (
                 <>
                   <Check className="mr-1 inline h-3.5 w-3.5 text-success" />
-                  Swept {created.assigned} existing {created.assigned === 1 ? "note" : "notes"} in
-                  — and new saves that match will land here automatically.
+                  Swept {created.assigned} existing {created.assigned === 1 ? "note" : "notes"} in —
+                  and new saves that match will land here automatically.
                 </>
               ) : (
                 "No existing notes matched yet — new saves that fit will land here automatically."

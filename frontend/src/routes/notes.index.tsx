@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import {
   Search,
   Sparkles,
@@ -11,14 +11,13 @@ import {
   X,
   Check,
   Layers,
-  LayoutGrid,
   Link2,
   AlignLeft,
   ImagePlus,
   Mic,
   ArrowLeft,
   Pin,
-  Rows3,
+  Settings as SettingsIcon,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -33,7 +32,14 @@ import {
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
-import { ingest, ingestMedia, ingestText, ingestVoice, searchNotes } from "@/lib/api";
+import {
+  ingest,
+  ingestMedia,
+  ingestText,
+  ingestVoice,
+  listCategories,
+  searchNotes,
+} from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
@@ -42,7 +48,8 @@ import {
   replayQueue,
   type QueuedCapture,
 } from "@/lib/capture-queue";
-import { groupNotesByDate, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
+import { groupNotesByDate, sourceLabel } from "@/lib/note-meta";
+import { setFeedOrder } from "@/lib/note-nav";
 import { FOCUS_RING } from "@/lib/ui";
 import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
 import { NoteMenuProvider } from "@/components/NoteContextMenu";
@@ -50,17 +57,19 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
 import { AddNoteSheet } from "@/components/AddNoteSheet";
 import { AppShell } from "@/components/AppShell";
+import { CategoryChips, CategoryMenu } from "@/components/feed/CategoryFilter";
+import { ClipMark, ClipLoader } from "@/components/ClipMark";
+import { useLayout } from "@/lib/layout";
 import type { Note, Job, Collection } from "@/lib/types";
 
-// The Notes app: the catch-all feed for everything that isn't in a mini-app or a collection.
-// `?type=<slug>` still deep-links to a single content_type (kept for internal/back-compat links).
+// The notes feed. Home (`/`) is the ONE feed (Feed with `home`). The old `/notes` view was a
+// second, identical feed from the collections era; with collections gone it was just a duplicate
+// (opening a note then going Back landed here), so `/notes` now redirects to home.
 export const Route = createFileRoute("/notes/")({
-  validateSearch: (s: Record<string, unknown>): { type?: string } =>
-    typeof s.type === "string" && s.type ? { type: s.type } : {},
-  component: Feed,
+  beforeLoad: () => {
+    throw redirect({ to: "/" });
+  },
 });
-
-type Layout = "standard" | "condensed";
 
 // Round header icon button: 40px tap target, hairline border, with the shared focus ring.
 // (The + FAB is intentionally left without a focus ring.)
@@ -111,40 +120,10 @@ function presentManualSources(notes: Note[]): Set<string> {
 // resolves if first-run extraction ever looks off.
 const SAMPLE_LINK = "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe";
 
-// Tracks whether a horizontal scroller sits at its start/end, so the caller can show edge
-// fades only when content actually overflows. Recomputes on scroll, on resize, and when
-// `deps` change (e.g. the category list grows — which changes scrollWidth, not box size).
-function useScrollEdges<T extends HTMLElement>(deps: unknown[]) {
-  const ref = useRef<T>(null);
-  const [edges, setEdges] = useState({ atStart: true, atEnd: true });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => {
-      const { scrollLeft, scrollWidth, clientWidth } = el;
-      setEdges({
-        atStart: scrollLeft <= 1,
-        atEnd: scrollLeft + clientWidth >= scrollWidth - 1,
-      });
-    };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener("scroll", update);
-      ro.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  return { ref, ...edges };
-}
-
-function Feed() {
+export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: string }) {
   const { user, loading } = useAuth();
   useCategoryMeta(); // re-render the feed when category icon/colour overrides load or change
   const navigate = useNavigate();
-  const { type: typeParam } = Route.useSearch();
   const { openChat } = useAsk();
   const [notes, setNotes] = useState<Note[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -153,25 +132,14 @@ function Feed() {
   const [max, setMax] = useState(50);
   const [userCategories, setUserCategories] = useState<string[]>([]);
   const [userSources, setUserSources] = useState<string[]>([]);
+  const [catCounts, setCatCounts] = useState<Record<string, number>>({});
   const [active, setActive] = useState<string>(typeParam ?? "all");
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [layout, setLayout] = useState<Layout>(
-    () => (localStorage.getItem("clipnote.layout") as Layout) || "standard",
-  );
-  // The view toggle lives here (the Notes collection screen), persisted app-wide.
-  const toggleLayout = () => {
-    setLayout((prev) => {
-      const next: Layout = prev === "condensed" ? "standard" : "condensed";
-      try {
-        localStorage.setItem("clipnote.layout", next);
-      } catch {
-        /* non-fatal — the toggle still applies for this session */
-      }
-      return next;
-    });
-  };
+  // Read-only here — the view toggle now lives in Settings (Appearance). The hook keeps this in
+  // sync via localStorage, so changing it there and returning to the feed reflects immediately.
+  const [layout] = useLayout();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
     try {
@@ -221,6 +189,11 @@ function Feed() {
     getUserSources(user.uid)
       .then(setUserSources)
       .catch(() => {});
+    // Whole-corpus per-type counts for the category panel. Best-effort: on failure the panel
+    // just renders chips without counts.
+    listCategories()
+      .then((cats) => setCatCounts(Object.fromEntries(cats.map((c) => [c.slug, c.count]))))
+      .catch(() => {});
   }, [user]);
 
   // In-flight captures → optimistic "processing" cards (works for every capture path).
@@ -240,6 +213,17 @@ function Feed() {
   useEffect(() => {
     setActive(typeParam ?? "all");
   }, [typeParam]);
+
+  // Set the active category AND mirror it into the URL (?type=…) on the home feed, so opening a
+  // note and pressing Back returns to the same category instead of resetting to All. `replace`
+  // keeps it out of history (the note push is the real back target).
+  const applyActive = useCallback(
+    (v: string) => {
+      setActive(v);
+      if (home) navigate({ to: "/", search: v === "all" ? {} : { type: v }, replace: true });
+    },
+    [home, navigate],
+  );
 
   // Offline-queued captures replay on mount and whenever the connection returns.
   // Server-rejected entries (4xx) are dropped with their error surfaced — they'd
@@ -406,27 +390,21 @@ function Feed() {
     ];
   }, [domainSources, notes]);
 
-  // Edge fades on the category scroller — only shown when chips actually overflow.
-  const {
-    ref: catScrollRef,
-    atStart: catAtStart,
-    atEnd: catAtEnd,
-  } = useScrollEdges<HTMLDivElement>([categories.length, sourceOptions.length]);
-
   // Browse view: the live feed filtered only by the type/source chips. Text queries no
   // longer filter this slice — they run server-side semantic search (below) over the
   // whole corpus, not just the loaded window.
   const filtered = useMemo(() => {
     return notes.filter((n) => {
-      // The Notes app is the catch-all: notes filed into a smart collection live in that
-      // collection, not here. Excluded client-side so it works regardless of whether older
+      // Home is THE feed — every note streams here regardless of collection. The /notes
+      // deep link stays the catch-all: notes filed into a smart collection live in that
+      // collection, not there. Excluded client-side so it works regardless of whether older
       // notes have the collection_id field yet (a Firestore `== null` query would miss those).
-      if (n.collection_id) return false;
+      if (!home && n.collection_id) return false;
       if (active !== "all" && n.content_type !== active) return false;
       if (!noteMatchesSource(n, source)) return false;
       return true;
     });
-  }, [notes, active, source]);
+  }, [notes, active, source, home]);
 
   // Semantic search: debounced server call over all the user's notes (Firestore Vector
   // Search). Empty/short queries fall back to the browse feed. Results are projected
@@ -446,13 +424,10 @@ function Feed() {
     const handle = setTimeout(async () => {
       try {
         const results = await searchNotes(trimmedQuery);
-        // The unified index also returns mini-app items (app set); those live in their own apps
-        // and would mis-route through NoteCard (→ /notes/$id), so the Notes app shows note hits
-        // only. Items remain findable via their mini-app, the Library recents, and Clip AI.
         setSearchResults(
-          results
-            .filter((r) => !r.app)
-            .map((r) => ({ ...r, source_url: "", source: "web", data: {} }) as unknown as Note),
+          results.map(
+            (r) => ({ ...r, source_url: "", source: "web", data: {} }) as unknown as Note,
+          ),
         );
       } catch {
         setSearchResults([]);
@@ -490,6 +465,18 @@ function Feed() {
     () => (searchActive ? null : groupNotesByDate(displayNotes.filter((n) => !n.pinned_at))),
     [searchActive, displayNotes],
   );
+
+  // Persist the visible order (pinned first, then the date-grouped stream — matching what's on
+  // screen) so the note view can swipe/arrow to the next note in the same filtered context.
+  useEffect(() => {
+    const ids = searchActive
+      ? displayNotes.map((n) => n.id)
+      : [
+          ...pinnedNotes.map((n) => n.id),
+          ...displayNotes.filter((n) => !n.pinned_at).map((n) => n.id),
+        ];
+    setFeedOrder(ids);
+  }, [displayNotes, pinnedNotes, searchActive]);
 
   // Processing cards show only on the default view — an in-flight job has no type/title
   // yet to match a filter or search. Merge server jobs with not-yet-acknowledged local
@@ -547,7 +534,7 @@ function Feed() {
   if (loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
+        <ClipLoader className="h-20 w-20" />
       </div>
     );
   }
@@ -617,13 +604,12 @@ function Feed() {
               </div>
             ) : (
               <div className="mb-3 flex items-center justify-between gap-3">
-                {/* Notes is a collection now — this header reads like one: back to the
-                    Library + the collection name, not a second app home. */}
-                <div className="flex min-w-0 items-center gap-2">
-                  <Link to="/" aria-label="Back to Library" title="Library" className={ICON_BTN}>
-                    <ArrowLeft className="h-4 w-4" />
-                  </Link>
-                  <span className="truncate font-serif text-2xl text-ink">Notes</span>
+                {/* The Clipnote paper-clip mark + wordmark. */}
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
+                    <ClipMark className="h-5 w-5" />
+                  </span>
+                  <span className="truncate font-serif text-2xl text-ink">Clipnote</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -635,33 +621,17 @@ function Feed() {
                   >
                     <Search className="h-4 w-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={toggleLayout}
-                    aria-label={
-                      layout === "condensed" ? "Switch to card view" : "Switch to condensed view"
-                    }
-                    title={layout === "condensed" ? "Card view" : "Condensed view"}
-                    className={ICON_BTN}
-                  >
-                    {layout === "condensed" ? (
-                      <LayoutGrid className="h-4 w-4" />
-                    ) : (
-                      <Rows3 className="h-4 w-4" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingUrl("");
-                      setShowAdd(true);
-                    }}
-                    aria-label="New note"
-                    title="New note"
-                    className={ICON_BTN}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                  {categories.length > 0 && (
+                    <CategoryMenu
+                      categories={categories}
+                      active={active}
+                      setActive={applyActive}
+                      counts={catCounts}
+                    />
+                  )}
+                  <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
+                    <SettingsIcon className="h-4 w-4" />
+                  </Link>
                 </div>
               </div>
             )}
@@ -671,49 +641,7 @@ function Feed() {
                 {sourceOptions.length > 1 && (
                   <SourceFilter options={sourceOptions} source={source} setSource={setSource} />
                 )}
-                <div className="min-w-0 flex-1">
-                  {/* Edge fades via a mask on the scroller itself — fades the actual chips to
-                    transparent, so it's background-agnostic (no opaque-overlay seam against the
-                    translucent, blurred header) and only fades the side that actually overflows. */}
-                  <div
-                    ref={catScrollRef}
-                    className="-mx-1 flex gap-1.5 overflow-x-auto px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                    style={{
-                      WebkitMaskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
-                      maskImage: `linear-gradient(to right, ${catAtStart ? "black" : "transparent"}, black 28px, black calc(100% - 28px), ${catAtEnd ? "black" : "transparent"})`,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setActive("all")}
-                      className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${FOCUS_RING} ${
-                        active === "all"
-                          ? "bg-ink text-paper"
-                          : "border border-border bg-card text-ink-soft hover:text-ink"
-                      }`}
-                    >
-                      All
-                    </button>
-                    {categories.map((c) => {
-                      const accent = noteAccent(c);
-                      const Icon = noteIcon(c);
-                      const isActive = active === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setActive(c)}
-                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
-                            isActive ? `${accent.dot} text-white` : accent.chip
-                          }`}
-                        >
-                          <Icon className="h-3.5 w-3.5 shrink-0" />
-                          {noteLabel(c)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <CategoryChips categories={categories} active={active} setActive={applyActive} />
               </div>
             )}
           </div>
@@ -858,8 +786,19 @@ function Feed() {
           )}
         </main>
 
-        {/* The bottom-right FAB is now the global Ask-AI button (components/ask/AskFab.tsx);
-          search moved to the top bar. */}
+        {/* Primary action FAB: capture a new note. (Clip AI is reached from the search bar.) */}
+        <button
+          type="button"
+          onClick={() => {
+            setPendingUrl("");
+            setShowAdd(true);
+          }}
+          aria-label="New note"
+          title="New note"
+          className="fixed bottom-8 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
 
         {showAdd && (
           <AddNoteSheet

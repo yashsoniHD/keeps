@@ -31,10 +31,6 @@ class Settings:
     # Per-user daily cap on /api/search — each search embeds the query (a paid Vertex call,
     # tiny but previously unbounded). Generous: real usage is a handful of searches a day.
     MAX_SEARCHES_PER_USER_PER_DAY: int = int(os.getenv("MAX_SEARCHES_PER_USER_PER_DAY", "500"))
-    # Per-user, per-app daily cap on mini-app backfill runs. Backfill writes are idempotent
-    # but each run re-incurs its Gemini / enrichment-API spend, so repeats are bounded.
-    MAX_BACKFILLS_PER_APP_PER_DAY: int = int(os.getenv("MAX_BACKFILLS_PER_APP_PER_DAY", "3"))
-
     CLOUD_TASKS_QUEUE: str = os.getenv("CLOUD_TASKS_QUEUE", "clip-note-jobs")
     CLOUD_TASKS_LOCATION: str = os.getenv("CLOUD_TASKS_LOCATION", "us-central1")
     CLOUD_TASKS_WORKER_URL: str = os.getenv("CLOUD_TASKS_WORKER_URL", "http://localhost:8080")
@@ -172,7 +168,7 @@ class Settings:
 
     # --- Watchlist mini-app (TMDB enrichment) ---
     # TMDB v4 Read Access Token (sent as `Authorization: Bearer`). When empty, enrichment is a
-    # graceful no-op: entertainment notes still save and watch_items render from the raw title.
+    # graceful no-op: entertainment notes still save and their titles render unenriched.
     # TMDB is free for this use, so no per-user cost cap (unlike Gemini/Imagen).
     TMDB_BEARER: str = os.getenv("TMDB_BEARER", "")
     TMDB_API_BASE: str = os.getenv("TMDB_API_BASE", "https://api.themoviedb.org/3")
@@ -187,7 +183,7 @@ class Settings:
     # --- Places mini-app (Google Places API New) ---
     # Server-side calls authenticate with the runtime service account (ADC) — same as Vertex /
     # Firestore — so there's no API key to manage. Off → enrichment is a graceful no-op: place
-    # notes still save and place_items render from the raw venue name. Cache hard + the free SKU
+    # notes still save and their venues render from the raw venue name. Cache hard + the free SKU
     # tier keep cost negligible. (The frontend Maps JS uses a separate browser key.)
     ENABLE_PLACES: bool = os.getenv("ENABLE_PLACES", "true").lower() == "true"
     GOOGLE_PLACES_API_BASE: str = os.getenv("GOOGLE_PLACES_API_BASE", "https://places.googleapis.com/v1")

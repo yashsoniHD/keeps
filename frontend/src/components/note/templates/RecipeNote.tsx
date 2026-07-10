@@ -29,6 +29,30 @@ export function RecipeNote({ note }: { note: Note }) {
   const data = note.data as RecipeData;
   const accent = noteAccent(note.content_type);
 
+  // Some captures (older backfill stubs) never got their recipe extracted — `data` is empty.
+  // Render a clear empty state with the source instead of blank Ingredients/Method scaffolding.
+  const hasContent =
+    (data.ingredients?.some((g) => (g.items?.length ?? 0) > 0) ?? false) ||
+    (data.steps?.length ?? 0) > 0;
+  if (!hasContent) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-6 text-center">
+        <p className="text-ink">We couldn't pull the recipe details from this one.</p>
+        {note.source_url && (
+          <a
+            href={note.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper"
+          >
+            <Globe className="h-4 w-4" />
+            Open the source
+          </a>
+        )}
+      </div>
+    );
+  }
+
   const stats: { icon: LucideIcon; label: string; value?: string }[] = [
     { icon: Clock, label: "Total", value: data.totalTime },
     { icon: Timer, label: "Prep", value: data.prepTime },

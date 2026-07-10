@@ -29,7 +29,6 @@ export function CaptureModal({ url, onClose }: { url: string; onClose: () => voi
     ingest(url)
       .then(({ job_id }) => {
         unsubRef.current = watchJob(job_id, (job) => {
-          // A mini-app capture has no note_id — it lands in its app via `destination`.
           if (job.status === "completed" && (job.destination || job.note_id)) {
             unsubRef.current?.();
             setDone(true);

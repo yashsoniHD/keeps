@@ -1,10 +1,13 @@
 import { MapPin, Star, Clock, Wallet, Sparkles, Lightbulb, Utensils } from "lucide-react";
-import type { Note } from "@/lib/types";
+import type { Note, PlaceAction } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
+import { ActionRow } from "../ActionRow";
+import { VenuesMap } from "../VenuesMap";
 
-// One venue in a place note. Matches the backend `place` venues[] schema
-// (services/gemini.py TYPE_PROMPTS["place"]). The legacy single-venue shape (pre-venues[]) is
-// normalized into a one-element array by PlaceNote below.
+// One venue in a place note. camelCase fields match the backend `place` venues[] schema
+// (services/gemini.py TYPE_PROMPTS["place"] — what the source said); snake_case fields are
+// backend Google-Places enrichment (looked up: photo, coords, live rating, hours, links). The
+// legacy single-venue shape (pre-venues[]) is normalized into a one-element array below.
 interface Venue {
   name?: string;
   location?: string;
@@ -13,7 +16,7 @@ interface Venue {
   cuisine?: string;
   priceForTwo?: string;
   priceRange?: string; // legacy
-  rating?: string;
+  rating?: string | number; // source string, or Google numeric after enrichment
   timings?: string;
   mustTry?: string[];
   goodFor?: string[];
@@ -22,6 +25,18 @@ interface Venue {
   highlights?: string[];
   tips?: string[];
   why?: string;
+  // enrichment (Google Places)
+  place_id?: string;
+  formatted_address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  user_rating_count?: number | null;
+  price_level?: string | null;
+  opening_hours?: string[];
+  website?: string | null;
+  phone?: string | null;
+  photo_url?: string | null;
+  action_links?: PlaceAction[];
 }
 
 interface PlaceData {
@@ -43,8 +58,15 @@ type Accent = ReturnType<typeof noteAccent>;
 
 function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showName: boolean }) {
   const stats: { icon: typeof Star; label: string; value: string }[] = [];
-  if (v.rating) stats.push({ icon: Star, label: "Rating", value: v.rating });
-  const price = v.priceForTwo || v.priceRange;
+  if (v.rating) {
+    // Google's numeric rating gets its review count; a source-said string renders as-is.
+    const value =
+      typeof v.rating === "number" && v.user_rating_count
+        ? `${v.rating} (${v.user_rating_count.toLocaleString()})`
+        : String(v.rating);
+    stats.push({ icon: Star, label: "Rating", value });
+  }
+  const price = v.priceForTwo || v.priceRange || v.price_level;
   if (price) stats.push({ icon: Wallet, label: "Price", value: price });
   if (v.timings) stats.push({ icon: Clock, label: "Hours", value: v.timings });
 
@@ -52,12 +74,23 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
     <div className="space-y-6">
       {showName && v.name && <h2 className="font-serif text-2xl text-ink">{v.name}</h2>}
 
-      {(v.location || v.category || v.cuisine) && (
+      {v.photo_url && (
+        <div className="overflow-hidden rounded-2xl border border-border">
+          <img
+            src={v.photo_url}
+            alt={v.name ?? ""}
+            loading="lazy"
+            className="h-52 w-full object-cover"
+          />
+        </div>
+      )}
+
+      {(v.location || v.formatted_address || v.category || v.cuisine) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-soft">
-          {v.location && (
+          {(v.location || v.formatted_address) && (
             <span className="inline-flex items-center gap-1.5">
               <MapPin className={`h-4 w-4 ${accent.text}`} />
-              <span className="text-ink">{v.location}</span>
+              <span className="text-ink">{v.location || v.formatted_address}</span>
             </span>
           )}
           {(v.category || v.cuisine) && (
@@ -65,6 +98,9 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
           )}
         </div>
       )}
+
+      {/* Region-aware actions built by backend enrichment (Directions / Reserve / Order / …). */}
+      <ActionRow actions={v.action_links} />
 
       {stats.length > 0 && (
         <div
@@ -79,6 +115,21 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
             </div>
           ))}
         </div>
+      )}
+
+      {(v.opening_hours?.length ?? 0) > 0 && (
+        <details className="rounded-2xl border border-border bg-card px-5 py-3">
+          <summary
+            className={`inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-ink`}
+          >
+            <Clock className={`h-4 w-4 ${accent.text}`} /> Opening hours
+          </summary>
+          <ul className="mt-2 space-y-1 text-sm text-ink-soft">
+            {v.opening_hours!.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {v.facts && v.facts.length > 0 && (
@@ -187,6 +238,8 @@ export function PlaceNote({ note }: { note: Note }) {
       {data.listTheme && multi && (
         <p className="text-sm uppercase tracking-wider text-ink-soft">{data.listTheme}</p>
       )}
+      {/* Live map of enriched venues — renders nothing without a Maps key or coordinates. */}
+      <VenuesMap venues={venues} heightClass={multi ? "h-[40vh]" : "h-56"} />
       {venues.map((v, i) => (
         <div key={i} className={i > 0 ? "border-t border-border pt-10" : ""}>
           <VenueBlock v={v} accent={accent} showName={multi} />

@@ -1,5 +1,5 @@
 """candidate_pool embedding economics: one ask = ONE paid query embedding, threaded
-through both the notes shortlist and the mini-app items shortlist."""
+through the notes shortlist."""
 import services.note_retrieval as nr
 from services.embeddings import embedding_service
 
@@ -26,8 +26,7 @@ async def test_shortlists_still_embed_when_called_standalone(fake_db, monkeypatc
 
     monkeypatch.setattr(embedding_service, "embed_query", counting_embed)
     assert await nr.vector_shortlist(fake_db, "u", "q1") == []
-    assert await nr.item_shortlist(fake_db, "u", "q2") == []
-    assert calls == ["q1", "q2"]
+    assert calls == ["q1"]
 
 
 async def test_embed_failure_degrades_to_recency_only(fake_db, monkeypatch):

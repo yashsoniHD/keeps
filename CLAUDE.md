@@ -53,7 +53,7 @@ Imagen-generated covers at scale.
 | GCP Service Account | `clip-note-sa@weekly-updates-automation.iam.gserviceaccount.com` |
 | Firebase web app | "Clip Note" `1:674775099277:web:5a3293c1c0b570e392bfc4` |
 | Models | `gemini-3.5-flash` (extraction) · `gemini-3.1-flash-lite` (categorization) |
-| TMDB (Watchlist) | `TMDB_BEARER` env/secret on Cloud Run = TMDB v4 Read Access Token. Empty = enrichment no-op. Free API; "Streaming data by JustWatch" credit is mandatory wherever providers render. |
+| TMDB (note enrichment) | `TMDB_BEARER` env/secret on Cloud Run = TMDB v4 Read Access Token. Empty = enrichment no-op. Free API; "Streaming data by JustWatch" credit is mandatory wherever providers render. |
 | Billing budget | "Clip Note credits guard" ₹30,000 (50/80/100% alerts) |
 | Distill reference app | `/Users/yashsoni/dev/distill` |
 | Lovable frontend source | `/Users/yashsoni/Downloads/Clip Note` |
@@ -194,6 +194,16 @@ passed the gate.
       `ASK_EXHAUSTIVE_CAP`; 28 new tests (133 total). Deployed (Cloud Run rev 00032-zlr +
       clipnote.web.app). Plan: `~/.claude/plans/think-from-an-average-vivid-knuth.md`. Deferred:
       location-aware retrieval ("restaurants in Bandra") + cross-session chat persistence.
+- [x] Notes-first collapse (2026-07-10): removed the 5 mini-apps (routes, walls, item
+      subcollections, `/api/{watch,wish,place,recipe,trip}-items` routers, per-app tests) and
+      made **every capture a note again**, with TMDB/Places/price enrichment folded into
+      `note.data` by the new `services/enrich.py` (see "Notes-first" under Firestore
+      Collections). Home = the feed (single `Feed` component, `home` variant adds greeting +
+      capture chips + user Collections); search/Ask/nav/citations are notes-only;
+      `search_index` is notes-only and carries `content_type`. Existing items folded back via
+      `scripts/migrate_items_to_notes.py` (merge/regroup/idempotent + `--heal-refs`). Dropped
+      on purpose: status buckets, item ratings, TMDB/Places add-by-search. 336 backend tests.
+      Plan: `~/.claude/plans/i-feel-like-the-swirling-bentley.md`.
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 
@@ -269,65 +279,38 @@ usage/{uid}-{date}    user_id, date, ingest_count, ask_count   # per-user daily 
 system/usage-{date}   date, note_count, ask_count,             # global daily kill-switch
                       tok_tokens_{in,out}_{main,lite}, tok_ai_calls  # global daily token spend
 shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used_at  # Phase 2 (PAT)
-users/{uid}/watch_items/{id}  source_note_ids[], title, year, media_type, tmdb_id?,  # Watchlist mini-app
-                      poster_url?, providers?[{name,logo_url,type}], providers_region?,
-                      watch_status (saved|to_watch|watched), watched_at?, rating? (1-5)
-                      # owner-READ only; backend writes enrichment + /api/watch-items toggles
 tmdb_cache/{key}      cached TMDB details/providers (24h TTL); backend-only
-users/{uid}/wish_items/{id}  source_note_ids[], title, brand?, image_url?, buy_url?, domain?,  # Wishlist mini-app
-                      price_raw?, price_amount?, currency?, rating? (0-5 review), specs[], pros[],
-                      cons[], verdict?, wish_status (saved|to_buy|purchased), target_price?,
-                      price_when_added?, purchased_at?
-                      # owner-READ only; backend writes enrichment + /api/wish-items toggles
-users/{uid}/trip_items/{id}  source_note_ids[], title, destination?, duration?, budget?,  # Trips mini-app
-                      best_season?, image_url?, source_url?, domain?,
-                      days[{day,title?,stops[{time?,place,note?,lat?,lng?}]}], tips[],
-                      favorite (no status buckets)
-                      # owner-READ only; backend writes enrichment + /api/trip-items toggle/delete
+places_cache/{key}    cached Google Places lookups; backend-only
+search_index/{note-id}  user_id, kind ("note"), ref_id, content_type, title, summary,
+                      cover_image_url, collection_id?, embedding  # backend-write-only
 ```
 
-**Watchlist mini-app:** entertainment notes (slug matched by `is_entertainment`, `gemini.py`) extract a
-structured `data.titles[]` via the `entertainment` `TYPE_PROMPT`; the worker (`process.py`) fans each
-title out into `users/{uid}/watch_items` (TMDB-enriched, deduped by tmdb id, never clobbering user
-state) and adopts the primary poster as the note cover when coverless. Note fan-out seeds the
-**`saved`** inbox; the user promotes items to **`to_watch`** (manual TMDB adds skip the inbox and
-start there), then **`watched`**. The three are mutually-exclusive buckets surfaced as the Saved /
-Watchlist / Watched tabs. Frontend `/watchlist` route (`components/watchlist/`) is a poster wall with
-a "+ Watchlist" promote action; region lives on `users/{uid}.region`.
-
-**Wishlist mini-app (shopping counterpart, Phase A — 2026-06-29):** product notes (slug matched by
-`is_shopping`, `gemini.py`) fan out **1:1** into `users/{uid}/wish_items` via `enrich_wish_item`
-(`services/wishlist.py`). Unlike the watchlist there is **no external enrichment API** — a product
-note arrives already structured (the `product` TYPE_PROMPT puts price/specs/pros/cons in `data`; the
-product *name* is the note `title`, its *image* is the note `cover_image_url`), so fan-out is a pure
-copy with no TMDB-equivalent. Deduped by **canonical buy URL** (tracking params stripped) → brand+title
-fallback; `_parse_price` splits "₹2,499" into amount+currency for sorting. Buckets mirror the watchlist:
-**`saved`** inbox → **`to_buy`** (promote) → **`purchased`**. "Manual add" is just pasting a product URL
-through the normal `/api/ingest` flow (no catalog search/add-by-id/details endpoints — all data lives on
-the item doc); `/api/wish-items` only does PATCH (status + `target_price`) / DELETE / backfill. Frontend
-`/wishlist` route (`components/wishlist/`, product palette idx 2). **Phase B (deferred):** scheduled
-price re-check (re-scrape `buy_url` via the existing product resolver) + price-drop notifications — the
-hard/fragile/costly part, since there's no free price API. `target_price` + `price_when_added` are stored
-now and surface a "below target" badge; the alert loop lands with Phase 3 notification infra.
-
-**Trips mini-app (travel counterpart, 2026-06-30):** itinerary notes (slug matched by `is_itinerary`,
-`gemini.py` — the classifier deliberately separates `itinerary`/day-by-day trip plans from `place`/
-venues) fan out **1:1** into `users/{uid}/trip_items` via `enrich_trip_item` (`services/itineraries.py`).
-The `itinerary` `TYPE_PROMPT` already emits the structured `data` (destination/duration/budget/
-bestSeason/days[].stops[]/tips), so fan-out is a near-pure copy — the one enrichment is **geocoding each
-stop by name** via the existing `google_places.search_place` (cached; no-op when `ENABLE_PLACES` off;
-capped at `TRIP_MAX_GEOCODED_STOPS`) so the detail map can plot stops (`stops[].lat/lng`). Deduped by
-**canonical trip URL** (tracking params stripped) → destination/title slug. Like the recipes app there
-are **no status buckets** — a flat, filterable wall (destination / length / season) + favorite ⭐.
-Frontend `/trips` route (`components/trips/`, **Plane** icon, **sky-blue** trip palette idx 8 — the
-`itinerary` note slug repoints here too, while `place` keeps the sage palette). Detail adds a
-**stops map** (`TripMap`, reuses the Places `@vis.gl/react-google-maps` setup) and a client-side
-**packing checklist** (`PackingList`, localStorage). "Manual add" is just pasting an itinerary URL
-through `/api/ingest`; `/api/trip-items` only does PATCH (favorite) / DELETE / backfill. The
-**backfill re-extracts** day plans from older travel notes that predate the app (classified
-`travel`/`travel-destination-guide` etc. → generic composer, no `days`) via
-`gemini.extract_days_from_note` (mirrors the Places `extract_venues_from_note` pass) — it returns
-`{days:[]}` for single spots / venue roundups so only genuine day-by-day trips fan out.
+**Notes-first (2026-07-10 — the mini-app collapse):** the five mini-apps (Watchlist, Wishlist,
+Recipes, Places, Trips) were removed; **every capture creates a note again** and their enrichment
+now lands **inside `note.data`** via `services/enrich.py` (`enrich_note_data`, dispatched on the
+same `is_entertainment`/`is_shopping`/`is_places`/`is_recipe`/`is_itinerary` matchers in
+`gemini.py`, which now gate enrichment instead of item fan-out):
+- entertainment → each `data.titles[]` entry gains TMDB fields (`tmdb_id`, `poster_url`,
+  `overview`, `genres`, `providers[]` + `providers_region`); the first poster is adopted as the
+  note cover only when coverless. Rendered by `WatchNote.tsx` (poster cards + "where to watch";
+  **JustWatch attribution is mandatory wherever providers render**).
+- place → each `data.venues[]` entry gains Google Places fields (`photo_url`, `lat/lng`, live
+  `rating`, `opening_hours`, `action_links[]` — the region-aware Directions/Reserve/Order row);
+  first photo adopted as cover. `PlaceNote.tsx` renders a venues map (`VenuesMap`) + enriched blocks.
+- itinerary → `data.days[].stops[]` geocoded (`lat/lng`, capped at `TRIP_MAX_GEOCODED_STOPS`);
+  `ItineraryNote.tsx` renders the stops map (`TripMap`) + a localStorage `PackingList`.
+- product → `data.price` parsed into `price_amount` + `currency`.
+- recipe → no external enrichment (already complete).
+Enrichment fields are snake_case (looked-up) vs Gemini's camelCase (source-said); every path is
+best-effort — a miss leaves a valid plain note. Cover ladder: source image → enrichment
+poster/photo → Imagen (gated). `users/{uid}.region` still feeds providers + action links
+(Settings → Region). Status buckets (`to_watch`/`purchased`/…), item ratings, and the TMDB/Places
+"add by search" flows were deliberately dropped; favorites survive as `note.is_favorite`.
+Existing item docs were folded back into notes by `scripts/migrate_items_to_notes.py`
+(merge-onto-live-note, listicle regrouping, idempotent; `--heal-refs` remaps composed notes'
+prefixed item ids). Frontend: home (`/`) IS the feed (`Feed home` variant — greeting + capture
+chips + user Collections above the stream); `search_index` is notes-only and hits carry
+`content_type`; Ask AI grounding, citations, and `goToNote` are notes-only.
 
 `users/{uid}.categories` is the source of truth for a user's note types (kept current with
 `ArrayUnion` on each new slug) — read it instead of scanning `notes`. `notes` docs store **structured
@@ -335,9 +318,12 @@ through `/api/ingest`; `/api/trip-items` only does PATCH (favorite) / DELETE / b
 
 **Note types** — known templates with exact data schemas:
 - `recipe` → `{totalTime, servings, difficulty, ingredients: [{group?, items}], steps}`
-- `itinerary` → `{destination, duration, budget, days: [{day, title, stops: [{time, place, note}]}]}`
-- `product` → `{price, brand, rating, buyUrl, specs: [{label, value}], pros, cons}`
+- `itinerary` → `{destination, duration, budget, days: [{day, title, stops: [{time, place, note, lat?, lng?}]}]}`
+- `product` → `{price, brand, rating, buyUrl, specs: [{label, value}], pros, cons}` (+ enriched `price_amount`, `currency`)
 - `summary` → `{medium, readTime?, videoLength?, tldr, keyPoints, quotes: [{text, timestamp?}]}`
+- `entertainment` → `{titles: [{title, year?, mediaType, creator?, why?, …TMDB enrichment}], listTheme?}`
+  (resolved by **data shape** — `titles[]` of objects — since its slug is open; see `resolveTemplate`)
+- `place` → `{venues: [{name, location?, mustTry?, …source fields, …Places enrichment}], listTheme?}`
 - `*` → any AI-invented type rendered by `GenericNote`
 - `template:"composed"` → Ask-AI artifact/created note: COMPOSER blocks
   (`facts/sections/steps/table/checklist`), always rendered by `GenericNote` (its

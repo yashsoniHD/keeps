@@ -1,17 +1,16 @@
 import { MapPin, Calendar, Wallet, Sun, Lightbulb, type LucideIcon } from "lucide-react";
-import type { Note } from "@/lib/types";
+import type { Note, TripDay } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
+import { TripMap } from "../TripMap";
+import { PackingList } from "../PackingList";
 
 interface ItineraryData {
   destination?: string;
   duration?: string;
   budget?: string;
   bestSeason?: string;
-  days?: {
-    day: number;
-    title?: string;
-    stops?: { time?: string; place: string; note?: string }[];
-  }[];
+  // Stops carry lat/lng when backend enrichment geocoded them — that's what drives the map.
+  days?: TripDay[];
   tips?: string[];
 }
 
@@ -40,6 +39,13 @@ export function ItineraryNote({ note }: { note: Note }) {
               <div className="font-serif text-base text-ink">{s.value}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Live map of geocoded stops — renders nothing without a Maps key or coordinates. */}
+      {(data.days?.length ?? 0) > 0 && (
+        <div className="mt-6">
+          <TripMap days={data.days!} />
         </div>
       )}
 
@@ -90,6 +96,9 @@ export function ItineraryNote({ note }: { note: Note }) {
           </ul>
         </section>
       )}
+
+      {/* Client-side scratch list (localStorage) — what to bring on this trip. */}
+      <PackingList noteId={note.id} />
     </div>
   );
 }

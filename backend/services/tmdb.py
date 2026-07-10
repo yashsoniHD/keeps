@@ -1,4 +1,4 @@
-"""TMDB enrichment for the Watchlist mini-app.
+"""TMDB enrichment for entertainment notes.
 
 Given a title extracted from an entertainment note, match it to a TMDB movie/show and pull
 poster, year, overview, genres, and per-region "where to watch" providers. Designed so the
@@ -7,7 +7,7 @@ the HTTP + Firestore-cache layer wraps them.
 
 Auth is the TMDB v4 Read Access Token sent as `Authorization: Bearer` (settings.TMDB_BEARER).
 When the token is absent every public function is a graceful no-op (returns None / []), so an
-entertainment note still saves and its watch_items render from the raw title.
+entertainment note still saves and its titles render unenriched.
 
 Provider data ("Streaming data by JustWatch") lags ~8h, so it's cached per (tmdb_id, region).
 TMDB is free for this use — no per-user cost cap (unlike Gemini/Imagen).

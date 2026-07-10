@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { Sparkle, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { AskChat } from "./AskChat";
@@ -12,15 +11,15 @@ const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/settings"];
 // Past this much downward drag, releasing dismisses the mobile sheet (otherwise it snaps back).
 const DISMISS_THRESHOLD = 110;
 
-// Global Ask-AI launcher (FAB) + chat overlay. Mounted once in __root.tsx (inside the provider
-// tree) so it persists across navigation. Two presentations:
+// Global Ask-AI chat overlay. Mounted once in __root.tsx (inside the provider tree) so it
+// persists across navigation. There is no launcher FAB — Clip AI is opened via `openChat`
+// (from the feed's search bar and note pages). Two presentations:
 //   • Desktop (sm+): a full-height right rail.
 //   • Mobile: a full-screen sheet you can flick down to dismiss (Notion-AI style).
-// The FAB is the launcher; while open it's hidden (the sheet/rail covers it) and the header's
-// close button + swipe-down take over.
+// Closing happens via swipe-down or the header's close button.
 export function AskFab() {
   const { user } = useAuth();
-  const { isOpen, toggleChat, closeChat, seed, clearSeed, focalNoteId, focalNoteTitle } = useAsk();
+  const { isOpen, closeChat, seed, clearSeed, focalNoteId, focalNoteTitle } = useAsk();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Swipe-to-dismiss (mobile only). The live gesture values live in refs so the native listeners
@@ -222,20 +221,6 @@ export function AskFab() {
           </div>
         </>
       )}
-
-      {/* The FAB launches the chat. While open, the full-screen sheet (mobile) or rail (desktop)
-          covers it, so it's hidden — closing happens via swipe-down or the header's close button. */}
-      <button
-        type="button"
-        onClick={toggleChat}
-        aria-label={isOpen ? "Close Clip AI" : "Clip AI"}
-        title={isOpen ? "Close Clip AI" : "Clip AI"}
-        className={`fixed bottom-8 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 ${
-          isOpen ? "hidden" : ""
-        }`}
-      >
-        {isOpen ? <X className="h-6 w-6" /> : <Sparkle className="h-6 w-6" />}
-      </button>
     </>
   );
 }

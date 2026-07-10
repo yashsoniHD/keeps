@@ -12,12 +12,12 @@ import {
   Share2,
   Moon,
   Sun,
-  ChevronDown,
-  Globe,
+  LayoutGrid,
+  Rows3,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { getUserRegion, setUserRegion } from "@/lib/firestore";
 import { useAuth } from "@/contexts/auth-context";
+import { useLayout } from "@/lib/layout";
 import { ADMIN_EMAILS } from "@/routes/admin";
 import { createToken, listTokens, revokeToken, type ShortcutToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
@@ -93,7 +93,7 @@ function Settings() {
           className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
-          Library
+          Home
         </Link>
         <h1 className="font-serif text-3xl text-ink">Settings</h1>
 
@@ -115,9 +115,7 @@ function Settings() {
           </div>
         </section>
 
-        {/* Preferences first (region + theme), then organisation, then device setup. */}
-        <WatchRegionSection uid={user.uid} />
-
+        {/* Preferences first (appearance + view), then organisation, then device setup. */}
         <AppearanceSection />
 
         <CategoriesSection />
@@ -183,88 +181,10 @@ function Settings() {
   );
 }
 
-// Common "where to watch" regions for the Watchlist. ISO-3166-1 alpha-2; the backend uses
-// this when looking up streaming-provider availability for saved movies/shows.
-const WATCH_REGIONS: { code: string; label: string }[] = [
-  { code: "IN", label: "India" },
-  { code: "US", label: "United States" },
-  { code: "GB", label: "United Kingdom" },
-  { code: "CA", label: "Canada" },
-  { code: "AU", label: "Australia" },
-  { code: "DE", label: "Germany" },
-  { code: "FR", label: "France" },
-  { code: "ES", label: "Spain" },
-  { code: "BR", label: "Brazil" },
-  { code: "JP", label: "Japan" },
-  { code: "SG", label: "Singapore" },
-  { code: "AE", label: "United Arab Emirates" },
-];
-
-function WatchRegionSection({ uid }: { uid: string }) {
-  const [region, setRegion] = useState<string>("");
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    getUserRegion(uid)
-      .then((r) => setRegion(r || "IN"))
-      .catch(() => setRegion("IN"));
-  }, [uid]);
-
-  const handleChange = async (next: string) => {
-    setRegion(next);
-    try {
-      await setUserRegion(uid, next);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      // non-critical — the backend default applies if this never persists.
-    }
-  };
-
-  return (
-    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
-      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        <Globe className="h-3.5 w-3.5" />
-        Region
-      </h2>
-      <label className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-ink">Where you watch &amp; go out</span>
-          <span className="block text-xs text-ink-soft">
-            Streaming availability and reservation links use this country.
-            {saved && (
-              <span className="ml-1 inline-flex items-center gap-0.5 text-success">
-                <Check className="h-3 w-3" />
-                Saved
-              </span>
-            )}
-          </span>
-        </span>
-        {/* Native select for the platform picker UX, dressed as a house pill; the chevron is
-            ours because appearance-none strips the inconsistent platform arrow. */}
-        <span className="relative inline-flex shrink-0">
-          <select
-            value={region}
-            onChange={(e) => handleChange(e.target.value)}
-            className="h-10 appearance-none rounded-full border border-border bg-background py-0 pl-4 pr-9 text-sm text-ink"
-            aria-label="Region for streaming and reservation links"
-          >
-            {WATCH_REGIONS.map((r) => (
-              <option key={r.code} value={r.code}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-        </span>
-      </label>
-    </section>
-  );
-}
-
 function AppearanceSection() {
   const { resolved, setTheme } = useTheme();
   const isDark = resolved === "dark";
+  const [layout, setLayout] = useLayout();
 
   return (
     <section className="mt-4 rounded-3xl border border-border bg-card p-6">
@@ -283,6 +203,38 @@ function AppearanceSection() {
           aria-label="Toggle dark mode"
         />
       </label>
+
+      <div className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-5">
+        <span>
+          <span className="block text-sm font-medium text-ink">Feed view</span>
+          <span className="block text-xs text-ink-soft">How notes are laid out in your feed.</span>
+        </span>
+        {/* Segmented control: cards vs a condensed list. Persisted via the shared layout hook. */}
+        <div className="inline-flex shrink-0 rounded-full border border-border bg-background p-0.5">
+          {(
+            [
+              { value: "standard", label: "Cards", icon: LayoutGrid },
+              { value: "condensed", label: "Compact", icon: Rows3 },
+            ] as const
+          ).map((opt) => {
+            const active = layout === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setLayout(opt.value)}
+                aria-pressed={active}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                  active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+                }`}
+              >
+                <opt.icon className="h-3.5 w-3.5" />
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </section>
   );
 }
@@ -509,11 +461,7 @@ function ConnectPhone() {
                 className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-ink-soft hover:text-ink"
                 aria-label="Copy token"
               >
-                {copied ? (
-                  <Check className="h-4 w-4 text-place" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
+                {copied ? <Check className="h-4 w-4 text-place" /> : <Copy className="h-4 w-4" />}
               </button>
             </div>
             <p className="mt-2 text-xs text-ink-soft">

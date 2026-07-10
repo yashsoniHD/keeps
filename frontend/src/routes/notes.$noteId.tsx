@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ClipLoader } from "@/components/ClipMark";
 import { getNote, getAnnotation, watchCollections } from "@/lib/firestore";
 import { deleteNote } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
@@ -8,6 +9,8 @@ import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
 import { AppShell } from "@/components/AppShell";
+import { feedNeighbors } from "@/lib/note-nav";
+import { FOCUS_RING } from "@/lib/ui";
 import type { Note, Collection } from "@/lib/types";
 import { analytics } from "@/lib/analytics";
 
@@ -62,6 +65,51 @@ function NoteDetail() {
     return () => setFocalNote(null);
   }, [note, setFocalNote]);
 
+  // Swipe / arrow between notes in the feed order the user came from (all or a category). The
+  // feed stashes its visible order; we read this note's neighbours. `replace` navigation keeps
+  // Back pointing at the feed (with its filter), not at every note swiped through.
+  const { prev, next } = useMemo(() => feedNeighbors(noteId), [noteId]);
+  const go = useCallback(
+    (id?: string) => {
+      if (id) navigate({ to: "/notes/$noteId", params: { noteId: id }, replace: true });
+    },
+    [navigate],
+  );
+
+  // Start each note at the top when swiping to the next one.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [noteId]);
+
+  // Arrow keys page between notes (ignored while typing in a field / editing text).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      if (e.key === "ArrowLeft") go(prev);
+      else if (e.key === "ArrowRight") go(next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [go, prev, next]);
+
+  // Horizontal touch swipe (mobile). Require clear horizontal intent so it doesn't fight
+  // vertical scrolling or a horizontal scroller inside the note (map, table).
+  const touchRef = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchRef.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = touchRef.current;
+    touchRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? next : prev);
+  };
+
   if (loadError) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-ink-soft">
@@ -79,7 +127,7 @@ function NoteDetail() {
   if (loading || (!note && !notFound)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
+        <ClipLoader className="h-20 w-20" />
       </div>
     );
   }
@@ -93,16 +141,42 @@ function NoteDetail() {
 
   return (
     <AppShell>
-      <NoteContent
-        note={note}
-        collections={collections}
-        uid={user?.uid ?? null}
-        onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
-        onDelete={async () => {
-          await deleteNote(note.id);
-          navigate({ to: "/" });
-        }}
-      />
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <NoteContent
+          note={note}
+          collections={collections}
+          uid={user?.uid ?? null}
+          onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
+          onDelete={async () => {
+            await deleteNote(note.id);
+            navigate({ to: "/" });
+          }}
+        />
+      </div>
+
+      {/* Desktop prev/next affordances; mobile pages by swiping. */}
+      {prev && (
+        <button
+          type="button"
+          onClick={() => go(prev)}
+          aria-label="Previous note"
+          title="Previous note"
+          className={`fixed left-3 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-ink-soft shadow-md backdrop-blur transition-colors hover:text-ink lg:flex ${FOCUS_RING}`}
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+      )}
+      {next && (
+        <button
+          type="button"
+          onClick={() => go(next)}
+          aria-label="Next note"
+          title="Next note"
+          className={`fixed right-3 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-ink-soft shadow-md backdrop-blur transition-colors hover:text-ink lg:flex ${FOCUS_RING}`}
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
+      )}
     </AppShell>
   );
 }

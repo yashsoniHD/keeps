@@ -1,10 +1,4 @@
 import { getAuthHeader } from "@/integrations/firebase/auth-middleware";
-import type {
-  TmdbSearchResult,
-  WatchItemDetails,
-  PlaceSearchResult,
-  PlaceItemDetails,
-} from "@/lib/types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
@@ -172,245 +166,6 @@ export async function deleteNote(id: string): Promise<void> {
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete the note."), res.status);
 }
 
-// --- Watchlist mini-app ---
-
-// Toggle watched / set a 1–5 rating on a watch item. Writes route through the backend
-// (Firestore forbids client writes to watch_items); the view's onSnapshot reflects it live.
-export async function updateWatchItem(
-  itemId: string,
-  updates: {
-    watch_status?: "saved" | "to_watch" | "watching" | "watched";
-    rating?: number;
-    favorite?: boolean;
-  },
-): Promise<void> {
-  const res = await apiFetch(`/api/watch-items/${itemId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't update the watch item."), res.status);
-}
-
-// Search TMDB for the manual-add picker.
-export async function searchWatchTitles(q: string): Promise<TmdbSearchResult[]> {
-  const res = await apiFetch(`/api/watch-items/search?q=${encodeURIComponent(q)}`);
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Search failed."), res.status);
-  return (await res.json()).results as TmdbSearchResult[];
-}
-
-// Manually add a TMDB title to the watchlist. Returns the new item id.
-export async function addWatchItem(item: {
-  tmdb_id: number;
-  media_type: "movie" | "tv";
-}): Promise<string> {
-  const res = await apiFetch("/api/watch-items", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(item),
-  });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't add the title."), res.status);
-  return (await res.json()).id as string;
-}
-
-// Fetch rich TMDB details (cast/runtime/rating) for the detail page. `{}` for raw titles.
-export async function getWatchItemDetails(itemId: string): Promise<WatchItemDetails> {
-  const res = await apiFetch(`/api/watch-items/${itemId}/details`);
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't load details."), res.status);
-  return res.json();
-}
-
-export async function deleteWatchItem(itemId: string): Promise<void> {
-  const res = await apiFetch(`/api/watch-items/${itemId}`, { method: "DELETE" });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't remove the title."), res.status);
-}
-
-// Import movies & shows from the user's existing entertainment notes into the watchlist.
-// Safe to re-run (idempotent); returns how many notes were scanned and titles found.
-export async function backfillWatchItems(): Promise<{
-  notes_processed: number;
-  titles_found: number;
-}> {
-  const res = await apiFetch("/api/watch-items/backfill", { method: "POST" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't import from your notes."), res.status);
-  return res.json();
-}
-
-// --- Wishlist mini-app ---
-
-// Promote to-buy / mark bought / set a target price on a wish item. Writes route through the
-// backend (Firestore forbids client writes to wish_items); the view's onSnapshot reflects it
-// live. Pass target_price: null to clear a target; omit it to leave it untouched.
-export async function updateWishItem(
-  itemId: string,
-  updates: {
-    wish_status?: "saved" | "to_buy" | "purchased";
-    target_price?: number | null;
-    favorite?: boolean;
-  },
-): Promise<void> {
-  const res = await apiFetch(`/api/wish-items/${itemId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't update the wish item."), res.status);
-}
-
-export async function deleteWishItem(itemId: string): Promise<void> {
-  const res = await apiFetch(`/api/wish-items/${itemId}`, { method: "DELETE" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't remove the product."), res.status);
-}
-
-// Import products from the user's existing product notes into the wishlist. Safe to re-run
-// (idempotent); returns how many product notes were scanned.
-export async function backfillWishItems(): Promise<{
-  notes_processed: number;
-  products_found: number;
-}> {
-  const res = await apiFetch("/api/wish-items/backfill", { method: "POST" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't import from your notes."), res.status);
-  return res.json();
-}
-
-// --- Places mini-app ---
-
-// Promote to-visit / mark visited / set a 1–5 personal rating / edit your notes on a place item.
-// Writes route through the backend (Firestore forbids client writes to place_items); the view's
-// onSnapshot reflects it live. Pass user_notes: null to clear a note; omit it to leave untouched.
-export async function updatePlaceItem(
-  itemId: string,
-  updates: {
-    place_status?: "saved" | "to_visit" | "visited";
-    user_rating?: number;
-    user_notes?: string | null;
-    favorite?: boolean;
-    log_visit?: boolean; // record another visit (bumps visit_count, advances visited_at)
-  },
-): Promise<void> {
-  const res = await apiFetch(`/api/place-items/${itemId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the place."), res.status);
-}
-
-// Search Google Places for the manual-add picker.
-export async function searchPlaces(q: string): Promise<PlaceSearchResult[]> {
-  const res = await apiFetch(`/api/place-items/search?q=${encodeURIComponent(q)}`);
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Search failed."), res.status);
-  return (await res.json()).results as PlaceSearchResult[];
-}
-
-// Manually add a Google Place to the places list. Returns the new item id.
-export async function addPlaceItem(item: { place_id: string }): Promise<string> {
-  const res = await apiFetch("/api/place-items", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(item),
-  });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't add the place."), res.status);
-  return (await res.json()).id as string;
-}
-
-// Fetch rich Google Place details (hours/photo/website) for the detail page. `{}` for raw venues.
-export async function getPlaceItemDetails(itemId: string): Promise<PlaceItemDetails> {
-  const res = await apiFetch(`/api/place-items/${itemId}/details`);
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't load details."), res.status);
-  return res.json();
-}
-
-export async function deletePlaceItem(itemId: string): Promise<void> {
-  const res = await apiFetch(`/api/place-items/${itemId}`, { method: "DELETE" });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't remove the place."), res.status);
-}
-
-// Import places from the user's existing place notes into the places list. Safe to re-run
-// (idempotent); returns how many notes were scanned and venues found.
-export async function backfillPlaceItems(): Promise<{
-  notes_processed: number;
-  venues_found: number;
-}> {
-  const res = await apiFetch("/api/place-items/backfill", { method: "POST" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't import from your notes."), res.status);
-  return res.json();
-}
-
-// --- Recipes mini-app ---
-
-// Toggle the favorite star on a recipe. Writes through the backend (Firestore forbids client
-// writes to recipe_items); the view's onSnapshot reflects it live. Recipes have no status
-// workflow, so favorite is the only mutable field.
-export async function updateRecipeItem(
-  itemId: string,
-  updates: { favorite?: boolean },
-): Promise<void> {
-  const res = await apiFetch(`/api/recipe-items/${itemId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't update the recipe."), res.status);
-}
-
-export async function deleteRecipeItem(itemId: string): Promise<void> {
-  const res = await apiFetch(`/api/recipe-items/${itemId}`, { method: "DELETE" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't remove the recipe."), res.status);
-}
-
-// Import recipes from the user's existing recipe notes into the cookbook. Safe to re-run
-// (idempotent); returns how many notes were scanned and recipes found.
-export async function backfillRecipeItems(): Promise<{
-  notes_processed: number;
-  recipes_found: number;
-}> {
-  const res = await apiFetch("/api/recipe-items/backfill", { method: "POST" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't import from your notes."), res.status);
-  return res.json();
-}
-
-// Toggle the favorite star on a trip. Writes through the backend (Firestore forbids client writes
-// to trip_items); the view's onSnapshot reflects it live. Trips have no status workflow, so favorite
-// is the only mutable field.
-export async function updateTripItem(
-  itemId: string,
-  updates: { favorite?: boolean },
-): Promise<void> {
-  const res = await apiFetch(`/api/trip-items/${itemId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the trip."), res.status);
-}
-
-export async function deleteTripItem(itemId: string): Promise<void> {
-  const res = await apiFetch(`/api/trip-items/${itemId}`, { method: "DELETE" });
-  if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't remove the trip."), res.status);
-}
-
-// Import trips from the user's existing itinerary notes into the wall. Safe to re-run
-// (idempotent); returns how many notes were scanned and trips found.
-export async function backfillTripItems(): Promise<{
-  notes_processed: number;
-  trips_found: number;
-}> {
-  const res = await apiFetch("/api/trip-items/backfill", { method: "POST" });
-  if (!res.ok)
-    throw new ApiError(await errorDetail(res, "Couldn't import from your notes."), res.status);
-  return res.json();
-}
-
 // --- Categories (manage the user's taxonomy) ---
 
 // The taxonomy joined with per-type note counts. Rename/delete re-tag the affected
@@ -480,10 +235,7 @@ export interface AskCitation {
   content_type: string;
   cover_image_url: string | null;
   source_domain: string;
-  // Mini-app grounding: when set, the citation is a saved item → route to /<app>/$ref_id
-  // instead of /notes/$id. Both null for plain-note citations.
-  app?: string | null;
-  ref_id?: string | null;
+  ref_id?: string | null; // the underlying note id (same as id)
 }
 
 export interface AskTurn {
@@ -776,9 +528,7 @@ export interface SearchResult {
   ai_summary: string;
   source_domain: string;
   cover_image_url: string | null;
-  // When set, the hit is a mini-app item → route to /<app>/$ref_id, not /notes/$id.
-  app?: string | null;
-  ref_id?: string | null;
+  ref_id?: string | null; // the underlying note id (same as id)
 }
 
 export async function searchNotes(q: string): Promise<SearchResult[]> {

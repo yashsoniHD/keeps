@@ -17,6 +17,7 @@ import { SummaryNote } from "./note/templates/SummaryNote";
 import { WorkoutNote } from "./note/templates/WorkoutNote";
 import { PlaceNote } from "./note/templates/PlaceNote";
 import { BookNote } from "./note/templates/BookNote";
+import { WatchNote } from "./note/templates/WatchNote";
 import { GenericNote } from "./note/templates/GenericNote";
 
 // Which bespoke template a note's `data` map was built for. This is a STRUCTURAL fact
@@ -25,8 +26,14 @@ import { GenericNote } from "./note/templates/GenericNote";
 // can't read the existing fields, hiding the note's contents. New notes carry an immutable
 // `template` from the backend; for legacy notes that predate it, infer from the data shape.
 function resolveTemplate(note: Note): string {
-  if (note.template) return note.template;
   const data = (note.data ?? {}) as Record<string, unknown>;
+  // Entertainment resolves on data shape FIRST: its content_type slug is open (any
+  // movies/shows phrasing), so `template` isn't a stable key for it — but `titles[]` of
+  // objects is emitted only by the entertainment extraction schema. Older entertainment
+  // notes (summary-shaped data, no titles[]) fall through to their stored template.
+  if (Array.isArray(data.titles) && data.titles.length > 0 && typeof data.titles[0] === "object")
+    return "entertainment";
+  if (note.template) return note.template;
   if (Array.isArray(data.ingredients)) return "recipe";
   if (Array.isArray(data.days)) return "itinerary";
   if (Array.isArray(data.exercises) || (data.structure && data.goal)) return "workout";
@@ -55,6 +62,8 @@ function NoteBody({ note, onPatch }: { note: Note; onPatch?: (patch: Partial<Not
       return <PlaceNote note={note} />;
     case "book":
       return <BookNote note={note} />;
+    case "entertainment":
+      return <WatchNote note={note} />;
     default:
       // Any AI-invented type — plus save-as-is typed notes, whose editable `body` block
       // GenericNote renders when onPatch is wired (owner view only).

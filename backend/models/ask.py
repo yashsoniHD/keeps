@@ -32,10 +32,7 @@ class Citation(BaseModel):
     content_type: str
     cover_image_url: str | None = None
     source_domain: str = ""
-    # Mini-app grounding: when a citation is a saved item (not a note), `app` + `ref_id` let the
-    # UI route to /<app>/$itemId instead of /notes/$id. Both null for plain-note citations.
-    app: str | None = None
-    ref_id: str | None = None
+    ref_id: str | None = None  # the underlying note id (same as id); kept for client back-compat
 
 
 class ArtifactNote(BaseModel):

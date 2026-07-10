@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
+import { ClipLoader } from "@/components/ClipMark";
 import { getNote } from "@/lib/firestore";
 import { saveSharedNote } from "@/lib/api";
 import { NoteContent } from "@/components/NoteContent";
@@ -81,7 +82,7 @@ function PublicNote() {
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
+        <ClipLoader className="h-20 w-20" />
       </div>
     );
   }
