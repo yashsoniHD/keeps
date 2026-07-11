@@ -32,14 +32,7 @@ import {
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
-import {
-  ingest,
-  ingestMedia,
-  ingestText,
-  ingestVoice,
-  listCategories,
-  searchNotes,
-} from "@/lib/api";
+import { ingest, ingestMedia, ingestText, ingestVoice, searchNotes } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
@@ -57,7 +50,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
 import { AddNoteSheet } from "@/components/AddNoteSheet";
 import { AppShell } from "@/components/AppShell";
-import { CategoryChips, CategoryMenu } from "@/components/feed/CategoryFilter";
+import { CategoryChips, CollectionsMenu } from "@/components/feed/CategoryFilter";
 import { ClipMark, ClipLoader } from "@/components/ClipMark";
 import { useLayout } from "@/lib/layout";
 import type { Note, Job, Collection } from "@/lib/types";
@@ -132,7 +125,6 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
   const [max, setMax] = useState(50);
   const [userCategories, setUserCategories] = useState<string[]>([]);
   const [userSources, setUserSources] = useState<string[]>([]);
-  const [catCounts, setCatCounts] = useState<Record<string, number>>({});
   const [active, setActive] = useState<string>(typeParam ?? "all");
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
@@ -188,11 +180,6 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
       .catch(() => {});
     getUserSources(user.uid)
       .then(setUserSources)
-      .catch(() => {});
-    // Whole-corpus per-type counts for the category panel. Best-effort: on failure the panel
-    // just renders chips without counts.
-    listCategories()
-      .then((cats) => setCatCounts(Object.fromEntries(cats.map((c) => [c.slug, c.count]))))
       .catch(() => {});
   }, [user]);
 
@@ -621,14 +608,7 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
                   >
                     <Search className="h-4 w-4" />
                   </button>
-                  {categories.length > 0 && (
-                    <CategoryMenu
-                      categories={categories}
-                      active={active}
-                      setActive={applyActive}
-                      counts={catCounts}
-                    />
-                  )}
+                  <CollectionsMenu />
                   <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
                     <SettingsIcon className="h-4 w-4" />
                   </Link>

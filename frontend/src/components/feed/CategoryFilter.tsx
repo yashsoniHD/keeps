@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, LayoutGrid, X } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { LayoutGrid, X } from "lucide-react";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
+import { TOOLS } from "@/lib/collections-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
 // Tracks whether a horizontal scroller sits at its start/end, so the caller can show edge
@@ -93,69 +95,32 @@ export function CategoryChips({
   );
 }
 
-// Top-bar button that opens the full-screen categories page. The button reflects the active
-// filter (its icon + accent) so the applied category is legible from the header.
-export function CategoryMenu({
-  categories,
-  active,
-  setActive,
-  counts,
-}: {
-  categories: string[];
-  active: string;
-  setActive: (v: string) => void;
-  counts?: Record<string, number>;
-}) {
+// Top-bar button that opens the full-screen collections launcher — the five mini-apps.
+// (Replaces the old category-filter page; note-category filtering lives in CategoryChips.)
+export function CollectionsMenu() {
   const [open, setOpen] = useState(false);
-  const isFiltered = active !== "all";
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={isFiltered ? `Category: ${noteLabel(active)}` : "Browse categories"}
-        title={isFiltered ? `Category: ${noteLabel(active)}` : "Browse categories"}
-        className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-          isFiltered
-            ? "border-ink bg-card text-ink"
-            : "border-border bg-card text-ink-soft hover:text-ink"
-        }`}
+        aria-label="Open collections"
+        title="Collections"
+        className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
       >
         <LayoutGrid className="h-4 w-4" />
       </button>
 
-      {open && (
-        <CategoryPage
-          categories={categories}
-          active={active}
-          counts={counts}
-          onPick={(v) => {
-            setActive(v);
-            setOpen(false);
-          }}
-          onClose={() => setOpen(false)}
-        />
-      )}
+      {open && <CollectionsPage onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-// Full-screen categories page: every category as a colour-coded tile in a 2-column grid, each
-// tile tinted with its category accent. Portaled to <body> to escape the header backdrop.
-function CategoryPage({
-  categories,
-  active,
-  counts,
-  onPick,
-  onClose,
-}: {
-  categories: string[];
-  active: string;
-  counts?: Record<string, number>;
-  onPick: (v: string) => void;
-  onClose: () => void;
-}) {
+// Full-screen collections launcher: the mini-apps (Watchlist, Wishlist, Places, Recipes, Trips)
+// as colour-coded tiles, each opening its standalone app. The Notes catch-all is intentionally
+// omitted — Notes is the home feed. Portaled to <body> to escape the header backdrop.
+function CollectionsPage({ onClose }: { onClose: () => void }) {
   // Close on Escape; lock body scroll while the full-screen page is up.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -168,52 +133,13 @@ function CategoryPage({
     };
   }, [onClose]);
 
-  const total = useMemo(
-    () => (counts ? Object.values(counts).reduce((a, b) => a + b, 0) : undefined),
-    [counts],
-  );
-
-  const Tile = ({
-    slug,
-    label,
-    count,
-    icon,
-    tint,
-    isActive,
-  }: {
-    slug: string;
-    label: string;
-    count?: number;
-    icon: React.ReactNode;
-    tint: string;
-    isActive: boolean;
-  }) => (
-    <button
-      key={slug}
-      type="button"
-      onClick={() => onPick(slug)}
-      className={`flex min-h-[104px] flex-col justify-between gap-6 rounded-2xl p-4 text-left transition-transform active:scale-[0.98] ${FOCUS_RING} ${tint}`}
-    >
-      <div className="flex items-start justify-between">
-        {icon}
-        {isActive && <Check className="h-5 w-5 shrink-0" />}
-      </div>
-      <div className="min-w-0">
-        <div className="truncate font-semibold">{label}</div>
-        {count != null && (
-          <div className="text-sm opacity-70">
-            {count} {count === 1 ? "note" : "notes"}
-          </div>
-        )}
-      </div>
-    </button>
-  );
+  const apps = TOOLS.filter((t) => t.app); // drop the Notes catch-all
 
   return createPortal(
     <div className="fixed inset-0 z-[80] flex flex-col bg-background duration-150 animate-in fade-in-0">
       <div className="shrink-0 border-b border-border">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-4 md:px-8">
-          <h1 className="font-serif text-2xl text-ink">Categories</h1>
+          <h1 className="font-serif text-2xl text-ink">Collections</h1>
           <button
             type="button"
             onClick={onClose}
@@ -228,28 +154,25 @@ function CategoryPage({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-4 py-5 md:px-8 md:py-6">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <Tile
-              slug="all"
-              label="All notes"
-              count={total}
-              tint={active === "all" ? "bg-ink text-paper" : "bg-ink/[0.04] text-ink"}
-              icon={<LayoutGrid className="h-6 w-6" />}
-              isActive={active === "all"}
-            />
-            {categories.map((c) => {
-              const Icon = noteIcon(c);
-              const accent = noteAccent(c);
-              const isActive = active === c;
+            {apps.map((t) => {
+              const Icon = t.icon;
               return (
-                <Tile
-                  key={c}
-                  slug={c}
-                  label={noteLabel(c)}
-                  count={counts?.[c]}
-                  tint={isActive ? `${accent.dot} text-white` : accent.chip}
-                  icon={<Icon className="h-6 w-6" />}
-                  isActive={isActive}
-                />
+                <Link
+                  key={t.key}
+                  to={t.to}
+                  onClick={onClose}
+                  className={`flex min-h-[120px] flex-col justify-between gap-6 rounded-2xl border p-4 text-left transition-transform active:scale-[0.98] ${FOCUS_RING} ${t.wash}`}
+                >
+                  <span
+                    className={`inline-flex h-10 w-10 items-center justify-center rounded-full ${t.fill}`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className={`truncate font-semibold ${t.text}`}>{t.label}</div>
+                    <div className="truncate text-sm text-ink-soft">{t.desc}</div>
+                  </div>
+                </Link>
               );
             })}
           </div>

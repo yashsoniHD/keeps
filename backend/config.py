@@ -63,6 +63,9 @@ class Settings:
     DAILY_GLOBAL_NOTE_CAP: int = int(os.getenv("DAILY_GLOBAL_NOTE_CAP", "1000"))
     MAX_ASKS_PER_USER_PER_DAY: int = int(os.getenv("MAX_ASKS_PER_USER_PER_DAY", "30"))
     DAILY_GLOBAL_ASK_CAP: int = int(os.getenv("DAILY_GLOBAL_ASK_CAP", "300"))
+    # Per-user, per-app cap on mini-app backfill runs/day. Backfill writes are idempotent but
+    # their Gemini / enrichment-API spend re-incurs each run, so repeats are capped.
+    MAX_BACKFILLS_PER_APP_PER_DAY: int = int(os.getenv("MAX_BACKFILLS_PER_APP_PER_DAY", "3"))
     # Per-IP flood guard on the expensive POST endpoints (ingest/ask). In-memory, per Cloud
     # Run instance — abuse protection layered in front of the authoritative cost caps above.
     RATE_LIMIT_PER_MIN: int = int(os.getenv("RATE_LIMIT_PER_MIN", "30"))

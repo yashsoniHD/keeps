@@ -20,7 +20,16 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
-import type { Note, Job, Collection } from "@/lib/types";
+import type {
+  Note,
+  Job,
+  Collection,
+  WatchItem,
+  WishItem,
+  PlaceItem,
+  RecipeItem,
+  TripItem,
+} from "@/lib/types";
 
 // Record signup attribution on the user's own doc (rules allow owner writes). Merge so it
 // never clobbers backend-written fields; called once, on first sign-in.
@@ -347,4 +356,188 @@ export async function ensureUserRegion(userId: string): Promise<void> {
   } catch {
     // non-critical — leave region unset and let the backend default apply.
   }
+}
+
+// ─── Mini-app item watchers (restored) ────────────────────────────────────
+// One-shot job read (owner-only per rules) — used to recover the captured URL for older
+// mini-app items whose source_note_ids hold a job id (item-only captures create no note).
+export async function getJob(jobId: string): Promise<Job | null> {
+  const snap = await getDoc(doc(db, "jobs", jobId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Job;
+}
+
+// Live listener over the user's watch_items subcollection (read-only — writes go through
+// the backend). Ordered newest-first; the view splits To-Watch / Watched client-side.
+export function watchWatchItems(
+  userId: string,
+  callback: (items: WatchItem[]) => void,
+  opts: { max?: number; onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const { max = 200, onError } = opts;
+  const q = query(
+    collection(db, "users", userId, "watch_items"),
+    orderBy("created_at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as WatchItem)),
+    (err) => onError?.(err),
+  );
+}
+
+// Live listener over a single watch item (for the detail page) so status/rating changes
+// reflect instantly. Calls back with null if the item is deleted or doesn't exist.
+export function watchWatchItem(
+  userId: string,
+  itemId: string,
+  callback: (item: WatchItem | null) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "users", userId, "watch_items", itemId),
+    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as WatchItem) : null),
+    (err) => opts.onError?.(err),
+  );
+}
+
+// Live listener over the user's wish_items subcollection (read-only — writes go through the
+// backend). Ordered newest-first; the view splits Saved / Wishlist / Bought client-side.
+export function watchWishItems(
+  userId: string,
+  callback: (items: WishItem[]) => void,
+  opts: { max?: number; onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const { max = 200, onError } = opts;
+  const q = query(
+    collection(db, "users", userId, "wish_items"),
+    orderBy("created_at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as WishItem)),
+    (err) => onError?.(err),
+  );
+}
+
+// Live listener over a single wish item (for the detail page) so status/target changes reflect
+// instantly. Calls back with null if the item is deleted or doesn't exist.
+export function watchWishItem(
+  userId: string,
+  itemId: string,
+  callback: (item: WishItem | null) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "users", userId, "wish_items", itemId),
+    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as WishItem) : null),
+    (err) => opts.onError?.(err),
+  );
+}
+
+// Live listener over the user's place_items subcollection (read-only — writes go through the
+// backend). Ordered newest-first; the view splits Saved / To-visit / Visited client-side.
+export function watchPlaceItems(
+  userId: string,
+  callback: (items: PlaceItem[]) => void,
+  opts: { max?: number; onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const { max = 200, onError } = opts;
+  const q = query(
+    collection(db, "users", userId, "place_items"),
+    orderBy("created_at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PlaceItem)),
+    (err) => onError?.(err),
+  );
+}
+
+// Live listener over a single place item (for the detail page) so status/rating/notes changes
+// reflect instantly. Calls back with null if the item is deleted or doesn't exist.
+export function watchPlaceItem(
+  userId: string,
+  itemId: string,
+  callback: (item: PlaceItem | null) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "users", userId, "place_items", itemId),
+    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as PlaceItem) : null),
+    (err) => opts.onError?.(err),
+  );
+}
+
+// Live listener over the user's recipe_items subcollection (read-only — the favorite toggle goes
+// through the backend). Ordered newest-first; the cookbook view filters client-side (no buckets).
+export function watchRecipeItems(
+  userId: string,
+  callback: (items: RecipeItem[]) => void,
+  opts: { max?: number; onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const { max = 200, onError } = opts;
+  const q = query(
+    collection(db, "users", userId, "recipe_items"),
+    orderBy("created_at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecipeItem)),
+    (err) => onError?.(err),
+  );
+}
+
+// Live listener over a single recipe item (for the detail page) so the favorite toggle reflects
+// instantly. Calls back with null if the item is deleted or doesn't exist.
+export function watchRecipeItem(
+  userId: string,
+  itemId: string,
+  callback: (item: RecipeItem | null) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "users", userId, "recipe_items", itemId),
+    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as RecipeItem) : null),
+    (err) => opts.onError?.(err),
+  );
+}
+
+// Live listener over the user's trip_items subcollection (read-only — the favorite toggle goes
+// through the backend). Ordered newest-first; the wall filters client-side (no buckets).
+export function watchTripItems(
+  userId: string,
+  callback: (items: TripItem[]) => void,
+  opts: { max?: number; onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  const { max = 200, onError } = opts;
+  const q = query(
+    collection(db, "users", userId, "trip_items"),
+    orderBy("created_at", "desc"),
+    limit(max),
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TripItem)),
+    (err) => onError?.(err),
+  );
+}
+
+// Live listener over a single trip item (for the detail page) so the favorite toggle reflects
+// instantly. Calls back with null if the item is deleted or doesn't exist.
+export function watchTripItem(
+  userId: string,
+  itemId: string,
+  callback: (item: TripItem | null) => void,
+  opts: { onError?: (e: Error) => void } = {},
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "users", userId, "trip_items", itemId),
+    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as TripItem) : null),
+    (err) => opts.onError?.(err),
+  );
 }
