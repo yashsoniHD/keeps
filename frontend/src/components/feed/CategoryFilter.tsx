@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { LayoutGrid } from "lucide-react";
-import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
+import { noteAccent, noteIcon } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
 // Tracks whether a horizontal scroller sits at its start/end, so the caller can show edge
@@ -33,18 +33,24 @@ function useScrollEdges<T extends HTMLElement>(deps: unknown[]) {
   return { ref, ...edges };
 }
 
+// One chip: a display label plus every slug that renders to it (e.g. "Trips" carries both
+// `itinerary` and `trip`). Selecting it filters the feed to ANY of its slugs.
+export type ChipGroup = { label: string; slugs: string[] };
+
 // The quick-filter row under the header: a horizontally-scrolling strip of category chips with
-// edge fades. For the full taxonomy at once, the top-bar CategoryMenu button opens the page.
+// edge fades. For the full taxonomy at once, the top-bar CollectionsMenu button opens the page.
+// Chips are deduped by display label — one chip per label, carrying all slugs that map to it —
+// so `itinerary`/`trip` don't show as two "Trips" chips that each filter a different subset.
 export function CategoryChips({
-  categories,
+  groups,
   active,
   setActive,
 }: {
-  categories: string[];
+  groups: ChipGroup[];
   active: string;
   setActive: (v: string) => void;
 }) {
-  const { ref, atStart, atEnd } = useScrollEdges<HTMLDivElement>([categories.length]);
+  const { ref, atStart, atEnd } = useScrollEdges<HTMLDivElement>([groups.length]);
 
   return (
     <div className="min-w-0 flex-1">
@@ -70,21 +76,25 @@ export function CategoryChips({
         >
           All
         </button>
-        {categories.map((c) => {
-          const accent = noteAccent(c);
-          const Icon = noteIcon(c);
-          const isActive = active === c;
+        {groups.map((g) => {
+          // Style/icon come from the group's representative (first) slug; selecting it sets
+          // that slug as `active`, and a chip reads active when `active` is any of its slugs
+          // (so a deep link to any one slug still lights the right chip).
+          const rep = g.slugs[0];
+          const accent = noteAccent(rep);
+          const Icon = noteIcon(rep);
+          const isActive = g.slugs.includes(active);
           return (
             <button
-              key={c}
+              key={g.label}
               type="button"
-              onClick={() => setActive(c)}
+              onClick={() => setActive(rep)}
               className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 isActive ? `${accent.dot} text-white` : accent.chip
               }`}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {noteLabel(c)}
+              {g.label}
             </button>
           );
         })}

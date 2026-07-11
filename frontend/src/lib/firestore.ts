@@ -59,15 +59,22 @@ export function watchNotes(
   callback: (notes: Note[]) => void,
   opts: {
     max?: number;
-    contentType?: string;
+    // A single slug (==) or a group of slugs (Firestore `in`, capped at 10) that all render
+    // as the same chip label — see the category-chip dedupe in the feed.
+    contentType?: string | string[];
     collectionId?: string | null;
     onError?: (e: Error) => void;
   } = {},
 ): Unsubscribe {
   const { max = 50, contentType, collectionId, onError } = opts;
+  const types = contentType ? (Array.isArray(contentType) ? contentType : [contentType]) : [];
   const clauses = [
     where("user_id", "==", userId),
-    ...(contentType ? [where("content_type", "==", contentType)] : []),
+    ...(types.length === 1
+      ? [where("content_type", "==", types[0])]
+      : types.length > 1
+        ? [where("content_type", "in", types.slice(0, 10))]
+        : []),
     // collectionId "" is the Notes catch-all (collection_id == null); a real id is a bucket.
     // Backed by the (user_id, collection_id, created_at) composite index.
     ...(collectionId !== undefined ? [where("collection_id", "==", collectionId || null)] : []),

@@ -24,13 +24,17 @@ export const Route = createFileRoute("/collections")({ component: CollectionsPag
 const TILE_GRID = "grid grid-cols-2 gap-3 lg:grid-cols-3";
 const TILE_BASE = `flex min-h-[120px] flex-col justify-between gap-6 rounded-2xl border p-4 text-left transition-transform active:scale-[0.98] ${FOCUS_RING}`;
 
-// Quiet count in a tile's top-right corner: skeleton while loading, "N saved" / "N notes" after.
+// Quiet count in a tile's top-right corner: skeleton while loading, then just the number
+// (the label word is dropped visually; `unit` still fills the aria-label for screen readers).
 function CountCorner({ count, unit }: { count: number | null; unit: string }) {
   if (count === null)
-    return <span className="mt-1 h-4 w-12 shrink-0 animate-pulse rounded bg-ink/10" aria-hidden />;
+    return <span className="mt-1 h-4 w-8 shrink-0 animate-pulse rounded bg-ink/10" aria-hidden />;
   return (
-    <span className="mt-1 shrink-0 whitespace-nowrap text-xs text-ink-soft">
-      {count} {unit}
+    <span
+      className="mt-1 shrink-0 whitespace-nowrap text-xs text-ink-soft"
+      aria-label={`${count} ${unit}`}
+    >
+      {count}
     </span>
   );
 }

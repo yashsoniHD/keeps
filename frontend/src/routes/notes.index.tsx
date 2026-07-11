@@ -41,7 +41,7 @@ import {
   replayQueue,
   type QueuedCapture,
 } from "@/lib/capture-queue";
-import { groupNotesByDate, sourceLabel } from "@/lib/note-meta";
+import { groupNotesByDate, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { setFeedOrder } from "@/lib/note-nav";
 import { getCached, hasCached, setCached } from "@/lib/swr-cache";
 import { FOCUS_RING } from "@/lib/ui";
@@ -74,7 +74,7 @@ export const Route = createFileRoute("/notes/")({
 // Round header icon button: 40px tap target, hairline border, with the shared focus ring.
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
-const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+const GRID_CLS = "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
 
 // A source-filter option: either a web domain (rendered with its favicon) or a synthetic
 // "manual" group for captures that have no web source (typed/voice/uploaded/Clip-AI notes),
@@ -178,25 +178,64 @@ export function Feed({
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
 
+  // Filter chips emerge from the user's own taxonomy (user doc + loaded notes). This flat slug
+  // list still feeds the note context menu ("move to category"); the chip row uses the deduped
+  // groups below.
+  const categories = useMemo(
+    () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
+    [notes, userCategories],
+  );
+  // Chip groups: different slugs can share a display label (itinerary + trip → "Trips";
+  // travel + travel-destination-guide → "Travel"). Rendering one chip per slug showed
+  // duplicate-looking chips that each filtered a different subset, so collapse by label —
+  // one chip per label carrying ALL its slugs — and sort by label.
+  const chipGroups = useMemo(() => {
+    const byLabel = new Map<string, string[]>();
+    for (const slug of categories) {
+      const label = noteLabel(slug);
+      const arr = byLabel.get(label);
+      if (arr) arr.push(slug);
+      else byLabel.set(label, [slug]);
+    }
+    return Array.from(byLabel.entries())
+      .map(([label, slugs]) => ({ label, slugs: slugs.slice().sort() }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [categories]);
+  // The slug set the active chip filters by: the whole label group `active` belongs to (so a
+  // multi-slug chip matches any of its slugs), or just `[active]` when it isn't in a group yet
+  // (e.g. a deep link whose category hasn't loaded). Null == "All". `activeKey` is the stable
+  // string the feed subscription/cache key off of, so streaming notes don't churn the listener.
+  const activeSlugs = useMemo<string[] | null>(() => {
+    if (active === "all") return null;
+    return chipGroups.find((g) => g.slugs.includes(active))?.slugs ?? [active];
+  }, [active, chipGroups]);
+  const activeKey = activeSlugs ? activeSlugs.join(",") : "all";
+
   // Real-time feed: new/updated notes stream in without a refetch. The active type
   // filter runs server-side (composite index), so it sees past the feed window.
   useEffect(() => {
     if (!user) return;
+    // activeKey is a stable, comma-joined slug string ("all" == unfiltered); split it back into
+    // the slug set so a multi-slug chip filters server-side via a Firestore `in` query.
+    const types = activeKey === "all" ? undefined : activeKey.split(",");
     return watchNotes(
       user.uid,
       (n) => {
         setNotes(n);
         setNotesReady(true);
         setFeedError(false);
+        // Cache under the raw selected slug (`active`), not the group key: the initial-state
+        // read on back-nav looks up `feed:{uid}:{typeParam ?? "all"}`, and typeParam is the
+        // single slug from the URL. `active` is also a dep so a group-mate switch re-keys.
         setCached(`feed:${user.uid}:${active}`, n); // warm cache for instant back-nav
       },
       {
         max,
-        contentType: active === "all" ? undefined : active,
+        contentType: types,
         onError: () => setFeedError(true),
       },
     );
-  }, [user, max, active]);
+  }, [user, max, active, activeKey]);
 
   // Chip list comes from users/{uid}.categories (source of truth), so chips don't
   // vanish when a server-side filter narrows the loaded notes to one type.
@@ -391,11 +430,6 @@ export function Feed({
     setShowAdd(false);
   };
 
-  // Filter chips emerge from the user's own taxonomy (user doc + loaded notes).
-  const categories = useMemo(
-    () => Array.from(new Set([...userCategories, ...notes.map((n) => n.content_type)])).sort(),
-    [notes, userCategories],
-  );
   // Web-source domains come from users/{uid}.sources (whole-corpus source of truth) unioned
   // with loaded notes, so the filter doesn't vanish when a server-side category filter
   // narrows the loaded notes to one domain — same trick as the category chips above. Empty
@@ -431,11 +465,11 @@ export function Feed({
       // collection, not there. Excluded client-side so it works regardless of whether older
       // notes have the collection_id field yet (a Firestore `== null` query would miss those).
       if (!home && n.collection_id) return false;
-      if (active !== "all" && n.content_type !== active) return false;
+      if (activeSlugs && !activeSlugs.includes(n.content_type)) return false;
       if (!noteMatchesSource(n, source)) return false;
       return true;
     });
-  }, [notes, active, source, home]);
+  }, [notes, activeSlugs, source, home]);
 
   // Semantic search: debounced server call over all the user's notes (Firestore Vector
   // Search). Empty/short queries fall back to the browse feed. Results are projected
@@ -474,11 +508,11 @@ export function Feed({
   const displayNotes = useMemo(() => {
     if (!searchActive) return filtered;
     return (searchResults ?? []).filter((n) => {
-      if (active !== "all" && n.content_type !== active) return false;
+      if (activeSlugs && !activeSlugs.includes(n.content_type)) return false;
       if (!noteMatchesSource(n, source)) return false;
       return true;
     });
-  }, [searchActive, searchResults, filtered, active, source]);
+  }, [searchActive, searchResults, filtered, activeSlugs, source]);
 
   // Pinned notes float into their own section above the dated groups (newest-pinned first),
   // so a note the user marked "come back to this" stays at the top of the feed instead of
@@ -665,7 +699,7 @@ export function Feed({
                 {sourceOptions.length > 1 && (
                   <SourceFilter options={sourceOptions} source={source} setSource={setSource} />
                 )}
-                <CategoryChips categories={categories} active={active} setActive={applyActive} />
+                <CategoryChips groups={chipGroups} active={active} setActive={applyActive} />
               </div>
             )}
           </div>
@@ -975,13 +1009,14 @@ function NoteGrid({ notes }: { notes: Note[] }) {
 }
 
 // Pinterest-style masonry: CSS multi-column (2 on mobile → 3/4 on wider screens) with
-// break-inside-avoid so each image-forward tile stays whole. Column-gap comes from `gap-3`;
-// row spacing from the item margin. Same error-boundary isolation as the grid.
+// break-inside-avoid so each image-forward tile stays whole. Column-gap comes from `gap-4`;
+// row spacing from the matching item margin — a touch more air than the tiles' own p-3 so
+// the phone grid doesn't read as cramped. Same error-boundary isolation as the grid.
 function BoardMasonry({ notes }: { notes: Note[] }) {
   return (
-    <section className="columns-2 gap-3 sm:columns-3 lg:columns-4 [column-fill:_balance]">
+    <section className="columns-2 gap-4 sm:columns-3 lg:columns-4 [column-fill:_balance]">
       {notes.map((n) => (
-        <div key={n.id} className="mb-3 break-inside-avoid">
+        <div key={n.id} className="mb-4 break-inside-avoid">
           <ErrorBoundary label="feed-board-card" fallback={<FallbackNoteCard note={n} />}>
             <BoardCard note={n} />
           </ErrorBoundary>

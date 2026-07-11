@@ -257,10 +257,19 @@ function videoDuration(note: Note): string | null {
   return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }
 
+// Board covers keep their natural shape only within this band; extremes get cropped by
+// object-cover. Keeps the masonry lively but rhythmic: a 9:16 reel can't swallow a column
+// and a wide og-image banner can't collapse into a sliver.
+const BOARD_RATIO_MIN = 3 / 4; // tallest tile (portrait)
+const BOARD_RATIO_MAX = 3 / 2; // shortest tile (landscape)
+
 export function BoardCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const TypeIcon = noteIcon(note.content_type);
   const { hasCover, onImageError } = useCoverPresent(note);
+  // Natural cover ratio, measured on load; null until then (pre-load tiles use the band's
+  // portrait end, since video thumbnails dominate saved content).
+  const [coverRatio, setCoverRatio] = useState<number | null>(null);
   const video = isVideoNote(note);
   const duration = videoDuration(note);
   // Sub-line: the category chip (icon + label) plus the short date. The source is only
@@ -277,20 +286,29 @@ export function BoardCard({ note }: { note: Note }) {
       >
         <div className="relative">
           {hasCover ? (
-            // Natural aspect (no fixed height) so the image drives the tile's height; a cap
-            // keeps an extreme portrait from swallowing the column.
             <img
               src={note.cover_image_url!}
               alt=""
               loading="lazy"
               onError={onImageError}
-              className="w-full max-h-[32rem] object-cover"
+              onLoad={(e) => {
+                const el = e.currentTarget;
+                if (el.naturalWidth && el.naturalHeight)
+                  setCoverRatio(el.naturalWidth / el.naturalHeight);
+              }}
+              className="w-full object-cover"
+              style={{
+                aspectRatio: Math.min(
+                  BOARD_RATIO_MAX,
+                  Math.max(BOARD_RATIO_MIN, coverRatio ?? BOARD_RATIO_MIN),
+                ),
+              }}
             />
           ) : (
             <div
               className={`flex ${placeholderAspect} items-center justify-center ${accent.soft} p-4`}
             >
-              <span className="line-clamp-4 text-center font-mono text-sm font-medium uppercase leading-snug tracking-[0.2em] text-ink-soft/60">
+              <span className="line-clamp-4 text-center font-mono text-sm font-medium uppercase leading-snug tracking-[0.12em] break-words [overflow-wrap:anywhere] text-ink-soft/60">
                 {note.title}
               </span>
             </div>
@@ -321,7 +339,9 @@ export function BoardCard({ note }: { note: Note }) {
         </div>
 
         <div className="flex min-w-0 flex-col p-3">
-          <h3 className="font-serif text-base leading-snug text-ink line-clamp-2">{note.title}</h3>
+          <h3 className="text-[15px] font-medium leading-snug text-ink line-clamp-2">
+            {note.title}
+          </h3>
           <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
             <span
               className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${accent.chip}`}
@@ -329,7 +349,7 @@ export function BoardCard({ note }: { note: Note }) {
               <TypeIcon className="h-3 w-3 shrink-0" />
               <span className="truncate">{noteLabel(note.content_type)}</span>
             </span>
-            {date && <span className="shrink-0">· {date}</span>}
+            {date && <span className="shrink-0 whitespace-nowrap">· {date}</span>}
           </p>
         </div>
       </Link>

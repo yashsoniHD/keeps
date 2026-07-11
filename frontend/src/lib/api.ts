@@ -7,7 +7,14 @@ import type {
   PlaceItemDetails,
 } from "@/lib/types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+// The fallback must be environment-aware: a production build must NEVER point at localhost
+// (Vite loads .env*.local in all modes, so a stray VITE_API_URL could otherwise ship). When
+// the var is unset, dev talks to the local backend and prod talks to the live Cloud Run API.
+const API_URL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV
+    ? "http://localhost:8080"
+    : "https://clip-note-api-674775099277.us-central1.run.app");
 
 // All API calls go through this: a 401 usually means the cached Firebase token
 // expired while the tab was backgrounded — retry exactly once with a forced refresh.

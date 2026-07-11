@@ -14,7 +14,12 @@ export function reportClientError(kind: string, message: unknown, stack?: unknow
     path: window.location.pathname,
     ua: navigator.userAgent.slice(0, 200),
   });
-  const endpoint = `${import.meta.env.VITE_API_URL ?? "http://localhost:8080"}/api/client-errors`;
+  const base =
+    import.meta.env.VITE_API_URL ??
+    (import.meta.env.DEV
+      ? "http://localhost:8080"
+      : "https://clip-note-api-674775099277.us-central1.run.app");
+  const endpoint = `${base}/api/client-errors`;
   try {
     if (!navigator.sendBeacon?.(endpoint, body)) {
       fetch(endpoint, { method: "POST", body, keepalive: true }).catch(() => {});
