@@ -347,7 +347,7 @@ export function NoteRow({ note }: { note: Note }) {
       <Link
         to="/notes/$noteId"
         params={{ noteId: note.id }}
-        className={`group flex w-full min-w-0 items-center gap-3.5 px-4 py-3 transition-colors [-webkit-touch-callout:none] select-none hover:bg-accent ${FOCUS_RING}`}
+        className={`group flex w-full min-w-0 items-center gap-3.5 border-b border-border px-4 py-3 transition-colors [-webkit-touch-callout:none] select-none hover:bg-accent ${FOCUS_RING}`}
       >
         {hasCover && (
           <CoverThumb
@@ -399,13 +399,14 @@ export function NoteRowList({
   onRetry?: (job: Job) => void;
   onDismiss?: (jobId: string) => void;
 }) {
-  // Desktop (lg+) packs rows into 2 columns. `divide-y` can't draw the dividers there
-  // (it's a sibling selector, blind to grid geometry), so each child gets its own
-  // border-b instead — minus the bottom row, which would double the container border.
-  // Full-strength border-border (not /70) so the hairlines stay visible in dark mode.
+  // Each row paints its own border-b (dividers can't live on the container's direct
+  // children: note rows sit inside a display:contents menu wrapper, which computes but
+  // never paints borders). The container only exempts the bottom row(s) so the hairline
+  // never doubles the container border — both the wrapped (`>*>*`) and unwrapped (`>*`)
+  // child shapes are covered; the extra selector is a no-op on the other shape.
   return (
     <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card lg:max-w-6xl">
-      <div className="divide-y divide-border lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-border lg:[&>*:nth-last-child(-n+2)]:border-b-0">
+      <div className="lg:grid lg:grid-cols-2 lg:gap-x-6 [&>*:last-child]:border-b-0 [&>*:last-child>*]:border-b-0 lg:[&>*:nth-last-child(-n+2)]:border-b-0 lg:[&>*:nth-last-child(-n+2)>*]:border-b-0">
         {failedJobs.map((j) => (
           <FailedRow
             key={j.id}
@@ -563,7 +564,10 @@ export function FailedRow({
 }) {
   const domain = jobDomain(job.url);
   return (
-    <div className="flex w-full min-w-0 items-center gap-3.5 px-4 py-3" aria-label="Capture failed">
+    <div
+      className="flex w-full min-w-0 items-center gap-3.5 border-b border-border px-4 py-3"
+      aria-label="Capture failed"
+    >
       <span className="flex h-12 w-12 shrink-0 items-center justify-center self-start rounded-lg bg-destructive/10 text-destructive">
         <AlertCircle className="h-5 w-5" />
       </span>
@@ -600,7 +604,7 @@ export function ProcessingRow({ job, label = "Processing" }: { job: Job; label?:
   const waiting = label !== "Processing";
   return (
     <div
-      className="flex w-full min-w-0 items-center gap-3.5 px-4 py-3"
+      className="flex w-full min-w-0 items-center gap-3.5 border-b border-border px-4 py-3"
       aria-label={waiting ? `Capture ${label.toLowerCase()}` : "Note processing"}
     >
       {waiting ? (
