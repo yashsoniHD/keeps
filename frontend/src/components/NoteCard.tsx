@@ -340,8 +340,6 @@ export function NoteRow({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
   const Icon = noteIcon(note.content_type);
   const { hasCover, onImageError } = useCoverPresent(note);
-  const price = typeof note.data?.price === "string" ? (note.data.price as string) : null;
-
   return (
     <WithNoteMenu note={note}>
       <Link
@@ -365,7 +363,6 @@ export function NoteRow({ note }: { note: Note }) {
               <Icon className="h-3 w-3 shrink-0" />
               {noteLabel(note.content_type)}
             </span>
-            {price && <span className="ml-auto shrink-0 font-serif text-sm text-ink">{price}</span>}
           </div>
           <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-ink line-clamp-2">
             {note.title}
