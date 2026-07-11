@@ -49,7 +49,6 @@ export const WatchCard = memo(function WatchCard({
   const watched = item.watch_status === "watched";
   const saved = item.watch_status === "saved";
   const favorite = !!item.favorite;
-  const flatrate = (item.providers ?? []).filter((p) => p.type === "flatrate");
 
   const poster = (
     <Link
@@ -98,7 +97,7 @@ export const WatchCard = memo(function WatchCard({
         <span
           className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${MEDIA_ACCENT.chip}`}
         >
-          {item.media_type === "tv" ? "TV" : item.media_type === "movie" ? "Film" : "—"}
+          {item.media_type === "tv" ? "TV" : item.media_type === "movie" ? "Film" : "Title"}
         </span>
       </div>
 
@@ -124,28 +123,6 @@ export const WatchCard = memo(function WatchCard({
           <Plus className="h-3.5 w-3.5" />
           Watchlist
         </button>
-      )}
-
-      {/* Where to watch (flatrate first) */}
-      {flatrate.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          {flatrate.slice(0, 4).map((p) =>
-            p.logo_url ? (
-              <img
-                key={p.name}
-                src={p.logo_url}
-                alt={p.name}
-                title={p.name}
-                loading="lazy"
-                className="h-5 w-5 rounded"
-              />
-            ) : (
-              <span key={p.name} className="rounded bg-card px-1 text-[10px] text-ink-soft">
-                {p.name}
-              </span>
-            ),
-          )}
-        </div>
       )}
 
       {/* Rating — read-only badge on watched items the user has rated */}

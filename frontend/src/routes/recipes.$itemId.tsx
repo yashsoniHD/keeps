@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import { ArrowLeft, ChefHat } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { AppShell } from "@/components/AppShell";
@@ -13,6 +13,14 @@ function RecipesItem() {
   const { itemId } = Route.useParams();
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const router = useRouter();
+  const canGoBack = useCanGoBack();
+  // Back returns to wherever the item was opened from (a note, the wall, search). Falls back
+  // to the Recipes wall when opened cold, e.g. a deep link.
+  const goBack = () => {
+    if (canGoBack) router.history.back();
+    else navigate({ to: "/recipes" });
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -31,13 +39,15 @@ function RecipesItem() {
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-8 md:px-8">
-        <Link
-          to="/recipes"
+        <button
+          type="button"
+          onClick={goBack}
+          aria-label="Back to Recipes"
           className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
           Recipes
-        </Link>
+        </button>
         <ErrorBoundary label="recipes-detail" fallback={<DetailError />}>
           <RecipeDetail
             uid={user.uid}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Check, FolderPlus, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowRight, Check, FolderPlus, Loader2, Pencil, Sparkles, X } from "lucide-react";
 import { createCollection } from "@/lib/firestore";
 import { backfillCollection } from "@/lib/api";
 import {
@@ -23,6 +23,9 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState<string | null>(null);
   const [palette, setPalette] = useState<number | null>(null);
+  // Icon + colour options stay tucked away until the preview chip is tapped, so the default
+  // sheet is just name + description.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // After creation: the new collection's id + how many existing notes the sweep filed into it.
@@ -96,11 +99,11 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
               {created.assigned > 0 ? (
                 <>
                   <Check className="mr-1 inline h-3.5 w-3.5 text-success" />
-                  Swept {created.assigned} existing {created.assigned === 1 ? "note" : "notes"} in —
-                  and new saves that match will land here automatically.
+                  Swept {created.assigned} existing {created.assigned === 1 ? "note" : "notes"} in.
+                  New saves that match will land here automatically.
                 </>
               ) : (
-                "No existing notes matched yet — new saves that fit will land here automatically."
+                "No existing notes matched yet. New saves that fit will land here automatically."
               )}
             </p>
             <button
@@ -117,18 +120,27 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
           </div>
         ) : (
           <>
-            {/* Name, wearing the live icon + colour so the tile-to-be is visible while typing. */}
+            {/* Name, next to a large live preview of the icon + colour. Tapping the preview
+              reveals the pickers; they stay tucked away by default to keep the sheet calm. */}
             <div className="flex items-center gap-3">
-              <span
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${accent.dot} text-white shadow-sm`}
+              <button
+                type="button"
+                onClick={() => setPickerOpen((o) => !o)}
+                aria-expanded={pickerOpen}
+                aria-label="Change icon and colour"
+                title="Change icon and colour"
+                className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${accent.dot} text-white shadow-sm transition-transform active:scale-95 ${FOCUS_RING}`}
               >
-                <Icon className="h-5 w-5" />
-              </span>
+                <Icon className="h-6 w-6" />
+                <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-card text-ink-soft shadow-sm">
+                  <Pencil className="h-2.5 w-2.5" />
+                </span>
+              </button>
               <input
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Name — e.g. AI, Interiors, Gift ideas"
+                placeholder="Name, e.g. Gift ideas"
                 className="w-full rounded-2xl border border-border bg-paper px-4 py-3 text-base outline-none focus:border-ink"
               />
             </div>
@@ -146,39 +158,42 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
               Clipnote uses this to sweep in matching notes now and file future saves here.
             </p>
 
-            {/* Icon + colour, same picker vocabulary as Manage categories. */}
-            <div className="mt-3 rounded-2xl border border-border bg-paper p-3">
-              <div className="grid grid-cols-8 gap-1">
-                {Object.entries(CATEGORY_ICONS).map(([iconName, IconOpt]) => (
-                  <button
-                    key={iconName}
-                    type="button"
-                    onClick={() => setIcon(iconName)}
-                    aria-label={iconName}
-                    aria-pressed={icon === iconName}
-                    className={`inline-flex aspect-square items-center justify-center rounded-lg transition-colors ${
-                      icon === iconName ? "bg-ink text-paper" : "text-ink-soft hover:bg-accent"
-                    }`}
-                  >
-                    <IconOpt className="h-4 w-4" />
-                  </button>
-                ))}
+            {/* Icon + colour, same picker vocabulary as Manage categories. Revealed by the
+              preview chip above; hidden by default. */}
+            {pickerOpen && (
+              <div className="mt-3 rounded-2xl border border-border bg-paper p-3">
+                <div className="grid grid-cols-8 gap-1">
+                  {Object.entries(CATEGORY_ICONS).map(([iconName, IconOpt]) => (
+                    <button
+                      key={iconName}
+                      type="button"
+                      onClick={() => setIcon(iconName)}
+                      aria-label={iconName}
+                      aria-pressed={icon === iconName}
+                      className={`inline-flex aspect-square items-center justify-center rounded-lg transition-colors ${
+                        icon === iconName ? "bg-ink text-paper" : "text-ink-soft hover:bg-accent"
+                      }`}
+                    >
+                      <IconOpt className="h-4 w-4" />
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+                  {PALETTE_DOTS.map((dot, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setPalette(i)}
+                      aria-label={`Colour ${i + 1}`}
+                      aria-pressed={effectivePalette === i}
+                      className={`h-7 w-7 rounded-full ${dot} ring-2 ring-offset-2 ring-offset-paper transition-all ${
+                        effectivePalette === i ? "ring-ink" : "ring-transparent hover:ring-border"
+                      }`}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
-                {PALETTE_DOTS.map((dot, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setPalette(i)}
-                    aria-label={`Colour ${i + 1}`}
-                    aria-pressed={effectivePalette === i}
-                    className={`h-7 w-7 rounded-full ${dot} ring-2 ring-offset-2 ring-offset-paper transition-all ${
-                      effectivePalette === i ? "ring-ink" : "ring-transparent hover:ring-border"
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
+            )}
 
             {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 

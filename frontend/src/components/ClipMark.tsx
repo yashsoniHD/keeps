@@ -29,9 +29,10 @@ export function ClipMark({
   );
 }
 
-// Loading spinner in the brand's terracotta: a bright segment of "light" travels endlessly around
-// the clip (`.clip-march`) over a faint full-clip ghost. Sizes/colors off its box like ClipMark;
-// defaults to terracotta so it reads as the brand accent wherever it's dropped.
+// Loading spinner in the brand's terracotta: the clip draws itself on, holds a beat, then fades
+// and repeats (`.clip-breathe`) over a faint static ghost of the whole mark. A calm, deliberate
+// cycle (~2.2s, eased) reads as premium — no fast spin, no undraw. Sizes/colors off its box like
+// ClipMark; defaults to terracotta so it reads as the brand accent wherever it's dropped.
 export function ClipLoader({
   className,
   strokeWidth = 3,
@@ -40,24 +41,28 @@ export function ClipLoader({
   strokeWidth?: number;
 }) {
   return (
-    <span className={`inline-block text-recipe ${className ?? ""}`} role="status" aria-label="Loading">
+    <span
+      className={`inline-block text-recipe ${className ?? ""}`}
+      role="status"
+      aria-label="Loading"
+    >
       <svg viewBox="0 0 48 48" fill="none" aria-hidden className="block h-full w-full">
-        {/* faint ghost of the whole clip */}
+        {/* faint, static ghost of the whole clip — always present as an anchor */}
         <path
           d={CLIP_PATH}
           stroke="currentColor"
           strokeWidth={strokeWidth}
           strokeLinecap="round"
-          opacity={0.2}
+          opacity={0.15}
         />
-        {/* the travelling light */}
+        {/* draws on, holds, fades, repeats */}
         <path
           pathLength={100}
           d={CLIP_PATH}
           stroke="currentColor"
           strokeWidth={strokeWidth}
           strokeLinecap="round"
-          className="clip-march"
+          className="clip-breathe"
         />
       </svg>
     </span>
@@ -69,11 +74,7 @@ export function ClipLoader({
 // 78×96 proportions; `scale` fits it to a grid tile (1) or a condensed row (~0.46).
 export function SaveSnap({ scale = 1, className }: { scale?: number; className?: string }) {
   return (
-    <div
-      className={className}
-      style={{ width: 78 * scale, height: 96 * scale }}
-      aria-hidden
-    >
+    <div className={className} style={{ width: 78 * scale, height: 96 * scale }} aria-hidden>
       <div
         className="relative"
         style={{ width: 78, height: 96, transform: `scale(${scale})`, transformOrigin: "top left" }}
@@ -92,12 +93,7 @@ export function SaveSnap({ scale = 1, className }: { scale?: number; className?:
           style={{ left: 8, top: -6, width: 34, height: 34 }}
         >
           <svg viewBox="0 0 48 48" fill="none" aria-hidden className="block h-full w-full">
-            <path
-              d={CLIP_PATH}
-              stroke="currentColor"
-              strokeWidth={3.4}
-              strokeLinecap="round"
-            />
+            <path d={CLIP_PATH} stroke="currentColor" strokeWidth={3.4} strokeLinecap="round" />
           </svg>
         </span>
       </div>

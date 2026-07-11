@@ -45,6 +45,32 @@ def test_parse_details_flattens():
     assert d["website"] == "https://x.com" and d["phone"] == "+91 1"
     assert d["photo_name"] == "places/p1/photos/y" and d["editorial_summary"] == "nice"
     assert d["reservable"] is True
+    assert d["locality"] is None  # no addressComponents in this fixture
+
+
+def test_locality_from_components_prefers_locality_type():
+    components = [
+        {"longText": "Bangalore Urban", "types": ["administrative_area_level_2"]},
+        {"longText": "Bengaluru", "types": ["locality", "political"]},
+        {"longText": "Karnataka", "types": ["administrative_area_level_1"]},
+    ]
+    assert gp._locality_from_components(components) == "Bengaluru"
+
+
+def test_locality_from_components_falls_back_to_postal_town():
+    components = [{"longText": "Cambridge", "types": ["postal_town"]}]
+    assert gp._locality_from_components(components) == "Cambridge"
+
+
+def test_locality_from_components_absent():
+    assert gp._locality_from_components([]) is None
+    assert gp._locality_from_components(None) is None
+
+
+def test_parse_details_extracts_locality():
+    raw = {"id": "p1", "displayName": {"text": "X"},
+           "addressComponents": [{"longText": "Bengaluru", "types": ["locality"]}]}
+    assert gp._parse_details(raw)["locality"] == "Bengaluru"
 
 
 def test_search_candidate_lean_shape():

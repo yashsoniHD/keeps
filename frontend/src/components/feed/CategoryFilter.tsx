@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
-import { LayoutGrid, X } from "lucide-react";
+import { LayoutGrid } from "lucide-react";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
-import { TOOLS } from "@/lib/collections-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
 // Tracks whether a horizontal scroller sits at its start/end, so the caller can show edge
@@ -95,90 +93,18 @@ export function CategoryChips({
   );
 }
 
-// Top-bar button that opens the full-screen collections launcher — the five mini-apps.
-// (Replaces the old category-filter page; note-category filtering lives in CategoryChips.)
+// Top-bar button that opens the Collections page — the five mini-apps plus the user's own
+// smart collections. Now a real route (/collections) rather than a full-screen overlay, so
+// mini-app back buttons have somewhere to return to.
 export function CollectionsMenu() {
-  const [open, setOpen] = useState(false);
-
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Open collections"
-        title="Collections"
-        className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-      >
-        <LayoutGrid className="h-4 w-4" />
-      </button>
-
-      {open && <CollectionsPage onClose={() => setOpen(false)} />}
-    </>
-  );
-}
-
-// Full-screen collections launcher: the mini-apps (Watchlist, Wishlist, Places, Recipes, Trips)
-// as colour-coded tiles, each opening its standalone app. The Notes catch-all is intentionally
-// omitted — Notes is the home feed. Portaled to <body> to escape the header backdrop.
-function CollectionsPage({ onClose }: { onClose: () => void }) {
-  // Close on Escape; lock body scroll while the full-screen page is up.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
-
-  const apps = TOOLS.filter((t) => t.app); // drop the Notes catch-all
-
-  return createPortal(
-    <div className="fixed inset-0 z-[80] flex flex-col bg-background duration-150 animate-in fade-in-0">
-      <div className="shrink-0 border-b border-border">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-4 md:px-8">
-          <h1 className="font-serif text-2xl text-ink">Collections</h1>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className={`inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-accent hover:text-ink ${FOCUS_RING}`}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-4 py-5 md:px-8 md:py-6">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            {apps.map((t) => {
-              const Icon = t.icon;
-              return (
-                <Link
-                  key={t.key}
-                  to={t.to}
-                  onClick={onClose}
-                  className={`flex min-h-[120px] flex-col justify-between gap-6 rounded-2xl border p-4 text-left transition-transform active:scale-[0.98] ${FOCUS_RING} ${t.wash}`}
-                >
-                  <span
-                    className={`inline-flex h-10 w-10 items-center justify-center rounded-full ${t.fill}`}
-                  >
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className={`truncate font-semibold ${t.text}`}>{t.label}</div>
-                    <div className="truncate text-sm text-ink-soft">{t.desc}</div>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
+    <Link
+      to="/collections"
+      aria-label="Open collections"
+      title="Collections"
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
+    >
+      <LayoutGrid className="h-4 w-4" />
+    </Link>
   );
 }

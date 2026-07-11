@@ -1,9 +1,10 @@
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowDownUp, Globe, Plus, Search, ShoppingBag, Star, Tag } from "lucide-react";
+import { ArrowDownUp, Globe, Plus, ShoppingBag, Star, Tag } from "lucide-react";
 import { watchWishItems } from "@/lib/firestore";
 import { updateWishItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
+import { formatPrice } from "@/lib/format";
 import type { WishItem } from "@/lib/types";
 import {
   IconSelect,
@@ -49,7 +50,7 @@ function dedupeItems(list: WishItem[]): WishItem[] {
 const EMPTY: Record<Queue, { title: string; body: string }> = {
   saved: {
     title: "Save a product and it lands here",
-    body: "Share a product link or a buying-guide and each product becomes its own card — your wishlist of things you’re considering.",
+    body: "Share a product link or a buying-guide and each product becomes its own card. Your wishlist of things you’re considering.",
   },
   purchased: {
     title: "Nothing bought yet",
@@ -76,7 +77,12 @@ function DealsRail({ items }: { items: WishItem[] }) {
           >
             <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-product-soft/60">
               {i.image_url ? (
-                <img src={i.image_url} alt="" loading="lazy" className="h-full w-full object-contain p-1" />
+                <img
+                  src={i.image_url}
+                  alt=""
+                  loading="lazy"
+                  className="h-full w-full object-contain p-1"
+                />
               ) : (
                 <ShoppingBag className="h-4 w-4 text-product" />
               )}
@@ -84,7 +90,7 @@ function DealsRail({ items }: { items: WishItem[] }) {
             <span className="min-w-0">
               <span className="block truncate text-xs font-medium text-ink">{i.title}</span>
               <span className="block truncate text-sm font-semibold text-success">
-                {i.price_raw}
+                {formatPrice(i.price_amount, i.currency, i.price_raw)}
               </span>
             </span>
           </Link>
@@ -124,11 +130,9 @@ export function WishlistView({ uid }: { uid: string }) {
   const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<WishItem>(
     uid,
     watchWishItems,
+    "wishlist",
   );
   const [queue, setQueue] = useState<Queue>("saved");
-  const [query, setQuery] = useState("");
-  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
-  const deferredQuery = useDeferredValue(query);
   const [store, setStore] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("added");
   const [favOnly, setFavOnly] = useState(false);
@@ -181,12 +185,6 @@ export function WishlistView({ uid }: { uid: string }) {
 
   const filterSort = (list: WishItem[]) => {
     let out = list;
-    const q = deferredQuery.trim().toLowerCase();
-    if (q)
-      out = out.filter(
-        (i) =>
-          (i.title ?? "").toLowerCase().includes(q) || (i.brand ?? "").toLowerCase().includes(q),
-      );
     if (store !== "all") out = out.filter((i) => i.domain === store);
     const sorted = [...out];
     // Price low→high is the most useful shopping sort; items without a parsed price sort last.
@@ -224,7 +222,7 @@ export function WishlistView({ uid }: { uid: string }) {
 
   // Deals rail: shown on the pristine Saved view only (never over filtered/search results).
   const deals =
-    queue === "saved" && !favOnly && !deferredQuery.trim() && store === "all"
+    queue === "saved" && !favOnly && store === "all"
       ? deduped.filter(
           (i) =>
             i.wish_status !== "purchased" &&
@@ -272,18 +270,8 @@ export function WishlistView({ uid }: { uid: string }) {
         </button>
       </div>
 
-      {/* Search + compact icon filters, all on one row */}
-      <div className="flex items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your products"
-            className={`w-full rounded-full border border-border bg-card py-1.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
-          />
-        </div>
+      {/* Compact icon filters, all on one row */}
+      <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {storeNames.length > 0 && (
           <IconSelect
             icon={<Globe className="h-4 w-4" />}

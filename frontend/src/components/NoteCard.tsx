@@ -10,6 +10,7 @@ import {
   X,
   Star,
   Pin,
+  Play,
 } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
@@ -220,6 +221,117 @@ export function NoteCard({ note }: { note: Note }) {
   );
 }
 
+// --- Board (masonry) card -------------------------------------------------------
+// The image-forward tile for the Pinterest-style "Board" feed view. Unlike NoteCard (a
+// uniform text card with no cover preview), this celebrates the cover: it fills the top at
+// its natural aspect, so tall images stay tall and the masonry reads organic. A coverless
+// note falls back to a pastel placeholder with its title watermarked (uppercase, letterspaced
+// monospace) instead of a dead box. It only ever renders finished notes — the feed keeps
+// rendering in-flight/failed captures as standard cards.
+
+// Stable seed for per-note variety (placeholder aspect) without a stored field.
+function seedFromId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+// Coverless placeholders vary in height so the masonry doesn't render a wall of identical tiles.
+const PLACEHOLDER_ASPECTS = ["aspect-square", "aspect-[4/5]", "aspect-[3/4]"];
+
+// A video/reel note — drives the play pill + source chip on the cover. We only have the domain
+// and the capture input_type to go on (no explicit media flag), so match the known video hosts.
+function isVideoNote(note: Note): boolean {
+  if (note.input_type === "video") return true;
+  const d = note.source_domain ?? "";
+  return /(?:^|\.)(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|vimeo\.com|facebook\.com|fb\.watch)/.test(
+    d,
+  );
+}
+
+// Duration string carried by the note (summary notes stash it as data.videoLength). Absent for
+// most notes — the pill then shows just the play glyph, never a fabricated time.
+function videoDuration(note: Note): string | null {
+  const d = note.data ?? {};
+  const raw = d.videoLength ?? d.duration;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
+
+export function BoardCard({ note }: { note: Note }) {
+  const accent = noteAccent(note.content_type);
+  const { hasCover, onImageError } = useCoverPresent(note);
+  const video = isVideoNote(note);
+  const duration = videoDuration(note);
+  // Sub-line: the source (web brand, or how it was saved) then the short date — the same
+  // derivations every other card uses, so the board stays consistent with the feed.
+  const primary = note.source_domain ? sourceLabel(note.source_domain) : savedLabel(note);
+  const date = formatDateShort(note.created_at);
+  const placeholderAspect = PLACEHOLDER_ASPECTS[seedFromId(note.id) % PLACEHOLDER_ASPECTS.length];
+
+  return (
+    <WithNoteMenu note={note}>
+      <Link
+        to="/notes/$noteId"
+        params={{ noteId: note.id }}
+        className={`group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card ring-2 ring-transparent transition-all [-webkit-touch-callout:none] select-none hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
+      >
+        <div className="relative">
+          {hasCover ? (
+            // Natural aspect (no fixed height) so the image drives the tile's height; a cap
+            // keeps an extreme portrait from swallowing the column.
+            <img
+              src={note.cover_image_url!}
+              alt=""
+              loading="lazy"
+              onError={onImageError}
+              className="w-full max-h-[32rem] object-cover"
+            />
+          ) : (
+            <div
+              className={`flex ${placeholderAspect} items-center justify-center ${accent.soft} p-4`}
+            >
+              <span className="line-clamp-4 text-center font-mono text-sm font-medium uppercase leading-snug tracking-[0.2em] text-ink-soft/60">
+                {note.title}
+              </span>
+            </div>
+          )}
+
+          {/* Source chip (video sources only), top-left. */}
+          {video && note.source_domain && (
+            <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                }}
+                alt=""
+                className="h-3 w-3 rounded-sm"
+              />
+              <span className="capitalize">{sourceLabel(note.source_domain)}</span>
+            </span>
+          )}
+
+          {/* Play pill (video notes), bottom-left. Duration only when the note carries one. */}
+          {video && (
+            <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
+              <Play className="h-3 w-3 fill-white" />
+              {duration}
+            </span>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-col p-3">
+          <h3 className="font-serif text-base leading-snug text-ink line-clamp-2">{note.title}</h3>
+          <p className="mt-1 truncate text-[11px] text-ink-soft">
+            <span className="capitalize">{primary}</span>
+            {date && <> · {date}</>}
+          </p>
+        </div>
+      </Link>
+    </WithNoteMenu>
+  );
+}
+
 // Condensed layout: a contained "ledger" — one bordered card holding hairline-divided
 // rows (see NoteRowList). Serif titles keep it in the app's editorial voice; min-w-0 +
 // truncate are load-bearing: flex children default to min-width:auto, which lets long
@@ -302,7 +414,7 @@ export function NoteRowList({
           />
         ))}
         {deferredJobs.map((j) => (
-          <ProcessingRow key={j.id} job={j} label="Queued — high demand" />
+          <ProcessingRow key={j.id} job={j} label="Queued, high demand" />
         ))}
         {queuedJobs.map((j) => (
           <ProcessingRow key={j.id} job={j} label="Waiting for connection" />

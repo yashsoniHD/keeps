@@ -49,6 +49,7 @@ from services.firebase import (
 from services.enrich import enrich_note_data
 from services.gemini import gemini_service, match_existing, normalize_slug
 from services.imagen import generate_cover
+from services.item_reconcile import fan_out_note
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.oidc import verify_oidc
 from services.usage_meter import start_metering
@@ -390,6 +391,16 @@ async def process_job(job_id: str, request: Request):
         await add_user_category(user_id, extracted.content_type)
         if source_domain:
             await add_user_source(user_id, source_domain)
+        # Fan the note out into its mini-app family (watch/wish/place/recipe/trip_items) so it
+        # shows on the walls and the poster deep-links resolve. `note_doc.data` already carries
+        # the enriched payload from enrich_note_data above, so this re-runs no Gemini extraction
+        # and no fresh TMDB/Places spend. Idempotent (stable item ids) and best-effort — the
+        # note is written; a fan-out failure must not fail the job.
+        try:
+            await fan_out_note(user_id, note_id, note_doc)
+        except Exception as e:  # noqa: BLE001 — belt over fan_out_note's own per-family catch.
+            log.warning("mini-app fan-out failed: %s: %s", type(e).__name__, e,
+                        extra={"job_id": job_id, "user_id": user_id, "url": url})
         destination = {"kind": "note", "note_id": note_id}
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "destination": destination,

@@ -179,7 +179,7 @@ export function AddNoteSheet({
           {isUrl && (
             <p className="flex items-center gap-1.5 px-4 pb-2.5 text-xs text-tech">
               <Link2 className="h-3.5 w-3.5" />
-              Looks like a link — Clipnote will fetch and structure the page.
+              Looks like a link. Clipnote will fetch and structure the page.
             </p>
           )}
         </div>

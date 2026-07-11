@@ -16,6 +16,7 @@ from urllib.parse import quote_plus
 from google.cloud.firestore_v1 import ArrayUnion
 
 from services import google_places, search_index
+from services.enrich import normalize_city
 from services.firebase import get_db
 from services.gemini import gemini_service, is_places
 from services.watchlist import get_user_region  # shared region resolver (users/{uid}.region)
@@ -145,7 +146,9 @@ async def enrich_places(uid: str, source_id: str, venues: list[dict],
         if not name:
             continue
         location = v.get("location") or ""
-        city = v.get("city") or _city_from_location(location)
+        # Alias-normalized up front so even the raw-fallback dedup key ("Bangalore" vs
+        # "Bengaluru") converges; refined below with Google's own locality once `details` is in.
+        city = normalize_city(v.get("city") or _city_from_location(location))
         try:
             hit = await google_places.search_place(name, location, region)
             details = await google_places.place_details(hit.place_id) if hit else None
@@ -153,6 +156,10 @@ async def enrich_places(uid: str, source_id: str, venues: list[dict],
             doc_id = _doc_id(hit, name, city)
             ref = db.collection("users").document(uid).collection("place_items").document(doc_id)
             existing = await ref.get()
+
+            # Prefer Google's own locality over the source text now that details are in — same
+            # normalization services/enrich.py applies to note.data.venues[].
+            city = normalize_city((details or {}).get("locality")) or city
 
             # Source fields (always refreshed); never touch the user's place state here.
             enrichment = {
@@ -220,7 +227,7 @@ async def add_by_place_id(uid: str, place_id: str, region: str | None = None) ->
     doc_id = f"g_{place_id}"
     ref = db.collection("users").document(uid).collection("place_items").document(doc_id)
     existing = await ref.get()
-    city = _city_from_location(details.get("formatted_address"))
+    city = normalize_city(details.get("locality") or _city_from_location(details.get("formatted_address")))
 
     enrichment = {
         "user_id": uid,

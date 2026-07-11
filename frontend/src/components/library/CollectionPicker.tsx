@@ -107,7 +107,7 @@ export function CollectionPicker({
         <div className="max-h-72 space-y-1 overflow-y-auto">
           {collections.length === 0 ? (
             <p className="px-1 py-6 text-center text-sm text-ink-soft">
-              No collections yet — name one above to start.
+              No collections yet. Name one above to start.
             </p>
           ) : (
             collections.map((c) => {

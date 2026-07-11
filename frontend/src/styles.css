@@ -266,18 +266,33 @@
   }
 }
 
-/* Loading: a short "light" segment travels endlessly around the clip. */
-@keyframes clip-march {
-  from {
-    stroke-dashoffset: 0;
+/* Loading: the clip draws itself on, holds a beat, then fades — no undraw, no spin. A calm,
+   deliberate cycle reads as "premium" where the old fast-marching light read as busy/ugly. The
+   dashoffset jump back to the start happens only while opacity is 0, so it's invisible. */
+@keyframes clip-breathe {
+  0% {
+    stroke-dashoffset: 100;
+    opacity: 0;
   }
-  to {
-    stroke-dashoffset: -100;
+  12% {
+    opacity: 1;
+  }
+  52% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  78% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
   }
 }
-.clip-march {
-  stroke-dasharray: 22 78;
-  animation: clip-march 1.3s linear infinite;
+.clip-breathe {
+  stroke-dasharray: 100;
+  animation: clip-breathe 2.2s cubic-bezier(0.45, 0, 0.2, 1) infinite;
 }
 
 /* Saving: the clip drops in from above, snaps onto the note with a small bounce, holds, lifts. */
@@ -308,13 +323,14 @@
   }
 }
 .clip-snap {
-  animation: clip-snap 3.2s ease-in-out infinite;
+  animation: clip-snap 3s cubic-bezier(0.32, 0.72, 0, 1) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .clip-march {
+  .clip-breathe {
     animation: none;
-    stroke-dashoffset: -39; /* rest with the light mid-clip */
+    stroke-dashoffset: 0; /* rest fully drawn */
+    opacity: 0.55; /* static mark at reduced opacity */
   }
   .clip-snap {
     animation: none;

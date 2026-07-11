@@ -1,8 +1,9 @@
-import { MapPin, Star, Clock, Wallet, Sparkles, Lightbulb, Utensils } from "lucide-react";
+import { MapPin, Star, Clock, Wallet, Sparkles, Lightbulb, Utensils, ChevronDown } from "lucide-react";
 import type { Note, PlaceAction } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
 import { ActionRow } from "../ActionRow";
 import { VenuesMap } from "../VenuesMap";
+import { useImageAspect, orientationOf } from "../useImageAspect";
 
 // One venue in a place note. camelCase fields match the backend `place` venues[] schema
 // (services/gemini.py TYPE_PROMPTS["place"] — what the source said); snake_case fields are
@@ -56,75 +57,131 @@ interface PlaceData {
 
 type Accent = ReturnType<typeof noteAccent>;
 
-function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showName: boolean }) {
-  const stats: { icon: typeof Star; label: string; value: string }[] = [];
-  if (v.rating) {
-    // Google's numeric rating gets its review count; a source-said string renders as-is.
-    const value =
-      typeof v.rating === "number" && v.user_rating_count
-        ? `${v.rating} (${v.user_rating_count.toLocaleString()})`
-        : String(v.rating);
-    stats.push({ icon: Star, label: "Rating", value });
+// A venue photo, laid out by its own aspect so it never gets brutally center-cropped and
+// never dominates the venue card. Landscape → a modest banner (a mild crop reads as
+// intentional); portrait/square → a contained image centered on the note's accent wash,
+// shown in full. We measure off-screen first so the layout doesn't flash; a banner-shaped
+// box holds the space meanwhile.
+function VenuePhoto({ url, alt, accent }: { url: string; alt: string; accent: Accent }) {
+  const { status, ratio } = useImageAspect(url);
+
+  if (status === "loading") {
+    return <div className={`h-48 w-full rounded-2xl border border-border sm:h-56 ${accent.soft}`} />;
   }
+  if (status === "none") return null;
+
+  if (orientationOf(ratio) === "landscape") {
+    return (
+      <div className="overflow-hidden rounded-2xl border border-border">
+        <img src={url} alt={alt} loading="lazy" className="h-48 w-full object-cover sm:h-56" />
+      </div>
+    );
+  }
+  // Portrait / square: contained at its own aspect so nothing gets cut off.
+  return (
+    <div className={`flex justify-center rounded-2xl border border-border p-3 ${accent.soft}`}>
+      <img
+        src={url}
+        alt={alt}
+        loading="lazy"
+        style={{ aspectRatio: ratio }}
+        className="max-h-80 w-auto max-w-full rounded-xl object-cover"
+      />
+    </div>
+  );
+}
+
+// Google's opening_hours weekday lines look like "Friday: 9:00 AM – 11:00 PM". Pull out
+// today's hours for the compact disclosure summary; null when the format doesn't match.
+function todaysHours(hours: string[]): string | null {
+  const day = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  const line = hours.find((h) => h.startsWith(day));
+  if (!line) return null;
+  const rest = line.slice(day.length).replace(/^:\s*/, "").trim();
+  return rest || null;
+}
+
+function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showName: boolean }) {
+  // Compact inline rating: star glyph + "4.6 (188)". Google's numeric rating gets its review
+  // count; a source-said string renders as-is. Sits beside the name (multi-venue) or leads
+  // the meta line (single venue, where the note title is already the venue name).
+  const ratingText = v.rating
+    ? typeof v.rating === "number" && v.user_rating_count
+      ? `${v.rating} (${v.user_rating_count.toLocaleString()})`
+      : String(v.rating)
+    : null;
+  const rating = ratingText ? (
+    <span className="inline-flex items-center gap-1 text-sm font-medium text-ink">
+      <Star className={`h-3.5 w-3.5 shrink-0 fill-current ${accent.text}`} />
+      {ratingText}
+    </span>
+  ) : null;
+
   const price = v.priceForTwo || v.priceRange || v.price_level;
-  if (price) stats.push({ icon: Wallet, label: "Price", value: price });
-  if (v.timings) stats.push({ icon: Clock, label: "Hours", value: v.timings });
+  const liveHours = (v.opening_hours?.length ?? 0) > 0;
+  const today = liveHours ? todaysHours(v.opening_hours!) : null;
+  const hasMeta = Boolean(
+    (!showName && rating) ||
+      v.location ||
+      v.formatted_address ||
+      v.category ||
+      v.cuisine ||
+      price ||
+      (v.timings && !liveHours),
+  );
 
   return (
-    <div className="space-y-6">
-      {showName && v.name && <h2 className="font-serif text-2xl text-ink">{v.name}</h2>}
-
-      {v.photo_url && (
-        <div className="overflow-hidden rounded-2xl border border-border">
-          <img
-            src={v.photo_url}
-            alt={v.name ?? ""}
-            loading="lazy"
-            className="h-52 w-full object-cover"
-          />
+    <div className="space-y-5">
+      {showName && v.name && (
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="min-w-0 font-serif text-2xl text-ink">{v.name}</h2>
+          {rating}
         </div>
       )}
 
-      {(v.location || v.formatted_address || v.category || v.cuisine) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-soft">
+      {hasMeta && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-soft">
+          {!showName && rating}
           {(v.location || v.formatted_address) && (
             <span className="inline-flex items-center gap-1.5">
-              <MapPin className={`h-4 w-4 ${accent.text}`} />
+              <MapPin className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
               <span className="text-ink">{v.location || v.formatted_address}</span>
             </span>
           )}
           {(v.category || v.cuisine) && (
-            <span className="text-sm">· {[v.category, v.cuisine].filter(Boolean).join(" · ")}</span>
+            <span>{[v.category, v.cuisine].filter(Boolean).join(" · ")}</span>
+          )}
+          {price && (
+            <span className="inline-flex items-center gap-1.5">
+              <Wallet className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+              {price}
+            </span>
+          )}
+          {/* Source-said hours; skipped when live Google hours render below. */}
+          {v.timings && !liveHours && (
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+              {v.timings}
+            </span>
           )}
         </div>
       )}
 
+      {v.photo_url && <VenuePhoto url={v.photo_url} alt={v.name ?? ""} accent={accent} />}
+
       {/* Region-aware actions built by backend enrichment (Directions / Reserve / Order / …). */}
       <ActionRow actions={v.action_links} />
 
-      {stats.length > 0 && (
-        <div
-          className={`grid gap-3 rounded-2xl border border-border p-4 ${accent.soft}`}
-          style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
-        >
-          {stats.map((s, i) => (
-            <div key={i} className="flex flex-col items-center gap-1 text-center">
-              <s.icon className={`h-4 w-4 ${accent.text}`} />
-              <div className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</div>
-              <div className="font-serif text-lg text-ink">{s.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {(v.opening_hours?.length ?? 0) > 0 && (
-        <details className="rounded-2xl border border-border bg-card px-5 py-3">
-          <summary
-            className={`inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-ink`}
-          >
-            <Clock className={`h-4 w-4 ${accent.text}`} /> Opening hours
+      {/* Live hours as a compact one-line disclosure: today's hours in the summary, the
+          full week on expand. Never a full-width bar. */}
+      {liveHours && (
+        <details className="group text-sm">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-ink-soft transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
+            <Clock className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+            <span>{today ? `Today · ${today}` : "Opening hours"}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" />
           </summary>
-          <ul className="mt-2 space-y-1 text-sm text-ink-soft">
+          <ul className="mt-2 space-y-1 pl-5 text-ink-soft">
             {v.opening_hours!.map((h, i) => (
               <li key={i}>{h}</li>
             ))}

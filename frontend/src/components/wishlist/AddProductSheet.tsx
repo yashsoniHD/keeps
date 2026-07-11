@@ -53,7 +53,7 @@ export function AddProductSheet({ onClose }: { onClose: () => void }) {
           {state === "done" ? (
             <div className="flex items-center gap-2 rounded-xl bg-product-soft px-3 py-4 text-sm text-product">
               <Check className="h-4 w-4" />
-              Got it — fetching the product details. It’ll appear here in a moment.
+              Got it. Fetching the product details. It’ll appear here in a moment.
             </div>
           ) : (
             <>

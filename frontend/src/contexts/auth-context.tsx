@@ -11,6 +11,7 @@ import { auth } from "@/integrations/firebase/client";
 import { analytics } from "@/lib/analytics";
 import { ensureUserRegion, recordSignup } from "@/lib/firestore";
 import { readSignupRef, clearSignupRef } from "@/lib/attribution";
+import { clearCache } from "@/lib/swr-cache";
 
 interface AuthCtx {
   user: User | null;
@@ -36,6 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       // Seed the Watchlist "where to watch" region once, the first time we see this user.
       if (u) ensureUserRegion(u.uid).catch(() => {});
+      // Sign-out: wipe the SWR cache so a next user never sees the previous account's feed/walls.
+      else clearCache();
     });
   }, []);
 

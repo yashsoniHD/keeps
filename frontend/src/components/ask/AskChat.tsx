@@ -226,7 +226,7 @@ function ArtifactCard({
             className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
           >
             <Check className="h-4 w-4" />{" "}
-            {state === "added" ? "Added — view note" : "Saved — view note"}
+            {state === "added" ? "Added. View note" : "Saved. View note"}
           </Link>
         ) : (
           <>
@@ -282,6 +282,7 @@ export function AskChat({
 }) {
   useCategoryMeta(); // reflect category icon/colour overrides on citation chips
   const { user } = useAuth();
+  const navigate = useNavigate();
   // The conversation (messages + server id + reference scope) is owned by AskProvider so it
   // survives this component unmounting when the panel closes — see ask-context.tsx. It clears
   // only on an explicit "New chat" (resetChat) or a page refresh.
@@ -468,6 +469,11 @@ export function AskChat({
         return [...m.slice(0, -1), { ...last, text: last.text + text }];
       });
 
+    // Track — locally to this send — whether anything reached the user, so a stream that
+    // resolves with no delta, no artifact, and no error never leaves an empty bubble.
+    let sawContent = false;
+    let sawError = false;
+
     try {
       await askStream(
         question,
@@ -479,17 +485,28 @@ export function AskChat({
           onConversation: (id) => setConversationId(id),
           onStatus: (s) => setStatus(s),
           onDelta: (t) => {
+            sawContent = true;
             setStatus(null); // first token clears the activity line
             appendDelta(t);
           },
           onCitations: (citations) => patchLast({ citations }),
-          onArtifact: (artifact) => patchLast({ artifact }),
+          onArtifact: (artifact) => {
+            sawContent = true;
+            patchLast({ artifact });
+          },
           onCoverage: (coverage) => patchLast({ coverage }),
-          onSavedNote: (note_id) => patchLast({ saved_note_id: note_id }),
-          onError: (message) => setError(message),
+          onSavedNote: (note_id) => {
+            sawContent = true;
+            patchLast({ saved_note_id: note_id });
+          },
+          onError: (message) => {
+            sawError = true;
+            setError(message);
+          },
         },
       );
     } catch (e) {
+      sawError = true;
       setError(e instanceof ApiError ? e.message : "Couldn't get an answer. Please try again.");
     } finally {
       setSending(false);
@@ -502,6 +519,11 @@ export function AskChat({
         }
         return m;
       });
+      // If nothing streamed and the backend surfaced no error either, don't leave the user
+      // staring at nothing — show a friendly, retryable message.
+      if (!sawContent && !sawError) {
+        setError("I couldn't put together an answer. Please try again.");
+      }
     }
   };
 
@@ -803,13 +825,20 @@ export function AskChat({
                   key={i}
                   className="space-y-2.5 text-[15px] leading-relaxed text-ink duration-300 animate-in fade-in-0 slide-in-from-bottom-1"
                 >
-                  {m.text && renderMarkdown(m.text)}
+                  {m.text &&
+                    renderMarkdown(m.text, {
+                      // In-answer note refs ([label](note-id)) navigate in-app and dock the chat.
+                      onNoteClick: (id) => {
+                        onClose?.();
+                        goToNote(navigate, id);
+                      },
+                    })}
                   {/* Deep async task: working → result link / failure. */}
                   {m.pending && (
                     <div className="flex items-center gap-2.5 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-ink-soft">
                       <Loader2 className="h-4 w-4 shrink-0 animate-spin text-ink-soft" />
                       <span>
-                        Working on this — I'll save it as a note when it's ready. You can keep
+                        Working on this. I'll save it as a note when it's ready. You can keep
                         chatting.
                       </span>
                     </div>
@@ -826,7 +855,7 @@ export function AskChat({
                       onClick={onClose}
                       className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
                     >
-                      <Check className="h-4 w-4" /> Done — view the note
+                      <Check className="h-4 w-4" /> Done. View the note
                     </Link>
                   )}
                   {m.saved_note_id && (

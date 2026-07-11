@@ -113,7 +113,7 @@ function PublicNote() {
             <div>
               <p className="font-serif text-xl text-ink">Made with Clipnote</p>
               <p className="mt-1 text-sm text-ink-soft">
-                Turn any link — recipe, reel, product, article — into a structured note like this.
+                Turn any link (recipe, reel, product, article) into a structured note like this.
               </p>
             </div>
             <Link
@@ -121,7 +121,7 @@ function PublicNote() {
               className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
             >
               <Sparkles className="h-4 w-4" />
-              Start your own — free
+              Start your own, free
             </Link>
           </div>
         </div>

@@ -2,11 +2,12 @@
 // trips). Each wall used to hand-roll the same listener wiring, icon-filter control, and
 // loading state — this module is the single copy, parameterized only by the app's accent
 // classes (passed as full literal class strings so the Tailwind JIT sees them).
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { AlertCircle } from "lucide-react";
 import type { Unsubscribe } from "firebase/firestore";
 import { FOCUS_RING } from "@/lib/ui";
+import { getCached, setCached } from "@/lib/swr-cache";
 
 // Firestore listener page size. The walls were previously hard-capped here with no way to
 // see older items; useWallItems raises the limit in steps when the user asks for more.
@@ -25,20 +26,41 @@ type Watcher<T> = (
 // Owns the wall's live listener: error surfacing (a Firestore failure used to leave the
 // wall on a perpetual spinner), retry, and load-more past the page cap. `setItems` is
 // exposed for the walls' optimistic patchLocal updates.
-export function useWallItems<T>(uid: string, watcher: Watcher<T>) {
-  const [items, setItems] = useState<T[] | null>(null);
+//
+// `cacheKey` (e.g. "watchlist") opts the wall into the SWR cache: the first render seeds from
+// the last-seen items (no skeleton on back-navigation) and every update — fresh snapshot or
+// optimistic patchLocal — writes through, so the cache stays current.
+export function useWallItems<T>(uid: string, watcher: Watcher<T>, cacheKey?: string) {
+  const key = cacheKey ? `${cacheKey}:${uid}` : null;
+  const [items, setItems] = useState<T[] | null>(() =>
+    key ? (getCached<T[]>(key) ?? null) : null,
+  );
   const [error, setError] = useState(false);
   const [max, setMax] = useState(WALL_PAGE_SIZE);
   const [attempt, setAttempt] = useState(0);
 
+  // A setter that also warms the cache, used both by the listener and by the walls' optimistic
+  // patchLocal — so a title toggled/promoted in the wall survives a round-trip to a detail page.
+  const setItemsCached = useCallback<Dispatch<SetStateAction<T[] | null>>>(
+    (update) => {
+      setItems((prev) => {
+        const next =
+          typeof update === "function" ? (update as (p: T[] | null) => T[] | null)(prev) : update;
+        if (key && next !== null) setCached(key, next);
+        return next;
+      });
+    },
+    [key],
+  );
+
   useEffect(() => {
     setError(false);
-    return watcher(uid, setItems, { max, onError: () => setError(true) });
-  }, [uid, watcher, max, attempt]);
+    return watcher(uid, setItemsCached, { max, onError: () => setError(true) });
+  }, [uid, watcher, max, attempt, setItemsCached]);
 
   return {
     items,
-    setItems,
+    setItems: setItemsCached,
     error,
     retry: () => setAttempt((n) => n + 1),
     // The listener returned a full page — there may be older items beyond the cap.

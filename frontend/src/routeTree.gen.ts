@@ -19,6 +19,7 @@ import { Route as RecipesRouteImport } from './routes/recipes'
 import { Route as PlacesRouteImport } from './routes/places'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LibraryRouteImport } from './routes/library'
+import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -86,6 +87,11 @@ const LoginRoute = LoginRouteImport.update({
 const LibraryRoute = LibraryRouteImport.update({
   id: '/library',
   path: '/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CollectionsRoute = CollectionsRouteImport.update({
+  id: '/collections',
+  path: '/collections',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AskRoute = AskRouteImport.update({
@@ -183,6 +189,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
+  '/collections': typeof CollectionsRoute
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/places': typeof PlacesRouteWithChildren
@@ -213,6 +220,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
+  '/collections': typeof CollectionsRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
@@ -238,6 +246,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
+  '/collections': typeof CollectionsRoute
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/places': typeof PlacesRouteWithChildren
@@ -270,6 +279,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
+    | '/collections'
     | '/library'
     | '/login'
     | '/places'
@@ -300,6 +310,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
+    | '/collections'
     | '/login'
     | '/search'
     | '/settings'
@@ -324,6 +335,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ask'
+    | '/collections'
     | '/library'
     | '/login'
     | '/places'
@@ -355,6 +367,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AskRoute: typeof AskRoute
+  CollectionsRoute: typeof CollectionsRoute
   LibraryRoute: typeof LibraryRouteWithChildren
   LoginRoute: typeof LoginRoute
   PlacesRoute: typeof PlacesRouteWithChildren
@@ -440,6 +453,13 @@ declare module '@tanstack/react-router' {
       path: '/library'
       fullPath: '/library'
       preLoaderRoute: typeof LibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/collections': {
+      id: '/collections'
+      path: '/collections'
+      fullPath: '/collections'
+      preLoaderRoute: typeof CollectionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ask': {
@@ -654,6 +674,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AskRoute: AskRoute,
+  CollectionsRoute: CollectionsRoute,
   LibraryRoute: LibraryRouteWithChildren,
   LoginRoute: LoginRoute,
   PlacesRoute: PlacesRouteWithChildren,

@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowDownUp,
@@ -10,7 +10,6 @@ import {
   Globe,
   Gauge,
   Plus,
-  Search,
   ShoppingCart,
   Star,
   X,
@@ -104,7 +103,7 @@ function TonightsPick({ item, onReroll }: { item: RecipeItem; onReroll: () => vo
           <Link
             to="/recipes/$itemId"
             params={{ itemId: item.id }}
-            className={`mt-1 block truncate font-serif text-2xl leading-tight text-ink hover:underline ${FOCUS_RING}`}
+            className={`mt-1 block break-words font-serif text-2xl leading-tight text-ink hover:underline ${FOCUS_RING}`}
           >
             {item.title}
           </Link>
@@ -139,7 +138,12 @@ function TonightsPick({ item, onReroll }: { item: RecipeItem; onReroll: () => vo
         </div>
         {item.image_url && (
           <div className="relative w-32 shrink-0 sm:w-48">
-            <img src={item.image_url} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+            <img
+              src={item.image_url}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
           </div>
         )}
       </div>
@@ -155,10 +159,8 @@ export function RecipesView({ uid }: { uid: string }) {
   const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<RecipeItem>(
     uid,
     watchRecipeItems,
+    "recipes",
   );
-  const [query, setQuery] = useState("");
-  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
-  const deferredQuery = useDeferredValue(query);
   const [cuisine, setCuisine] = useState("all");
   const [difficulty, setDifficulty] = useState("all");
   const [time, setTime] = useState<TimeBucket>("all");
@@ -218,12 +220,6 @@ export function RecipesView({ uid }: { uid: string }) {
 
   const filterSort = (list: RecipeItem[]) => {
     let out = list;
-    const q = deferredQuery.trim().toLowerCase();
-    if (q)
-      out = out.filter(
-        (i) =>
-          (i.title ?? "").toLowerCase().includes(q) || (i.cuisine ?? "").toLowerCase().includes(q),
-      );
     if (cuisine !== "all") out = out.filter((i) => i.cuisine === cuisine);
     if (difficulty !== "all")
       out = out.filter((i) => (i.difficulty ?? "").toLowerCase() === difficulty);
@@ -250,12 +246,7 @@ export function RecipesView({ uid }: { uid: string }) {
   // Tonight's pick: prefer weeknight-quick dishes (≤45 min), fall back to the whole cookbook.
   // Only on the pristine browse view — never over search/filter results or grocery mode.
   const pristine =
-    !selecting &&
-    !favOnly &&
-    !deferredQuery.trim() &&
-    cuisine === "all" &&
-    difficulty === "all" &&
-    time === "all";
+    !selecting && !favOnly && cuisine === "all" && difficulty === "all" && time === "all";
   const quick = deduped.filter((i) => {
     const m = parseMinutes(i.total_time);
     return m != null && m <= 45;
@@ -298,18 +289,8 @@ export function RecipesView({ uid }: { uid: string }) {
         </button>
       </div>
 
-      {/* Search + compact icon filters, all on one row */}
-      <div className="flex items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your recipes"
-            className={`w-full rounded-full border border-border bg-card py-1.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
-          />
-        </div>
+      {/* Compact icon filters, all on one row */}
+      <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {cuisineNames.length > 0 && (
           <IconSelect
             icon={<Globe className="h-4 w-4" />}
@@ -420,7 +401,7 @@ export function RecipesView({ uid }: { uid: string }) {
           <ChefHat className="mx-auto h-10 w-10 text-ink-soft/50" />
           <p className="mt-4 font-medium text-ink">Save a recipe and it lands here</p>
           <p className="mt-1 text-sm text-ink-soft">
-            Share a recipe link and we’ll pull the ingredients, steps and photo into your cookbook —
+            Share a recipe link and we’ll pull the ingredients, steps and photo into your cookbook,
             then select a few to build a combined grocery list.
           </p>
         </div>

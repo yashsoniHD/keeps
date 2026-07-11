@@ -94,7 +94,11 @@ export const RecipeCard = memo(function RecipeCard({
           </button>
         ) : (
           <>
-            <Link to="/recipes/$itemId" params={{ itemId: item.id }} className={`press block rounded-xl shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}>
+            <Link
+              to="/recipes/$itemId"
+              params={{ itemId: item.id }}
+              className={`press block rounded-xl shadow-sm transition-shadow hover:shadow-md ${FOCUS_RING}`}
+            >
               <RecipeImage item={item} />
             </Link>
             <button
@@ -115,9 +119,7 @@ export const RecipeCard = memo(function RecipeCard({
       </div>
 
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-ink" title={item.title}>
-          {item.title}
-        </p>
+        <p className="break-words text-sm font-medium text-ink">{item.title}</p>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-soft">
           {/* Cuisine in the serif italic voice — a cookbook whisper (time moved onto the photo). */}
           {item.cuisine && (

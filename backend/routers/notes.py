@@ -20,6 +20,7 @@ from services.firebase import (
     prune_category_if_empty,
 )
 from services.gemini import match_existing, normalize_slug
+from services.item_reconcile import reconcile_note_items
 
 router = APIRouter(tags=["notes"])
 
@@ -180,6 +181,11 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
         # If this note was the last of its previous type, retire that now-empty category.
         if old_ct and old_ct != slug:
             await prune_category_if_empty(user_id, old_ct)
+        # Reconcile the mini-app item docs: a note recategorised out of a family (e.g. product →
+        # software) must drop its now-orphaned items, and one moved into a family gets fanned out.
+        # Best-effort — a reconciliation failure must never fail the category change.
+        if old_ct != slug:
+            await reconcile_note_items(user_id, note_id, old_ct, slug)
 
     # Move to a smart bucket (or the catch-all). "sent" is distinguished from "omitted" so a PATCH
     # that never mentions collection_id doesn't clobber membership.

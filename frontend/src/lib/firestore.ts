@@ -324,6 +324,52 @@ export async function getManualNotesCount(userId: string): Promise<number> {
   return snap.data().count;
 }
 
+// One-shot aggregate counts for the five mini-app subcollections, for the Collections launcher
+// tiles. A snapshot on mount is enough (no listener) — these are quiet counts, not a live wall.
+export type MiniAppItemCounts = {
+  watchlist: number;
+  wishlist: number;
+  places: number;
+  recipes: number;
+  trips: number;
+};
+
+const MINI_APP_SUBCOLLECTIONS: Record<keyof MiniAppItemCounts, string> = {
+  watchlist: "watch_items",
+  wishlist: "wish_items",
+  places: "place_items",
+  recipes: "recipe_items",
+  trips: "trip_items",
+};
+
+export async function getMiniAppItemCounts(userId: string): Promise<MiniAppItemCounts> {
+  const entries = await Promise.all(
+    (Object.entries(MINI_APP_SUBCOLLECTIONS) as [keyof MiniAppItemCounts, string][]).map(
+      async ([key, sub]) => {
+        const snap = await getCountFromServer(collection(db, "users", userId, sub));
+        return [key, snap.data().count] as const;
+      },
+    ),
+  );
+  return Object.fromEntries(entries) as MiniAppItemCounts;
+}
+
+// Note count for a single user-created collection — equality-only aggregate (user_id +
+// collection_id, no orderBy) so it needs no composite index. Best-effort: callers should
+// treat a rejected promise as "unknown" rather than block the tile on it.
+export async function getCollectionNoteCount(
+  userId: string,
+  collectionId: string,
+): Promise<number> {
+  const q = query(
+    collection(db, "notes"),
+    where("user_id", "==", userId),
+    where("collection_id", "==", collectionId),
+  );
+  const snap = await getCountFromServer(q);
+  return snap.data().count;
+}
+
 // The user's region (ISO-3166-1 alpha-2) — feeds streaming availability and reservation
 // links on enriched notes. Empty when never set.
 export async function getUserRegion(userId: string): Promise<string> {

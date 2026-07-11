@@ -330,7 +330,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
           </span>
           <p className="mt-3 font-serif text-lg text-ink">Nothing filed here yet</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
-            New saves that match this collection land here automatically — or move a note in from
+            New saves that match this collection land here automatically, or move a note in from
             its ⋯ menu.
           </p>
         </div>

@@ -177,6 +177,33 @@ async def test_add_by_place_id_raises_on_miss(fake_db, monkeypatch):
         await pl.add_by_place_id("u", "nope")
 
 
+async def test_city_normalized_via_alias_map_without_places_locality(fake_db):
+    """No 'locality' in fake_details (matches the fixture's shape) — the alias map alone must
+    still collapse 'Bangalore' to 'Bengaluru' on the place_item."""
+    await pl.enrich_places("u", "n1", [{"name": "Blue Tokai", "city": "Bangalore"}])
+    assert fake_db.docs[(COL, "g_p1")]["city"] == "Bengaluru"
+
+
+async def test_city_normalized_via_places_locality_when_present(fake_db, monkeypatch):
+    async def fake_details(place_id):
+        return {"place_id": "p1", "name": "Blue Tokai Coffee", "locality": "Bengaluru",
+                "photo_url": "https://lh3/p1.jpg"}
+    monkeypatch.setattr(google_places, "place_details", fake_details)
+
+    await pl.enrich_places("u", "n1", [{"name": "Blue Tokai", "city": "Bangalore"}])
+    assert fake_db.docs[(COL, "g_p1")]["city"] == "Bengaluru"
+
+
+async def test_add_by_place_id_normalizes_city(fake_db, monkeypatch):
+    async def fake_details(place_id):
+        return {"place_id": "p1", "name": "Blue Tokai Coffee",
+                "formatted_address": "Bandra, Bangalore", "locality": "Bengaluru"}
+    monkeypatch.setattr(google_places, "place_details", fake_details)
+
+    doc_id = await pl.add_by_place_id("u", "p1")
+    assert fake_db.docs[(COL, doc_id)]["city"] == "Bengaluru"
+
+
 async def test_backfill_reads_venues_and_filters_non_places(fake_db, monkeypatch):
     fake_db.seed("notes", "pl1", {"user_id": "u", "content_type": "place",
                                   "title": "Bandra cafes", "data": {"venues": [

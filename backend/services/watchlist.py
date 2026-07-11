@@ -124,10 +124,28 @@ async def enrich_titles(uid: str, source_id: str, titles: list[dict],
         year = t.get("year")
         media_hint = t.get("mediaType")
         try:
-            hit = await tmdb.search_title(title, year, media_hint)
             providers: list[dict] = []
-            if hit:
-                providers = await tmdb.watch_providers(hit.tmdb_id, hit.media_type, region)
+            item_region = region
+            if t.get("tmdb_id"):
+                # Title already TMDB-enriched — `enrich_note_data` merged tmdb_id / poster /
+                # providers onto the note's titles[] at ingest. Reuse those fields instead of
+                # re-doing the search/providers lookups (zero TMDB traffic, not even cache reads).
+                hit = tmdb.TmdbHit(
+                    tmdb_id=t["tmdb_id"],
+                    media_type=t.get("mediaType") or media_hint or "movie",
+                    title=title,
+                    year=year,
+                    poster_url=t.get("poster_url"),
+                    backdrop_url=t.get("backdrop_url"),
+                    overview=t.get("overview"),
+                    genres=t.get("genres") or [],
+                )
+                providers = t.get("providers") or []
+                item_region = t.get("providers_region") or region
+            else:
+                hit = await tmdb.search_title(title, year, media_hint)
+                if hit:
+                    providers = await tmdb.watch_providers(hit.tmdb_id, hit.media_type, region)
 
             doc_id = _doc_id(hit, title, year)
             ref = db.collection("users").document(uid).collection("watch_items").document(doc_id)
@@ -157,7 +175,7 @@ async def enrich_titles(uid: str, source_id: str, titles: list[dict],
                     "overview": hit.overview,
                     "genres": hit.genres,
                     "providers": providers,
-                    "providers_region": region,
+                    "providers_region": item_region,
                 })
 
             if not existing.exists:

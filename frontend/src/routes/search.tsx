@@ -132,7 +132,7 @@ function SearchScreen() {
           <div className="flex flex-col items-center gap-3 py-24 text-center text-ink-soft">
             <SearchIcon className="h-8 w-8" />
             <p className="max-w-xs text-sm">
-              Search everything you've saved — by topic, title, or place name.
+              Search everything you've saved: by topic, title, or place name.
             </p>
           </div>
         ) : status === "searching" ? (

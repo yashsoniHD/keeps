@@ -18,6 +18,9 @@ import {
   ArrowLeft,
   Pin,
   Settings as SettingsIcon,
+  LayoutGrid,
+  LayoutDashboard,
+  Rows3,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -43,8 +46,15 @@ import {
 } from "@/lib/capture-queue";
 import { groupNotesByDate, sourceLabel } from "@/lib/note-meta";
 import { setFeedOrder } from "@/lib/note-nav";
+import { getCached, hasCached, setCached } from "@/lib/swr-cache";
 import { FOCUS_RING } from "@/lib/ui";
-import { NoteCard, NoteRowList, ProcessingCard, FailedCard } from "@/components/NoteCard";
+import {
+  NoteCard,
+  NoteRowList,
+  ProcessingCard,
+  FailedCard,
+  BoardCard,
+} from "@/components/NoteCard";
 import { NoteMenuProvider } from "@/components/NoteContextMenu";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
@@ -52,7 +62,7 @@ import { AddNoteSheet } from "@/components/AddNoteSheet";
 import { AppShell } from "@/components/AppShell";
 import { CategoryChips, CollectionsMenu } from "@/components/feed/CategoryFilter";
 import { ClipMark, ClipLoader } from "@/components/ClipMark";
-import { useLayout } from "@/lib/layout";
+import type { Layout } from "@/lib/layout";
 import type { Note, Job, Collection } from "@/lib/types";
 
 // The notes feed. Home (`/`) is the ONE feed (Feed with `home`). The old `/notes` view was a
@@ -68,6 +78,48 @@ export const Route = createFileRoute("/notes/")({
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+
+// Feed view: the two Settings-owned layouts (Cards / Compact) plus a feed-only "board" — a
+// Pinterest-style masonry that celebrates cover imagery. We deliberately reuse the SAME
+// localStorage key + sync event as @/lib/layout so this and the Settings toggle stay
+// consistent for the shared values; "board" is a third value Settings simply doesn't offer
+// (its segmented control just shows neither option selected while board is active). Kept local
+// here because the shared `Layout` union — and the Settings control — are owned elsewhere.
+type FeedView = Layout | "board";
+const LAYOUT_KEY = "clipnote.layout";
+const LAYOUT_EVENT = "clipnote:layout";
+
+function readFeedView(): FeedView {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    return v === "condensed" || v === "board" ? v : "standard";
+  } catch {
+    return "standard";
+  }
+}
+
+function useFeedView(): [FeedView, (next: FeedView) => void] {
+  const [view, setView] = useState<FeedView>(readFeedView);
+  useEffect(() => {
+    const sync = () => setView(readFeedView());
+    window.addEventListener(LAYOUT_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(LAYOUT_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const set = (next: FeedView) => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, next);
+    } catch {
+      /* private mode — the in-memory state below still applies for this session */
+    }
+    setView(next);
+    window.dispatchEvent(new Event(LAYOUT_EVENT));
+  };
+  return [view, set];
+}
 
 // A source-filter option: either a web domain (rendered with its favicon) or a synthetic
 // "manual" group for captures that have no web source (typed/voice/uploaded/Clip-AI notes),
@@ -113,14 +165,33 @@ function presentManualSources(notes: Note[]): Set<string> {
 // resolves if first-run extraction ever looks off.
 const SAMPLE_LINK = "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe";
 
-export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: string }) {
+export function Feed({
+  home = false,
+  typeParam,
+  openAsk = false,
+}: {
+  home?: boolean;
+  typeParam?: string;
+  openAsk?: boolean;
+}) {
   const { user, loading } = useAuth();
   useCategoryMeta(); // re-render the feed when category icon/colour overrides load or change
   const navigate = useNavigate();
   const { openChat } = useAsk();
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [notesReady, setNotesReady] = useState(false);
+  const askConsumed = useRef(false);
+  // Seed from the SWR cache so back-navigation renders the last-seen feed instantly instead of
+  // a multi-second skeleton; the live listener below revalidates in the background. Keys are
+  // uid-scoped and the notes key also carries the active type (the server-side filter), so a
+  // filtered view never seeds from the wrong slice. `user`/`typeParam` are stable at mount.
+  const [notes, setNotes] = useState<Note[]>(() =>
+    user ? (getCached<Note[]>(`feed:${user.uid}:${typeParam ?? "all"}`) ?? []) : [],
+  );
+  const [collections, setCollections] = useState<Collection[]>(() =>
+    user ? (getCached<Collection[]>(`collections:${user.uid}`) ?? []) : [],
+  );
+  const [notesReady, setNotesReady] = useState(() =>
+    user ? hasCached(`feed:${user.uid}:${typeParam ?? "all"}`) : false,
+  );
   const [feedError, setFeedError] = useState(false);
   const [max, setMax] = useState(50);
   const [userCategories, setUserCategories] = useState<string[]>([]);
@@ -129,9 +200,10 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  // Read-only here — the view toggle now lives in Settings (Appearance). The hook keeps this in
-  // sync via localStorage, so changing it there and returning to the feed reflects immediately.
-  const [layout] = useLayout();
+  // Feed view (Cards / Board / Compact). Toggled in-feed (FeedViewToggle) and, for the two
+  // shared values, in Settings; both write the same localStorage key + event, so they stay in
+  // sync. Board is a feed-only masonry that Settings doesn't surface.
+  const [layout, setLayout] = useFeedView();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
     try {
@@ -162,6 +234,7 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
         setNotes(n);
         setNotesReady(true);
         setFeedError(false);
+        setCached(`feed:${user.uid}:${active}`, n); // warm cache for instant back-nav
       },
       {
         max,
@@ -193,13 +266,30 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
   // "Add to collection" list without a per-open fetch.
   useEffect(() => {
     if (!user) return;
-    return watchCollections(user.uid, setCollections, { onError: () => {} });
+    return watchCollections(
+      user.uid,
+      (c) => {
+        setCollections(c);
+        setCached(`collections:${user.uid}`, c);
+      },
+      { onError: () => {} },
+    );
   }, [user]);
 
   // Follow a `?type=` deep link from the Library (and clearing it) into the chip filter.
   useEffect(() => {
     setActive(typeParam ?? "all");
   }, [typeParam]);
+
+  // A `?ask=1` deep link (old /ask bookmarks redirect here) opens Clip AI once, then the param
+  // is cleared so a refresh or Back doesn't reopen it. Idempotent via the ref guard.
+  useEffect(() => {
+    if (!openAsk || askConsumed.current) return;
+    askConsumed.current = true;
+    openChat();
+    // Drop `?ask=1` (keep any active ?type=) so a refresh/Back doesn't reopen the chat.
+    navigate({ to: "/", search: typeParam ? { type: typeParam } : {}, replace: true });
+  }, [openAsk, openChat, navigate, typeParam]);
 
   // Set the active category AND mirror it into the URL (?type=…) on the home feed, so opening a
   // note and pressing Back returns to the same category instead of resetting to All. `replace`
@@ -685,71 +775,66 @@ export function Feed({ home = false, typeParam }: { home?: boolean; typeParam?: 
               />
             )
           ) : (
-            <div className="space-y-8">
-              {/* In-flight captures ("just now") sit above the dated groups. */}
-              {(failedJobs.length > 0 ||
-                queuedJobs.length > 0 ||
-                deferredJobs.length > 0 ||
-                pendingJobs.length > 0) &&
-                (layout === "condensed" ? (
-                  <NoteRowList
-                    notes={[]}
-                    jobs={pendingJobs}
-                    queuedJobs={queuedJobs}
-                    deferredJobs={deferredJobs}
-                    failedJobs={failedJobs}
-                    onRetry={retryJob}
-                    onDismiss={dismissJob}
-                  />
-                ) : (
-                  <section className={GRID_CLS}>
-                    {failedJobs.map((j) => (
-                      <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
-                    ))}
-                    {deferredJobs.map((j) => (
-                      <ProcessingCard key={j.id} job={j} label="Queued — high demand" />
-                    ))}
-                    {queuedJobs.map((j) => (
-                      <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
-                    ))}
-                    {pendingJobs.map((j) => (
-                      <ProcessingCard key={j.id} job={j} />
-                    ))}
-                  </section>
-                ))}
-
-              {pinnedNotes.length > 0 && (
-                <div>
-                  <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
-                    <Pin className="h-3.5 w-3.5" />
-                    Pinned
-                  </h2>
-                  {layout === "condensed" ? (
-                    <NoteRowList notes={pinnedNotes} />
+            <div className="space-y-5">
+              <div className="flex justify-end">
+                <FeedViewToggle view={layout} setView={setLayout} />
+              </div>
+              <div className="space-y-8">
+                {/* In-flight captures ("just now") sit above the dated groups. */}
+                {(failedJobs.length > 0 ||
+                  queuedJobs.length > 0 ||
+                  deferredJobs.length > 0 ||
+                  pendingJobs.length > 0) &&
+                  (layout === "condensed" ? (
+                    <NoteRowList
+                      notes={[]}
+                      jobs={pendingJobs}
+                      queuedJobs={queuedJobs}
+                      deferredJobs={deferredJobs}
+                      failedJobs={failedJobs}
+                      onRetry={retryJob}
+                      onDismiss={dismissJob}
+                    />
                   ) : (
-                    <NoteGrid notes={pinnedNotes} />
-                  )}
-                </div>
-              )}
+                    <section className={GRID_CLS}>
+                      {failedJobs.map((j) => (
+                        <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
+                      ))}
+                      {deferredJobs.map((j) => (
+                        <ProcessingCard key={j.id} job={j} label="Queued, high demand" />
+                      ))}
+                      {queuedJobs.map((j) => (
+                        <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
+                      ))}
+                      {pendingJobs.map((j) => (
+                        <ProcessingCard key={j.id} job={j} />
+                      ))}
+                    </section>
+                  ))}
 
-              {dateGroups ? (
-                dateGroups.map((g) => (
-                  <div key={g.key}>
-                    <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
-                      {g.label}
+                {pinnedNotes.length > 0 && (
+                  <div>
+                    <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+                      <Pin className="h-3.5 w-3.5" />
+                      Pinned
                     </h2>
-                    {layout === "condensed" ? (
-                      <NoteRowList notes={g.notes} />
-                    ) : (
-                      <NoteGrid notes={g.notes} />
-                    )}
+                    <NotesView notes={pinnedNotes} layout={layout} />
                   </div>
-                ))
-              ) : layout === "condensed" ? (
-                <NoteRowList notes={displayNotes} />
-              ) : (
-                <NoteGrid notes={displayNotes} />
-              )}
+                )}
+
+                {dateGroups ? (
+                  dateGroups.map((g) => (
+                    <div key={g.key}>
+                      <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
+                        {g.label}
+                      </h2>
+                      <NotesView notes={g.notes} layout={layout} />
+                    </div>
+                  ))
+                ) : (
+                  <NotesView notes={displayNotes} layout={layout} />
+                )}
+              </div>
             </div>
           )}
 
@@ -918,6 +1003,14 @@ function SourceFilter({
   );
 }
 
+// Picks the card layout for a slice of notes. Cards (grid) / Compact (ledger rows) / Board
+// (masonry) — one switch so every render site (pinned, each date group, search) stays in step.
+function NotesView({ notes, layout }: { notes: Note[]; layout: FeedView }) {
+  if (layout === "condensed") return <NoteRowList notes={notes} />;
+  if (layout === "board") return <BoardMasonry notes={notes} />;
+  return <NoteGrid notes={notes} />;
+}
+
 // A responsive grid of note cards, each isolated by an error boundary so one bad note
 // can't blank the whole feed.
 function NoteGrid({ notes }: { notes: Note[] }) {
@@ -929,6 +1022,56 @@ function NoteGrid({ notes }: { notes: Note[] }) {
         </ErrorBoundary>
       ))}
     </section>
+  );
+}
+
+// Pinterest-style masonry: CSS multi-column (2 on mobile → 3/4 on wider screens) with
+// break-inside-avoid so each image-forward tile stays whole. Column-gap comes from `gap-3`;
+// row spacing from the item margin. Same error-boundary isolation as the grid.
+function BoardMasonry({ notes }: { notes: Note[] }) {
+  return (
+    <section className="columns-2 gap-3 sm:columns-3 lg:columns-4 [column-fill:_balance]">
+      {notes.map((n) => (
+        <div key={n.id} className="mb-3 break-inside-avoid">
+          <ErrorBoundary label="feed-board-card" fallback={<FallbackNoteCard note={n} />}>
+            <BoardCard note={n} />
+          </ErrorBoundary>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// In-feed view switcher: Cards / Board / Compact. Persists via the shared layout key (see
+// useFeedView), so switching here mirrors into Settings for the two shared values. Icon-only
+// to stay compact above the stream.
+function FeedViewToggle({ view, setView }: { view: FeedView; setView: (v: FeedView) => void }) {
+  const options = [
+    { value: "standard", label: "Cards", icon: LayoutGrid },
+    { value: "board", label: "Board", icon: LayoutDashboard },
+    { value: "condensed", label: "Compact", icon: Rows3 },
+  ] as const;
+  return (
+    <div className="inline-flex shrink-0 rounded-full border border-border bg-card p-0.5">
+      {options.map((opt) => {
+        const isActive = view === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => setView(opt.value)}
+            aria-label={`${opt.label} view`}
+            aria-pressed={isActive}
+            title={opt.label}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+              isActive ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+            } ${FOCUS_RING}`}
+          >
+            <opt.icon className="h-4 w-4" />
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -959,7 +1102,7 @@ function EmptyState({ hasNotes, onTrySample }: { hasNotes: boolean; onTrySample?
       <p className="mt-2 text-sm text-ink-soft">
         {hasNotes
           ? "Try a different search or filter."
-          : "Tap + to clip your first link — or see one in action."}
+          : "Tap + to clip your first link, or see one in action."}
       </p>
       {!hasNotes && onTrySample && (
         <button

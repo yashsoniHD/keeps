@@ -16,6 +16,7 @@ import { watchWishItem, getNote } from "@/lib/firestore";
 import { updateWishItem, deleteWishItem } from "@/lib/api";
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
+import { formatPrice } from "@/lib/format";
 import type { WishItem } from "@/lib/types";
 
 const PRODUCT = paletteAccent(2);
@@ -89,6 +90,7 @@ export function ProductDetail({
     item.target_price != null &&
     item.price_amount != null &&
     item.price_amount <= item.target_price;
+  const priceLabel = formatPrice(item.price_amount, item.currency, item.price_raw);
 
   // Bought ↔ Saved. Undoing a purchase always lands in `saved` (never back to legacy `to_buy`).
   const toggleBought = () =>
@@ -135,9 +137,7 @@ export function ProductDetail({
           <h1 className="mt-1 font-serif text-2xl text-ink sm:text-3xl">{item.title}</h1>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-            {item.price_raw && (
-              <span className="text-xl font-semibold text-ink">{item.price_raw}</span>
-            )}
+            {priceLabel && <span className="text-xl font-semibold text-ink">{priceLabel}</span>}
             {item.rating ? (
               <span className="inline-flex items-center gap-1 text-sm text-ink-soft">
                 <Star className="h-4 w-4 fill-favorite text-favorite" />

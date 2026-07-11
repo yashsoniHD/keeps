@@ -6,7 +6,6 @@ import {
   Smartphone,
   Copy,
   Check,
-  X,
   Download,
   BarChart3,
   Share2,
@@ -18,7 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useLayout } from "@/lib/layout";
-import { ADMIN_EMAILS } from "@/routes/admin";
+import { checkAdminAccess } from "@/routes/admin";
 import { createToken, listTokens, revokeToken, type ShortcutToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { CategoriesSection } from "@/components/CategoriesSection";
@@ -47,10 +46,29 @@ function Settings() {
   const navigate = useNavigate();
   const [signOutConfirm, setSignOutConfirm] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
+
+  // Only the server knows who's an admin (ADMIN_EMAILS is a Cloud Run env var, never
+  // shipped to the client). Probe once per session — the shared cache means this is a
+  // no-op network-wise if /admin already ran it, and vice versa.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    checkAdminAccess()
+      .then(() => {
+        if (!cancelled) setIsAdmin(true);
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -131,7 +149,7 @@ function Settings() {
             {shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
             {shareCopied ? "Link copied!" : "Share the app"}
           </button>
-          {!!user.email && ADMIN_EMAILS.has(user.email.toLowerCase()) && (
+          {isAdmin && (
             <Link
               to="/admin"
               className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
@@ -342,42 +360,42 @@ function ConnectPhone() {
         Capture from your phone
       </h2>
 
-      <div className="mt-4 space-y-2 text-sm text-ink-soft">
+      <div className="mt-4 divide-y divide-border">
         {showAndroid && (
-          <p>
-            <strong className="text-ink">Android:</strong> install Clipnote from the browser menu
-            ("Add to Home screen"), and it then appears in your share sheet.
-          </p>
+          <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
+            <div>
+              <div className="text-sm font-medium text-ink">Android</div>
+              <div className="text-xs text-ink-soft">Appears in your share sheet after install.</div>
+            </div>
+            {installPrompt && (
+              <button
+                type="button"
+                onClick={handleInstall}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Install
+              </button>
+            )}
+          </div>
         )}
-        {showIOS && (
-          <p>
-            <strong className="text-ink">iPhone:</strong> one tap sets up a Shortcut so any app's
-            share sheet can save straight to Clipnote.
-          </p>
+        {showIOS && !newToken && (
+          <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
+            <div>
+              <div className="text-sm font-medium text-ink">iPhone</div>
+              <div className="text-xs text-ink-soft">One-tap Shortcut for any app's share sheet.</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={creating}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {creating ? "Setting up…" : "Add shortcut"}
+            </button>
+          </div>
         )}
       </div>
-
-      {showAndroid && installPrompt && (
-        <button
-          type="button"
-          onClick={handleInstall}
-          className="mt-4 inline-flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
-        >
-          <Download className="h-4 w-4" />
-          Install Clipnote
-        </button>
-      )}
-
-      {showIOS && !newToken && (
-        <button
-          type="button"
-          onClick={handleAdd}
-          disabled={creating}
-          className="mt-4 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {creating ? "Setting up…" : "Add iPhone shortcut"}
-        </button>
-      )}
 
       {showIOS && newToken && (
         <div className="mt-4 rounded-2xl border border-border bg-paper p-4">
@@ -485,11 +503,11 @@ function ConnectPhone() {
       {tokens.length > 0 && (
         <div className="mt-5 border-t border-border pt-4">
           <div className="text-xs uppercase tracking-wider text-ink-soft">Connected devices</div>
-          <ul className="mt-2 divide-y divide-border">
+          <ul className="mt-1 divide-y divide-border">
             {tokens.map((t) => (
               <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
                 <div>
-                  <div className="text-sm font-medium text-ink">{t.label}</div>
+                  <div className="text-sm text-ink">{t.label}</div>
                   <div className="text-xs text-ink-soft">
                     {t.last_used_at ? "Used recently" : "Never used"}
                   </div>
@@ -497,9 +515,8 @@ function ConnectPhone() {
                 <button
                   type="button"
                   onClick={() => handleRevoke(t.id)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:border-destructive/40 hover:text-destructive"
+                  className="shrink-0 text-xs text-ink-soft transition-colors hover:text-destructive"
                 >
-                  <X className="h-3 w-3" />
                   Revoke
                 </button>
               </li>

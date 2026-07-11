@@ -82,3 +82,52 @@ async def test_unmatched_family_is_a_no_op():
     out, cover = await enrich.enrich_note_data("u", "article", dict(data), None)
     assert out == data
     assert cover is None
+
+
+# --- city normalization (pure) --------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Bangalore", "Bengaluru"),
+    ("bangalore", "Bengaluru"),   # case-insensitive
+    (" Bangalore ", "Bengaluru"),  # trimmed before lookup
+    ("Bombay", "Mumbai"),
+    ("Madras", "Chennai"),
+    ("Calcutta", "Kolkata"),
+    ("Gurgaon", "Gurugram"),
+    ("Bengaluru", "Bengaluru"),  # already canonical -> unchanged
+    ("Goa", "Goa"),              # no alias -> passthrough as-is
+    ("", None),
+    (None, None),
+    (123, None),                 # non-string input never raises
+])
+def test_normalize_city_aliases(raw, expected):
+    assert enrich.normalize_city(raw) == expected
+
+
+async def test_place_venue_prefers_places_locality_over_source_city(monkeypatch):
+    from services.google_places import PlaceHit
+
+    async def fake_search(name, location=None, region=None):
+        return PlaceHit(place_id="p1", name="Blue Tokai")
+
+    async def fake_details(place_id):
+        return {"place_id": "p1", "name": "Blue Tokai", "locality": "Bengaluru",
+                "photo_url": "https://lh3/p1.jpg"}
+
+    monkeypatch.setattr(enrich.google_places, "search_place", fake_search)
+    monkeypatch.setattr(enrich.google_places, "place_details", fake_details)
+
+    data = {"venues": [{"name": "Blue Tokai", "city": "Bangalore"}]}
+    out, _ = await enrich.enrich_note_data("u", "place", data, None)
+    assert out["venues"][0]["city"] == "Bengaluru"  # Places locality wins over source text
+
+
+async def test_place_venue_falls_back_to_alias_map_without_a_places_match(monkeypatch):
+    async def fake_search(name, location=None, region=None):
+        return None  # no Google match at all
+
+    monkeypatch.setattr(enrich.google_places, "search_place", fake_search)
+
+    data = {"venues": [{"name": "Hidden Gem", "city": "Bangalore"}]}
+    out, _ = await enrich.enrich_note_data("u", "place", data, None)
+    assert out["venues"][0]["city"] == "Bengaluru"  # alias map alone still normalizes

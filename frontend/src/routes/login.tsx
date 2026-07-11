@@ -5,10 +5,10 @@ import {
   MapPin,
   Plane,
   ShoppingBag,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ClipMark } from "@/components/ClipMark";
 import { useAuth } from "@/contexts/auth-context";
 
 // The promise, shown not told: the kinds of saves that become rich structured notes, each in
@@ -50,8 +50,16 @@ function LoginPage() {
     setError(null);
     try {
       await signInWithGoogle();
-    } catch {
-      setError("Sign-in didn't complete. Please try again.");
+    } catch (err) {
+      // Surface the Firebase error code (e.g. auth/unauthorized-domain,
+      // auth/popup-blocked) — the generic message alone made failures undiagnosable.
+      const code = (err as { code?: string })?.code;
+      console.error("[auth] sign-in failed:", code ?? err);
+      setError(
+        code === "auth/popup-closed-by-user"
+          ? "Sign-in was cancelled."
+          : `Sign-in didn't complete${code ? ` (${code})` : ""}. Please try again.`,
+      );
     }
   };
 
@@ -59,7 +67,7 @@ function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm text-center">
         <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-ink text-paper">
-          <Sparkles className="h-8 w-8" />
+          <ClipMark className="h-8 w-8" />
         </div>
         <h1 className="font-serif text-4xl text-ink">Clipnote</h1>
         <p className="mx-auto mt-3 max-w-xs font-serif text-xl leading-snug text-ink">

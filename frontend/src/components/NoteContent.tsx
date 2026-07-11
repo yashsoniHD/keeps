@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { RotateCcw, Sparkles, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
+import { RotateCcw, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
 import type { Note, Collection } from "@/lib/types";
 import { ingest } from "@/lib/api";
+import { ClipMark } from "@/components/ClipMark";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
 import { TypeBadge } from "./note/TypeBadge";
 import { SourcePill } from "./note/SourcePill";
 import { formatDate, noteAccent, noteIcon } from "@/lib/note-meta";
-import { AISummaryBlock } from "./note/AISummaryBlock";
 import { ThoughtsBlock } from "./note/ThoughtsBlock";
 import { RecipeNote } from "./note/templates/RecipeNote";
 import { ItineraryNote } from "./note/templates/ItineraryNote";
@@ -126,7 +126,7 @@ function FallbackBanner({ note }: { note: Note }) {
   };
   return (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/50 px-4 py-3 text-sm text-ink-soft">
-      <span>Limited preview — we couldn't fully process this capture.</span>
+      <span>Limited preview. We couldn't fully process this capture.</span>
       {/* Retry re-ingests the original URL; a typed/uploaded capture has none, so it's hidden. */}
       {note.source_url && (
         <button
@@ -148,9 +148,9 @@ function FallbackBanner({ note }: { note: Note }) {
 function PublicNoteHeader({ note }: { note: Note }) {
   return (
     <header className="mb-8 flex flex-col gap-5">
-      <Link to="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
+      <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-ink">
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
-          <Sparkles className="h-3.5 w-3.5" />
+          <ClipMark className="h-3.5 w-3.5" />
         </span>
         Clipnote
       </Link>
@@ -240,31 +240,40 @@ function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
 
 // Aspect-ratio of the cover decides the hero layout: a wide, sizeable image
 // (article/recipe/travel hero) becomes a full-width banner; a square/portrait/small image
-// (a creator face or reel thumbnail from a social video) is "compact" and gets paired
-// beside the AI summary by NoteContent, so it never floats over dead space. We measure the
-// image off-screen first so the choice doesn't flash. "loading" reuses the banner-shaped
-// fallback; "none" covers no-cover and broken images alike.
+// (a creator face or reel thumbnail from a social video) is "compact" and renders as a
+// centered contained card so it is never crudely cropped. We measure the image off-screen
+// first so the choice doesn't flash. "loading" reuses the banner-shaped fallback; "none"
+// covers no-cover and broken images alike.
 type CoverKind = "loading" | "none" | "banner" | "compact";
 
-function useCoverKind(url?: string | null): CoverKind {
-  const [kind, setKind] = useState<CoverKind>(url ? "loading" : "none");
+// Returns the layout bucket plus the measured aspect ratio (width / height). The compact
+// branch feeds `ratio` into an aspect-ratio box so a portrait cover shows in full instead of
+// being cropped into a band.
+function useCoverKind(url?: string | null): { kind: CoverKind; ratio: number } {
+  const [state, setState] = useState<{ kind: CoverKind; ratio: number }>(
+    url ? { kind: "loading", ratio: 1 } : { kind: "none", ratio: 1 },
+  );
   useEffect(() => {
     if (!url) {
-      setKind("none");
+      setState({ kind: "none", ratio: 1 });
       return;
     }
-    setKind("loading");
+    setState({ kind: "loading", ratio: 1 });
+    let live = true;
     const img = new Image();
-    img.onload = () =>
-      setKind(
-        img.naturalWidth >= 480 && img.naturalWidth / img.naturalHeight >= 1.3
-          ? "banner"
-          : "compact",
-      );
-    img.onerror = () => setKind("none");
+    img.onload = () => {
+      if (!live) return;
+      const ratio = img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
+      const kind: CoverKind = img.naturalWidth >= 480 && ratio >= 1.3 ? "banner" : "compact";
+      setState({ kind, ratio });
+    };
+    img.onerror = () => live && setState({ kind: "none", ratio: 1 });
     img.src = url;
+    return () => {
+      live = false;
+    };
   }, [url]);
-  return kind;
+  return state;
 }
 
 // Gradient + faded type-icon stand-in so the detail view never reads as empty — the same
@@ -309,7 +318,9 @@ export function NoteContent({
   // Key off the structural template (not the editable category) so a recategorised
   // product doesn't render both its own image and the shared hero.
   const showHero = resolveTemplate(note) !== "product";
-  const coverKind = useCoverKind(showHero ? note.cover_image_url : null);
+  const { kind: coverKind, ratio: coverRatio } = useCoverKind(
+    showHero ? note.cover_image_url : null,
+  );
   const url = note.cover_image_url;
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
@@ -327,30 +338,30 @@ export function NoteContent({
       {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
       {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
-      {showHero && coverKind === "compact" && url ? (
-        // Portrait/small cover (reel thumbnail, creator face): pair it with the AI summary
-        // so the note doesn't open with a lonely thumbnail beside a wall of empty space.
-        <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-start">
-          <div
-            className={`shrink-0 overflow-hidden rounded-3xl border border-border ${noteAccent(note.content_type).soft}`}
-          >
-            <img src={url} alt="" className="h-64 w-full object-cover sm:h-60 sm:w-48" />
+      {showHero &&
+        (coverKind === "compact" && url ? (
+          // Portrait/small cover (reel thumbnail, creator face): a centered, contained card
+          // sized to the image's own aspect (clamped), so it reads as a deliberate poster
+          // instead of a cropped band or a lonely thumbnail.
+          <div className="mb-8 flex justify-center">
+            <div
+              className={`w-full max-w-[16rem] overflow-hidden rounded-3xl border border-border ${noteAccent(note.content_type).soft}`}
+            >
+              <img
+                src={url}
+                alt=""
+                style={{ aspectRatio: Math.min(Math.max(coverRatio, 0.62), 1.4) }}
+                className="w-full object-cover"
+              />
+            </div>
           </div>
-          <AISummaryBlock summary={note.ai_summary} className="min-w-0 flex-1 sm:self-stretch" />
-        </div>
-      ) : (
-        <>
-          {showHero &&
-            (coverKind === "banner" && url ? (
-              <div className="mb-8 overflow-hidden rounded-3xl border border-border">
-                <img src={url} alt="" className="h-56 w-full object-cover md:h-72" />
-              </div>
-            ) : (
-              <CoverFallback note={note} className="mb-8 h-56 w-full md:h-72" />
-            ))}
-          <AISummaryBlock summary={note.ai_summary} />
-        </>
-      )}
+        ) : coverKind === "banner" && url ? (
+          <div className="mb-8 overflow-hidden rounded-3xl border border-border">
+            <img src={url} alt="" className="h-56 w-full object-cover md:h-72" />
+          </div>
+        ) : (
+          <CoverFallback note={note} className="mb-8 h-56 w-full md:h-72" />
+        ))}
       <div className="mt-8">
         {/* onPatch is owner-only (undefined on the public view), so the editable body block
             inside GenericNote stays read-only for shared notes. */}

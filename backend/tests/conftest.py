@@ -7,6 +7,15 @@ except Exception:  # pragma: no cover — firestore absent in a minimal env
     _Increment = None
 
 
+def _match_filter(doc: dict, field: str, op: str, val) -> bool:
+    """Evaluate one where() clause against a doc. Supports the ops the code under test uses:
+    "==" and "array_contains" (membership in a list-valued field)."""
+    if op == "array_contains":
+        cur = doc.get(field)
+        return isinstance(cur, (list, tuple)) and val in cur
+    return doc.get(field) == val
+
+
 def _resolve_transforms(base: dict, data: dict) -> dict:
     """Apply Firestore field transforms (Increment) against the current doc so tests read
     plain numbers, matching what the real server materializes."""
@@ -108,7 +117,7 @@ class FakeCollection:
     async def stream(self):
         items = [
             (k[1], v) for k, v in self._db.docs.items()
-            if k[0] == self._name and all(v.get(f) == val for f, op, val in self._filters)
+            if k[0] == self._name and all(_match_filter(v, f, op, val) for f, op, val in self._filters)
             and (not self._require_embedding or v.get("embedding") is not None)
         ]
         if self._order:
@@ -134,7 +143,7 @@ class FakeAggregation:
         n = sum(
             1 for k, v in self._coll._db.docs.items()
             if k[0] == self._coll._name
-            and all(v.get(f) == val for f, op, val in self._coll._filters)
+            and all(_match_filter(v, f, op, val) for f, op, val in self._coll._filters)
         )
         return [[_FakeAggResult(n)]]
 

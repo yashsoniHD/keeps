@@ -11,7 +11,6 @@ import {
   FileText,
   Loader2,
   Plus,
-  Play,
 } from "lucide-react";
 import { watchWatchItem, getNote, getJob } from "@/lib/firestore";
 import { getWatchItemDetails, updateWatchItem, deleteWatchItem } from "@/lib/api";
@@ -42,19 +41,6 @@ function domainOf(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-// A recognisable call-to-action for the link a title was saved from. Video platforms get a
-// "Watch on …" label with a play glyph; anything else is a neutral "View source".
-function sourceCta(domain: string | null): { label: string; video: boolean } {
-  const d = (domain ?? "").toLowerCase();
-  if (d.includes("instagram")) return { label: "Watch on Instagram", video: true };
-  if (d.includes("youtube") || d.includes("youtu.be"))
-    return { label: "Watch on YouTube", video: true };
-  if (d.includes("tiktok")) return { label: "Watch on TikTok", video: true };
-  if (d.includes("facebook") || d === "fb.watch")
-    return { label: "Watch on Facebook", video: true };
-  return { label: domain ? `View on ${domain}` : "View source", video: false };
 }
 
 // The movie/show detail page: backdrop hero, overview, cast, where-to-watch, your status +
@@ -144,7 +130,6 @@ export function MovieDetail({
   const overview = item.overview ?? details.overview ?? null;
   const genres = item.genres?.length ? item.genres : (details.genres ?? []);
   const runtime = runtimeLabel(details, item);
-  const providers = item.providers ?? [];
   // Where this title was saved from: the doc's own link, else the recovered legacy one.
   const sourceUrl = item.source_url || fallbackSource?.url || null;
   const sourceDomain =
@@ -215,26 +200,19 @@ export function MovieDetail({
             ) : null}
           </div>
 
-          {/* The video/page this title was saved from — a clear CTA, not a footnote. */}
-          {sourceUrl &&
-            (() => {
-              const cta = sourceCta(sourceDomain);
-              return (
-                <a
-                  href={sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-media-soft hover:text-media ${FOCUS_RING}`}
-                >
-                  {cta.video ? (
-                    <Play className="h-4 w-4 fill-current" />
-                  ) : (
-                    <ExternalLink className="h-4 w-4" />
-                  )}
-                  {cta.label}
-                </a>
-              );
-            })()}
+          {/* Where this title was saved from. This is the captured source link (a reel, article,
+              etc), so it's always a neutral "View on <domain>". */}
+          {sourceUrl && (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-media-soft hover:text-media ${FOCUS_RING}`}
+            >
+              <ExternalLink className="h-4 w-4" />
+              View on {sourceDomain ?? "source"}
+            </a>
+          )}
 
           {genres.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -297,9 +275,7 @@ export function MovieDetail({
                   >
                     <Star
                       className={`h-5 w-5 ${
-                        (item.rating ?? 0) >= n
-                          ? "fill-favorite text-favorite"
-                          : "text-ink-soft/40"
+                        (item.rating ?? 0) >= n ? "fill-favorite text-favorite" : "text-ink-soft/40"
                       }`}
                     />
                   </button>
@@ -314,29 +290,6 @@ export function MovieDetail({
         <section className="mt-8">
           <h2 className="mb-2 text-sm font-semibold text-ink-soft">Overview</h2>
           <p className="text-sm leading-relaxed text-ink">{overview}</p>
-        </section>
-      )}
-
-      {/* Where to watch */}
-      {providers.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold text-ink-soft">
-            Where to watch{item.providers_region ? ` · ${item.providers_region}` : ""}
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {providers.map((p) => (
-              <span
-                key={`${p.type}_${p.name}`}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-ink"
-                title={`${p.name} (${p.type})`}
-              >
-                {p.logo_url && <img src={p.logo_url} alt="" className="h-4 w-4 rounded" />}
-                {p.name}
-                {p.type !== "flatrate" && <span className="text-ink-soft">· {p.type}</span>}
-              </span>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-ink-soft">Streaming data by JustWatch</p>
         </section>
       )}
 

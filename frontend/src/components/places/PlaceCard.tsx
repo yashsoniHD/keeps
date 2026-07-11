@@ -67,10 +67,8 @@ export const PlaceCard = memo(function PlaceCard({ item }: { item: PlaceItem }) 
       </div>
 
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-ink" title={item.name}>
-          {item.name}
-        </p>
-        {subtitle && <p className="truncate text-xs text-ink-soft">{subtitle}</p>}
+        <p className="break-words text-sm font-medium text-ink">{item.name}</p>
+        {subtitle && <p className="line-clamp-2 text-xs text-ink-soft">{subtitle}</p>}
       </div>
 
       {/* Your rating once Been, else Google rating + price level */}
@@ -89,52 +87,6 @@ export const PlaceCard = memo(function PlaceCard({ item }: { item: PlaceItem }) 
           <span className="text-xs text-ink-soft">{item.price_for_two || " "}</span>
         )}
         {item.price_level && <span className="text-xs text-ink-soft">{item.price_level}</span>}
-      </div>
-    </Link>
-  );
-});
-
-// Lean list row — the compact counterpart of PlaceCard, same tap-to-open, no inline action row.
-export const PlaceRow = memo(function PlaceRow({ item }: { item: PlaceItem }) {
-  const visits = visitsLabel(item);
-  return (
-    <Link
-      to="/places/$itemId"
-      params={{ itemId: item.id }}
-      className={`flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-colors hover:bg-place-soft ${FOCUS_RING}`}
-    >
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-place-soft">
-        {item.photo_url ? (
-          <img
-            src={item.photo_url}
-            alt={item.name}
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <MapPin className="h-5 w-5 text-place/50" />
-          </div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <p className="truncate text-sm font-medium text-ink">{item.name}</p>
-          {item.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-favorite text-favorite" />}
-        </div>
-        <p className="truncate text-xs text-ink-soft">
-          {[item.category, item.city].filter(Boolean).join(" · ")}
-        </p>
-        <div className="flex items-center gap-2 text-xs text-ink-soft">
-          {item.rating ? (
-            <span className="inline-flex items-center gap-0.5">
-              <Star className="h-3 w-3 fill-favorite text-favorite" />
-              {item.rating}
-              {item.price_level ? ` · ${item.price_level}` : ""}
-            </span>
-          ) : null}
-          {visits && <span className="text-place">{visits}</span>}
-        </div>
       </div>
     </Link>
   );

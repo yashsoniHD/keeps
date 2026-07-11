@@ -1,6 +1,6 @@
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowDownUp, Clapperboard, Film, Plus, Search, Star, Tv } from "lucide-react";
+import { ArrowDownUp, Clapperboard, Film, Plus, Star } from "lucide-react";
 import { watchWatchItems } from "@/lib/firestore";
 import { updateWatchItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
@@ -66,11 +66,11 @@ function dedupeItems(list: WatchItem[]): WatchItem[] {
 const EMPTY: Record<Queue, { title: string; body: string }> = {
   saved: {
     title: "Save a movie or show and it lands here",
-    body: "Share a reel or a listicle, or add a title directly — each film and series becomes its own card. Tap “+ Watchlist” to move the ones you actually want to watch.",
+    body: "Share a reel or a listicle, or add a title directly. Each film and series becomes its own card. Tap “+ Watchlist” to move the ones you actually want to watch.",
   },
   to_watch: {
     title: "Your watchlist is empty",
-    body: "Add titles from Saved with “+ Watchlist”, or add one directly — this is your hand-picked queue of what to watch next.",
+    body: "Add titles from Saved with “+ Watchlist”, or add one directly. This is your hand-picked queue of what to watch next.",
   },
   watched: {
     title: "Nothing watched yet",
@@ -79,10 +79,9 @@ const EMPTY: Record<Queue, { title: string; body: string }> = {
 };
 
 // The cinema moment: the freshest title with real TMDB art becomes a wide backdrop "marquee"
-// above the poster shelf — title, year & genres over a dark scrim, provider logos in the corner.
+// above the poster shelf — title, year & genres over a dark scrim.
 // Fixed black scrim (not ink/…) so it reads identically in dark mode, where ink flips to white.
 function Marquee({ item, eyebrow }: { item: WatchItem; eyebrow: string }) {
-  const flatrate = (item.providers ?? []).filter((p) => p.type === "flatrate" && p.logo_url);
   return (
     <Link
       to="/watchlist/$itemId"
@@ -114,20 +113,6 @@ function Marquee({ item, eyebrow }: { item: WatchItem; eyebrow: string }) {
             </p>
           )}
         </div>
-        {flatrate.length > 0 && (
-          <div className="flex shrink-0 items-center gap-1.5">
-            {flatrate.slice(0, 3).map((p) => (
-              <img
-                key={p.name}
-                src={p.logo_url!}
-                alt={p.name}
-                title={p.name}
-                loading="lazy"
-                className="h-6 w-6 rounded-md shadow"
-              />
-            ))}
-          </div>
-        )}
       </div>
     </Link>
   );
@@ -167,27 +152,16 @@ export function WatchlistView({ uid }: { uid: string }) {
   const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<WatchItem>(
     uid,
     watchWatchItems,
+    "watchlist",
   );
   const [queue, setQueue] = useState<Queue>("saved");
-  const [query, setQuery] = useState("");
-  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
-  const deferredQuery = useDeferredValue(query);
   const [media, setMedia] = useState<MediaFilter>("all");
-  const [provider, setProvider] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("added");
   const [favOnly, setFavOnly] = useState(false);
   const [adding, setAdding] = useState(false);
 
   // Collapse the same title saved across multiple notes into a single card.
   const deduped = useMemo(() => dedupeItems(items ?? []), [items]);
-
-  // The set of streaming services seen across the user's titles (flatrate), for the filter.
-  const providerNames = useMemo(() => {
-    const s = new Set<string>();
-    for (const i of deduped)
-      for (const p of i.providers ?? []) if (p.type === "flatrate") s.add(p.name);
-    return [...s].sort();
-  }, [deduped]);
 
   // Stable identities (useCallback) so the memoized WatchCards skip re-rendering when
   // unrelated state (search text, filters) changes.
@@ -243,11 +217,7 @@ export function WatchlistView({ uid }: { uid: string }) {
 
   const filterSort = (list: WatchItem[]) => {
     let out = list;
-    const q = deferredQuery.trim().toLowerCase();
-    if (q) out = out.filter((i) => (i.title ?? "").toLowerCase().includes(q));
     if (media !== "all") out = out.filter((i) => i.media_type === media);
-    if (provider !== "all")
-      out = out.filter((i) => (i.providers ?? []).some((p) => p.name === provider));
     const sorted = [...out];
     if (effectiveSort === "year") sorted.sort((a, b) => Number(b.year ?? 0) - Number(a.year ?? 0));
     else if (effectiveSort === "rating") sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
@@ -277,12 +247,7 @@ export function WatchlistView({ uid }: { uid: string }) {
   // never over filtered results (they must stay exact) or the Watched archive. The featured
   // title is pulled out of the grid so it isn't shown twice.
   const pristine =
-    !favOnly &&
-    queue !== "watched" &&
-    !deferredQuery.trim() &&
-    media === "all" &&
-    provider === "all" &&
-    effectiveSort === "added";
+    !favOnly && queue !== "watched" && media === "all" && effectiveSort === "added";
   const marqueeItem = pristine ? shown.find((i) => i.backdrop_url) : undefined;
   const gridItems = marqueeItem ? shown.filter((i) => i.id !== marqueeItem.id) : shown;
 
@@ -323,18 +288,8 @@ export function WatchlistView({ uid }: { uid: string }) {
         </button>
       </div>
 
-      {/* Search + compact icon filters, all on one row */}
-      <div className="flex items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your titles"
-            className={`w-full rounded-full border border-border bg-card py-1.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
-          />
-        </div>
+      {/* Compact icon filters, all on one row */}
+      <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <IconSelect
           icon={<Film className="h-4 w-4" />}
           title="Filter by type"
@@ -347,23 +302,6 @@ export function WatchlistView({ uid }: { uid: string }) {
           <option value="movie">Films</option>
           <option value="tv">TV</option>
         </IconSelect>
-        {providerNames.length > 0 && (
-          <IconSelect
-            icon={<Tv className="h-4 w-4" />}
-            title="Filter by service"
-            value={provider}
-            active={provider !== "all"}
-            activeClass={ACCENT_ACTIVE}
-            onChange={setProvider}
-          >
-            <option value="all">Any service</option>
-            {providerNames.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </IconSelect>
-        )}
         <IconSelect
           icon={<ArrowDownUp className="h-4 w-4" />}
           title="Sort"

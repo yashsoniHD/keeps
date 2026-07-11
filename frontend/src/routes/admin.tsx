@@ -12,12 +12,31 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { adminStats, type AdminStats, type DailyTrend } from "@/lib/api";
+import { ApiError, adminStats, type AdminStats, type DailyTrend } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/admin")({ component: AdminPage });
 
-export const ADMIN_EMAILS = new Set(["yashsoni102@gmail.com"]);
+// There's no separate "am I admin" endpoint — GET /api/admin/stats IS the check (it
+// gates on the server's ADMIN_EMAILS env var before running the expensive query, so a
+// non-admin gets a cheap 401/403). We probe with the real call and cache the in-flight
+// promise at module scope so a Settings-page probe and this page's own load share one
+// network round trip per session. A definitive 401/403 stays cached (that verdict won't
+// change mid-session); any other failure (network blip, 5xx) clears the cache so the
+// next attempt retries instead of permanently hiding admin access.
+let statsPromiseCache: Promise<AdminStats> | null = null;
+
+export function checkAdminAccess(): Promise<AdminStats> {
+  if (!statsPromiseCache) {
+    const promise = adminStats();
+    statsPromiseCache = promise;
+    promise.catch((e) => {
+      const deniedForSure = e instanceof ApiError && (e.status === 401 || e.status === 403);
+      if (!deniedForSure) statsPromiseCache = null;
+    });
+  }
+  return statsPromiseCache;
+}
 
 const nf = new Intl.NumberFormat("en-US");
 const fmt = (n: number) => nf.format(n);
@@ -26,7 +45,7 @@ const inr = (n: number) => `₹${nf.format(Math.round(n))}`;
 const usdSmall = (n: number) => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`);
 
 function fmtDate(ms: number | null): string {
-  if (!ms) return "—";
+  if (!ms) return "·";
   return new Date(ms).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -164,18 +183,40 @@ function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // null = still probing the server; true/false = the server's verdict, not a client guess.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
-  const isAdmin = !!user?.email && ADMIN_EMAILS.has(user.email.toLowerCase());
-
+  // The probe call IS the stats call — a hit means we already have the payload, so the
+  // common case (admin lands here straight from Settings) costs zero extra requests.
   useEffect(() => {
     if (loading) return;
     if (!user) {
       navigate({ to: "/login" });
       return;
     }
-    if (!isAdmin) navigate({ to: "/" });
-  }, [user, loading, isAdmin, navigate]);
+    let cancelled = false;
+    checkAdminAccess()
+      .then((data) => {
+        if (cancelled) return;
+        setStats(data);
+        setIsAdmin(true);
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, loading]);
 
+  // Anyone the server doesn't recognize as admin gets sent home — no admin content ever
+  // renders client-side for them, even momentarily (the check below covers that too).
+  useEffect(() => {
+    if (isAdmin === false) navigate({ to: "/" });
+  }, [isAdmin, navigate]);
+
+  // Manual refresh bypasses the cache (the user is confirmed admin at this point) and
+  // keeps the shared cache warm with the fresh result.
   const load = () => {
     setRefreshing(true);
     setError(null);
@@ -185,11 +226,7 @@ function AdminPage() {
       .finally(() => setRefreshing(false));
   };
 
-  useEffect(() => {
-    if (isAdmin) load();
-  }, [isAdmin]);
-
-  if (loading || !user || !isAdmin) return null;
+  if (loading || !user || isAdmin !== true) return null;
 
   const t = stats?.totals;
 
@@ -393,7 +430,7 @@ function AdminPage() {
                     {stats.users.map((u) => (
                       <tr key={u.uid} className="border-b border-border/60 last:border-0">
                         <td className="px-4 py-3">
-                          <div className="font-medium text-ink">{u.display_name || "—"}</div>
+                          <div className="font-medium text-ink">{u.display_name || "·"}</div>
                           <div className="text-xs text-ink-soft">{u.email || u.uid}</div>
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-ink">

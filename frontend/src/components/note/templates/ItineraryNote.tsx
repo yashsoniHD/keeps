@@ -3,6 +3,7 @@ import type { Note, TripDay } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
 import { TripMap } from "../TripMap";
 import { PackingList } from "../PackingList";
+import { StatGrid, type Stat } from "../StatGrid";
 
 interface ItineraryData {
   destination?: string;
@@ -18,29 +19,18 @@ export function ItineraryNote({ note }: { note: Note }) {
   const data = note.data as ItineraryData;
   const accent = noteAccent(note.content_type);
 
-  const stats: { icon: LucideIcon; label: string; value?: string }[] = [
-    { icon: MapPin, label: "Where", value: data.destination },
-    { icon: Calendar, label: "Duration", value: data.duration },
-    { icon: Wallet, label: "Budget", value: data.budget },
-    { icon: Sun, label: "Best season", value: data.bestSeason },
-  ].filter((s) => s.value);
+  const stats: Stat[] = (
+    [
+      { icon: MapPin, label: "Where", value: data.destination },
+      { icon: Calendar, label: "Duration", value: data.duration },
+      { icon: Wallet, label: "Budget", value: data.budget },
+      { icon: Sun, label: "Best season", value: data.bestSeason },
+    ] as { icon: LucideIcon; label: string; value?: string }[]
+  ).filter((s): s is Stat => Boolean(s.value));
 
   return (
     <div>
-      {stats.length > 0 && (
-        <div
-          className={`grid gap-3 rounded-2xl border border-border p-4 ${accent.soft}`}
-          style={{ gridTemplateColumns: `repeat(${Math.min(stats.length, 4)}, minmax(0, 1fr))` }}
-        >
-          {stats.map((s, i) => (
-            <div key={i} className="flex flex-col items-center gap-1 text-center">
-              <s.icon className={`h-4 w-4 ${accent.text}`} />
-              <div className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</div>
-              <div className="font-serif text-base text-ink">{s.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      <StatGrid stats={stats} accent={accent} />
 
       {/* Live map of geocoded stops — renders nothing without a Maps key or coordinates. */}
       {(data.days?.length ?? 0) > 0 && (

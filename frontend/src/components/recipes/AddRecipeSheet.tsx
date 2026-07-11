@@ -54,7 +54,7 @@ export function AddRecipeSheet({ onClose }: { onClose: () => void }) {
           {state === "done" ? (
             <div className="flex items-center gap-2 rounded-xl bg-recipe-soft px-3 py-4 text-sm text-recipe">
               <Check className="h-4 w-4" />
-              Got it — pulling the ingredients and method. It’ll appear here in a moment.
+              Got it. Pulling the ingredients and method. It’ll appear here in a moment.
             </div>
           ) : (
             <>

@@ -1,5 +1,5 @@
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
-import { ArrowDownUp, Calendar, MapPin, Plane, Plus, Search, Star, Sun } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ArrowDownUp, Calendar, MapPin, Plane, Plus, Star, Sun } from "lucide-react";
 import { watchTripItems } from "@/lib/firestore";
 import { updateTripItem } from "@/lib/api";
 import { FOCUS_RING } from "@/lib/ui";
@@ -65,10 +65,8 @@ export function TripsView({ uid }: { uid: string }) {
   const { items, setItems, error, retry, canLoadMore, loadMore } = useWallItems<TripItem>(
     uid,
     watchTripItems,
+    "trips",
   );
-  const [query, setQuery] = useState("");
-  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
-  const deferredQuery = useDeferredValue(query);
   const [destination, setDestination] = useState("all");
   const [length, setLength] = useState<LengthBucket>("all");
   const [season, setSeason] = useState("all");
@@ -113,13 +111,6 @@ export function TripsView({ uid }: { uid: string }) {
 
   const filterSort = (list: TripItem[]) => {
     let out = list;
-    const q = deferredQuery.trim().toLowerCase();
-    if (q)
-      out = out.filter(
-        (i) =>
-          (i.title ?? "").toLowerCase().includes(q) ||
-          (i.destination ?? "").toLowerCase().includes(q),
-      );
     if (destination !== "all") out = out.filter((i) => i.destination === destination);
     if (season !== "all") out = out.filter((i) => i.best_season === season);
     if (length !== "all") out = out.filter((i) => inBucket(parseDays(i), length));
@@ -140,103 +131,91 @@ export function TripsView({ uid }: { uid: string }) {
 
   return (
     <div className="space-y-6">
-      {/* Top row: Add */}
-      <div className="flex flex-wrap items-center justify-end gap-3">
+      {/* Compact icon filters + Add, all on one row (filters scroll, Add stays pinned) */}
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {destinations.length > 0 && (
+            <IconSelect
+              icon={<MapPin className="h-4 w-4" />}
+              title="Filter by destination"
+              value={destination}
+              active={destination !== "all"}
+              activeClass={ACCENT_ACTIVE}
+              onChange={setDestination}
+            >
+              <option value="all">Any destination</option>
+              {destinations.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </IconSelect>
+          )}
+          <IconSelect
+            icon={<Calendar className="h-4 w-4" />}
+            title="Filter by length"
+            value={length}
+            active={length !== "all"}
+            activeClass={ACCENT_ACTIVE}
+            onChange={(v) => setLength(v as LengthBucket)}
+          >
+            <option value="all">Any length</option>
+            <option value="weekend">Weekend (≤3 days)</option>
+            <option value="week">A week (4–7 days)</option>
+            <option value="long">Longer (8+ days)</option>
+          </IconSelect>
+          {seasons.length > 0 && (
+            <IconSelect
+              icon={<Sun className="h-4 w-4" />}
+              title="Filter by season"
+              value={season}
+              active={season !== "all"}
+              activeClass={ACCENT_ACTIVE}
+              onChange={setSeason}
+            >
+              <option value="all">Any season</option>
+              {seasons.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </IconSelect>
+          )}
+          <IconSelect
+            icon={<ArrowDownUp className="h-4 w-4" />}
+            title="Sort"
+            value={sort}
+            active={sort !== "added"}
+            activeClass={ACCENT_ACTIVE}
+            onChange={(v) => setSort(v as SortKey)}
+          >
+            <option value="added">Newest</option>
+            <option value="duration">Shortest</option>
+          </IconSelect>
+          {(favOnly || favCount > 0) && (
+            <button
+              type="button"
+              onClick={() => setFavOnly((v) => !v)}
+              title="Favorites"
+              aria-pressed={favOnly}
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
+                favOnly
+                  ? "border-transparent bg-trip text-white"
+                  : "border-border bg-card text-ink-soft"
+              }`}
+            >
+              <Star className={`h-4 w-4 ${favOnly ? "fill-current" : ""}`} />
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className={`inline-flex items-center gap-1.5 rounded-full bg-trip px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full bg-trip px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
         >
           <Plus className="h-3.5 w-3.5" />
           Add trip
         </button>
-      </div>
-
-      {/* Search + compact icon filters, all on one row */}
-      <div className="flex items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your trips"
-            className={`w-full rounded-full border border-border bg-card py-1.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
-          />
-        </div>
-        {destinations.length > 0 && (
-          <IconSelect
-            icon={<MapPin className="h-4 w-4" />}
-            title="Filter by destination"
-            value={destination}
-            active={destination !== "all"}
-            activeClass={ACCENT_ACTIVE}
-            onChange={setDestination}
-          >
-            <option value="all">Any destination</option>
-            {destinations.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </IconSelect>
-        )}
-        <IconSelect
-          icon={<Calendar className="h-4 w-4" />}
-          title="Filter by length"
-          value={length}
-          active={length !== "all"}
-          activeClass={ACCENT_ACTIVE}
-          onChange={(v) => setLength(v as LengthBucket)}
-        >
-          <option value="all">Any length</option>
-          <option value="weekend">Weekend (≤3 days)</option>
-          <option value="week">A week (4–7 days)</option>
-          <option value="long">Longer (8+ days)</option>
-        </IconSelect>
-        {seasons.length > 0 && (
-          <IconSelect
-            icon={<Sun className="h-4 w-4" />}
-            title="Filter by season"
-            value={season}
-            active={season !== "all"}
-            activeClass={ACCENT_ACTIVE}
-            onChange={setSeason}
-          >
-            <option value="all">Any season</option>
-            {seasons.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </IconSelect>
-        )}
-        <IconSelect
-          icon={<ArrowDownUp className="h-4 w-4" />}
-          title="Sort"
-          value={sort}
-          active={sort !== "added"}
-          activeClass={ACCENT_ACTIVE}
-          onChange={(v) => setSort(v as SortKey)}
-        >
-          <option value="added">Newest</option>
-          <option value="duration">Shortest</option>
-        </IconSelect>
-        {(favOnly || favCount > 0) && (
-          <button
-            type="button"
-            onClick={() => setFavOnly((v) => !v)}
-            title="Favorites"
-            aria-pressed={favOnly}
-            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-              favOnly
-                ? "border-transparent bg-trip text-white"
-                : "border-border bg-card text-ink-soft"
-            }`}
-          >
-            <Star className={`h-4 w-4 ${favOnly ? "fill-current" : ""}`} />
-          </button>
-        )}
       </div>
 
       {shown.length > 0 ? (
@@ -266,7 +245,7 @@ export function TripsView({ uid }: { uid: string }) {
           <p className="mt-4 font-medium text-ink">Save a trip and it lands here</p>
           <p className="mt-1 text-sm text-ink-soft">
             Share an itinerary link and we’ll pull the day-by-day plan, stops and photo into your
-            trips — with each stop pinned on a map.
+            trips, with each stop pinned on a map.
           </p>
         </div>
       )}

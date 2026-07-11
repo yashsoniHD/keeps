@@ -1,4 +1,5 @@
 import { getAuthHeader } from "@/integrations/firebase/auth-middleware";
+import { invalidateCache } from "@/lib/swr-cache";
 import type {
   TmdbSearchResult,
   WatchItemDetails,
@@ -141,6 +142,10 @@ export async function updateNote(
     body: JSON.stringify(updates),
   });
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't update the note."), res.status);
+  // Favorite/pin/edit/move changes the feed — drop the SWR cache so the next visit can't flash
+  // the pre-mutation note before the live listener catches up. (In-feed mutations rewrite the
+  // cache anyway via the listener; this covers edits made from the note detail page.)
+  invalidateCache("feed:");
 }
 
 // Move a note into a smart bucket (or back to the catch-all with null). Membership is
@@ -170,6 +175,9 @@ export async function backfillCollection(collectionId: string): Promise<{ assign
 export async function deleteNote(id: string): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}`, { method: "DELETE" });
   if (!res.ok) throw new ApiError(await errorDetail(res, "Couldn't delete the note."), res.status);
+  // Drop the feed cache so a deleted note can't flash back on the next visit (the live listener
+  // then repopulates from truth).
+  invalidateCache("feed:");
 }
 
 // --- Categories (manage the user's taxonomy) ---

@@ -385,6 +385,29 @@ def _chunk_parts(chunk):
             yield part
 
 
+# Last-ditch nudge for a run that ended without ever emitting a token — most often a round
+# whose only output was function calls, followed by a final round that returned nothing.
+_RETRY_NUDGE = (
+    "Use the tool results above to answer the user's question now. Reply in plain markdown. "
+    "If the tool results don't contain the answer, say briefly and directly what you could not "
+    "find — never reply with nothing.")
+
+NO_ANSWER_MESSAGE = "I couldn't put together an answer just now. Please try again."
+
+
+async def _retry_final_answer(ctx: AgentContext, contents: list) -> str:
+    """One tool-free generate over the tool results already gathered in `contents`.
+    Returns the answer text (may be empty on failure). Metered like any other model call."""
+    config = types.GenerateContentConfig(
+        system_instruction=ASK_ORCHESTRATOR_SYSTEM, temperature=0.3,
+        thinking_config=types.ThinkingConfig(thinking_budget=0))
+    nudge = types.Content(role="user", parts=[types.Part(text=_RETRY_NUDGE)])
+    resp = await gemini_service.client.aio.models.generate_content(
+        model=settings.GEMINI_MODEL, contents=contents + [nudge], config=config)
+    record_usage(settings.GEMINI_MODEL, resp)
+    return (getattr(resp, "text", None) or "").strip()
+
+
 async def run_agent(ctx: AgentContext):
     """Stream the agent. Yields event dicts: {type: delta|tool|agent|error, ...}.
     Citations/artifact are read off `ctx` by the caller after the generator finishes."""
@@ -396,6 +419,8 @@ async def run_agent(ctx: AgentContext):
         temperature=0.3,
         thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
+
+    any_delta = False  # did the whole run ever emit visible text?
 
     for round_i in range(ctx.max_rounds):
         # Force a final, tool-free answer on the last allowed round.
@@ -415,6 +440,7 @@ async def run_agent(ctx: AgentContext):
                     if getattr(part, "function_call", None) is not None:
                         call_parts.append(part)
                     elif getattr(part, "text", None) and not getattr(part, "thought", False):
+                        any_delta = True
                         yield {"type": "delta", "text": part.text}
         except Exception as e:
             log.error("agent stream failed: %s: %s", type(e).__name__, e,
@@ -425,7 +451,7 @@ async def run_agent(ctx: AgentContext):
             record_usage(settings.GEMINI_MODEL, last_chunk)
 
         if not call_parts:
-            return  # the model answered
+            break  # the model answered (or produced nothing) — finalize below
 
         # Re-attach the model's ACTUAL function-call parts (with thought_signature intact —
         # rebuilding from just the function_call would drop it and Gemini 3.x rejects the turn),
@@ -451,6 +477,24 @@ async def run_agent(ctx: AgentContext):
             response_parts.append(
                 types.Part.from_function_response(name=part.function_call.name, response=result))
         contents.append(types.Content(role="user", parts=response_parts))
+
+    # The run ended (model stopped calling tools, or rounds exhausted) without ever streaming
+    # a token and without building an artifact — the silent-empty-answer bug. Make ONE tool-free
+    # retry over the tool results already gathered; if that's still empty, surface a clear error
+    # instead of leaving the user with nothing.
+    if not any_delta and ctx.artifact is None:
+        text = ""
+        try:
+            text = await _retry_final_answer(ctx, contents)
+        except Exception as e:
+            log.error("agent retry answer failed: %s: %s", type(e).__name__, e,
+                      extra={"user_id": ctx.user_id})
+        if text:
+            yield {"type": "delta", "text": text}
+        else:
+            log.error("agent produced no answer after retry",
+                      extra={"user_id": ctx.user_id})
+            yield {"type": "error", "message": NO_ANSWER_MESSAGE}
 
 
 async def run_agent_collect(ctx: AgentContext) -> dict:

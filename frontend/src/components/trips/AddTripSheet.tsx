@@ -53,7 +53,7 @@ export function AddTripSheet({ onClose }: { onClose: () => void }) {
           {state === "done" ? (
             <div className="flex items-center gap-2 rounded-xl bg-trip-soft px-3 py-4 text-sm text-trip">
               <Check className="h-4 w-4" />
-              Got it — mapping out the days and stops. It’ll appear here in a moment.
+              Got it. Mapping out the days and stops. It’ll appear here in a moment.
             </div>
           ) : (
             <>

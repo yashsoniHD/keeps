@@ -1,16 +1,5 @@
-import { useDeferredValue, useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import {
-  ArrowDownUp,
-  Grid3x3,
-  List,
-  Map as MapIcon,
-  MapPin,
-  Plus,
-  Search,
-  Star,
-  Tag,
-} from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowDownUp, MapPin, Plus, Star, Tag } from "lucide-react";
 import { watchPlaceItems } from "@/lib/firestore";
 import { FOCUS_RING } from "@/lib/ui";
 import type { PlaceItem } from "@/lib/types";
@@ -23,13 +12,10 @@ import {
   useWallItems,
 } from "@/components/mini-apps/wall";
 import { PlaceCard } from "./PlaceCard";
-import { PlaceRow } from "./PlaceCard";
-import { PlacesMap } from "./PlacesMap";
 import { AddPlaceSheet } from "./AddPlaceSheet";
 
 type SortKey = "added" | "rating";
 type Tab = "saved" | "starred";
-type ViewMode = "grid" | "list" | "map";
 
 // Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
 const ACCENT_ACTIVE = "bg-place text-white";
@@ -68,7 +54,7 @@ const EMPTY: Record<Tab, { title: string; body: string }> = {
   },
   starred: {
     title: "No starred places yet",
-    body: "Open a place and tap the star to keep your go-to spots — and the ones you most want to try — in one shortlist.",
+    body: "Open a place and tap the star to keep your go-to spots and must-try places in one shortlist.",
   },
 };
 
@@ -82,30 +68,17 @@ function Grid({ items }: { items: PlaceItem[] }) {
   );
 }
 
-function ListView({ items }: { items: PlaceItem[] }) {
-  return (
-    <div className="space-y-2">
-      {items.map((i) => (
-        <PlaceRow key={i.id} item={i} />
-      ))}
-    </div>
-  );
-}
-
 // The Places mini-app body: a live venue collection under two tabs — Saved (everything captured
 // from place notes or added manually) and Starred (the places you've flagged with the ⭐).
-// Grid / List views plus city/category filters and a search picker. Cards are lean (tap to open);
-// all actions live on the detail page. Owns the place_items listener.
+// A standard card grid with city/category filters and sort. Cards are lean (tap to open); all
+// actions live on the detail page. Owns the place_items listener.
 export function PlacesView({ uid }: { uid: string }) {
   const { items, error, retry, canLoadMore, loadMore } = useWallItems<PlaceItem>(
     uid,
     watchPlaceItems,
+    "places",
   );
   const [tab, setTab] = useState<Tab>("saved");
-  const [view, setView] = useState<ViewMode>("grid");
-  const [query, setQuery] = useState("");
-  // Deferred so a keystroke doesn't synchronously re-filter and re-render the whole wall.
-  const deferredQuery = useDeferredValue(query);
   const [city, setCity] = useState<string>("all");
   const [category, setCategory] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("added");
@@ -127,14 +100,6 @@ export function PlacesView({ uid }: { uid: string }) {
 
   const filterSort = (list: PlaceItem[]) => {
     let out = list;
-    const q = deferredQuery.trim().toLowerCase();
-    if (q)
-      out = out.filter(
-        (i) =>
-          (i.name ?? "").toLowerCase().includes(q) ||
-          (i.cuisine ?? "").toLowerCase().includes(q) ||
-          (i.category ?? "").toLowerCase().includes(q),
-      );
     if (city !== "all") out = out.filter((i) => i.city === city);
     if (category !== "all") out = out.filter((i) => i.category === category);
     const sorted = [...out];
@@ -155,12 +120,6 @@ export function PlacesView({ uid }: { uid: string }) {
   const TABS: { key: Tab; label: string }[] = [
     { key: "saved", label: "Saved" },
     { key: "starred", label: "Starred" },
-  ];
-
-  const VIEWS: { key: ViewMode; icon: ReactNode; label: string }[] = [
-    { key: "grid", icon: <Grid3x3 className="h-4 w-4" />, label: "Grid" },
-    { key: "list", icon: <List className="h-4 w-4" />, label: "List" },
-    { key: "map", icon: <MapIcon className="h-4 w-4" />, label: "Map" },
   ];
 
   return (
@@ -191,36 +150,25 @@ export function PlacesView({ uid }: { uid: string }) {
         </button>
       </div>
 
-      {/* Search + view toggle + filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your places"
-            className={`w-full rounded-full border border-border bg-card py-1.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink-soft ${FOCUS_RING}`}
-          />
-        </div>
-
-        <div className="inline-flex rounded-full border border-border bg-card p-0.5">
-          {VIEWS.map((v) => (
-            <button
-              key={v.key}
-              type="button"
-              title={v.label}
-              aria-label={v.label}
-              onClick={() => setView(v.key)}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${FOCUS_RING} ${
-                view === v.key ? "bg-place text-white" : "text-ink-soft hover:text-ink"
-              }`}
-            >
-              {v.icon}
-            </button>
-          ))}
-        </div>
-
+      {/* Compact icon filters, all on one row */}
+      <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {cities.length > 1 && (
+          <IconSelect
+            icon={<MapPin className="h-4 w-4" />}
+            title="Filter by city"
+            value={city}
+            active={city !== "all"}
+            activeClass={ACCENT_ACTIVE}
+            onChange={setCity}
+          >
+            <option value="all">All cities</option>
+            {cities.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </IconSelect>
+        )}
         {categories.length > 0 && (
           <IconSelect
             icon={<Tag className="h-4 w-4" />}
@@ -251,36 +199,10 @@ export function PlacesView({ uid }: { uid: string }) {
         </IconSelect>
       </div>
 
-      {/* City chips — the way you actually browse places ("what did I save in Goa?"). */}
-      {cities.length > 1 && (
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-          {["all", ...cities].map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCity(c)}
-              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${FOCUS_RING} ${
-                city === c
-                  ? "border-transparent bg-place text-white"
-                  : "border-border bg-card text-ink-soft hover:text-ink"
-              }`}
-            >
-              {c === "all" ? "Everywhere" : c}
-            </button>
-          ))}
-        </div>
-      )}
-
       {shown.length > 0 ? (
         <>
-          {view === "grid" ? (
-            <Grid items={shown} />
-          ) : view === "list" ? (
-            <ListView items={shown} />
-          ) : (
-            <PlacesMap items={shown} heightClass="h-[65vh]" />
-          )}
-          {view !== "map" && canLoadMore && <LoadMoreButton onClick={loadMore} />}
+          <Grid items={shown} />
+          {canLoadMore && <LoadMoreButton onClick={loadMore} />}
         </>
       ) : base.length > 0 ? (
         <div className="py-16 text-center text-sm text-ink-soft">No places match your filters.</div>

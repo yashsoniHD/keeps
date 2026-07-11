@@ -108,6 +108,31 @@ def _city_from_location(location: str | None) -> str | None:
     return parts[-1] if parts else None
 
 
+# Common Indian city name variants that otherwise show up as separate city filter chips for the
+# same place (a source caption saying "Bangalore" vs a Places lookup returning "Bengaluru").
+# Single source of truth — `scripts/normalize_cities.py` imports this same map so a backfill of
+# already-saved venues can never drift from what a fresh capture writes.
+CITY_ALIASES: dict[str, str] = {
+    "bangalore": "Bengaluru",
+    "bombay": "Mumbai",
+    "madras": "Chennai",
+    "calcutta": "Kolkata",
+    "gurgaon": "Gurugram",
+}
+
+
+def normalize_city(raw: str | None) -> str | None:
+    """Canonicalize a city string: known variants (case-insensitive) collapse to one spelling via
+    CITY_ALIASES; anything else passes through trimmed, as-is. None/blank input -> None. Pure —
+    used both at write time (`_enrich_venues`, `services/places.py`) and by the backfill script."""
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    return CITY_ALIASES.get(s.lower(), s)
+
+
 def _maps_url(name: str, city: str | None, place_id: str | None,
               google_maps_url: str | None) -> str:
     if google_maps_url:
@@ -175,7 +200,7 @@ async def _enrich_venues(venues: list, region: str) -> tuple[list, str | None]:
             continue
         name = v["name"].strip()
         location = v.get("location") or ""
-        city = v.get("city") or _city_from_location(location)
+        source_city = v.get("city") or _city_from_location(location)
         try:
             hit = await google_places.search_place(name, location, region)
             details = (await google_places.place_details(hit.place_id)) if hit else None
@@ -186,6 +211,12 @@ async def _enrich_venues(venues: list, region: str) -> tuple[list, str | None]:
             if details:
                 v.update(_enrichment_from_details(v, details))
                 cover = cover or details.get("photo_url")
+            # Prefer Google's own locality over the source caption text — it's the fix for the
+            # same place showing up under two spellings ("Bangalore" and "Bengaluru"); when
+            # there's no Places match at all, the alias map still normalizes the source text.
+            city = normalize_city((details or {}).get("locality") or source_city)
+            if city:
+                v["city"] = city
             v["action_links"] = _action_links(v["name"], city, v, details or {})
         except Exception as e:  # noqa: BLE001 — one venue's miss must not sink the rest.
             log.warning("venue enrichment failed for %r: %s: %s", name, type(e).__name__, e)

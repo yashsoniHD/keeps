@@ -233,6 +233,14 @@ Rules:
 - This is a faithful re-structuring of the note, not new travel advice."""
 
 
+SUMMARIZE_BACKFILL_SYSTEM = """You write ai_summary for a note that already has a title and
+structured data — you are NOT re-reading the source, only restating what's already extracted.
+Return ONLY the summary text: ONE concise, specific sentence (~15-25 words) capturing the single
+most useful takeaway (mention an actual detail from the data — a dish, destination, title, spec).
+Never restate the content_type generically, never mention "items", "collection", or how many
+things were saved. No markdown, no quotes, no preamble."""
+
+
 _SHARED_RULES = """You are a note extraction engine. The user saves links and never wants to
 open the source again — your note must be MORE useful than the source.
 
@@ -763,6 +771,32 @@ class GeminiService:
         except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
             log.warning("days backfill extract failed: %s: %s", type(e).__name__, e)
             return {"days": []}
+
+    async def summarize_for_backfill(self, title: str, content_type: str,
+                                     data: dict | None) -> str:
+        """For scripts/backfill_summaries.py: regenerate `ai_summary` for a note stuck with a
+        migration-artifact summary ('Added 37 items to your Places collection.', left behind by
+        migrate_items_to_notes.py). Works off the STORED title/data only — no re-scrape. Lite
+        model, plain text. Returns "" on any failure (caller treats that as a skip)."""
+        blob = (
+            f"Title: {title}\n"
+            f"content_type: {content_type}\n"
+            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
+        )
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=settings.GEMINI_LITE_MODEL,
+                contents=[blob],
+                config=types.GenerateContentConfig(
+                    system_instruction=SUMMARIZE_BACKFILL_SYSTEM,
+                ),
+            )
+            record_usage(settings.GEMINI_LITE_MODEL, response)
+            return _strip_code_fences((response.text or "").strip())
+        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
+            log.warning("summary backfill failed for %r: %s: %s", title, type(e).__name__, e)
+            return ""
 
     # ---------- Step 2: type-focused extraction (main model) ----------
 

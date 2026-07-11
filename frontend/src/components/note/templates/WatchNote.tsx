@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Clapperboard, Film, Tv, Star } from "lucide-react";
 import type { Note, WatchProvider } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
+import { FOCUS_RING } from "@/lib/ui";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 // One work in an entertainment note's `data.titles[]`. camelCase fields come from Gemini
@@ -51,23 +53,11 @@ function PosterFallback({ t, accent }: { t: TitleEntry; accent: Accent }) {
   );
 }
 
-// A tappable poster card in the note's grid. Whole card opens the rich detail dialog — no
-// external link out to TMDB.
-function PosterCard({
-  t,
-  accent,
-  onOpen,
-}: {
-  t: TitleEntry;
-  accent: Accent;
-  onOpen: () => void;
-}) {
+// The inner visual of a poster card — shared by the link and dialog variants so both look
+// identical. Poster (or accent fallback), then title + meta line beneath.
+function PosterCardBody({ t, accent }: { t: TitleEntry; accent: Accent }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex flex-col text-left"
-    >
+    <>
       <div
         className={`aspect-[2/3] overflow-hidden rounded-2xl border border-border bg-card ring-2 ring-transparent transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg ${accent.ring}`}
       >
@@ -84,64 +74,48 @@ function PosterCard({
       </div>
       <h3 className="mt-3 line-clamp-2 font-serif text-lg leading-tight text-ink">{t.title}</h3>
       {metaLine(t) && <p className="mt-0.5 text-sm text-ink-soft">{metaLine(t)}</p>}
+    </>
+  );
+}
+
+// A tappable poster card. When the title resolved to a TMDB id it deep-links to the full
+// watchlist detail page (deterministic doc id: `m_`/`t_` + tmdb_id); otherwise it opens the
+// in-note detail dialog as a fallback (no watchlist doc exists to link to).
+function PosterCard({
+  t,
+  accent,
+  itemId,
+  onOpen,
+}: {
+  t: TitleEntry;
+  accent: Accent;
+  itemId: string | null;
+  onOpen: () => void;
+}) {
+  const cardClass = `group flex flex-col rounded-2xl text-left ${FOCUS_RING}`;
+  if (itemId) {
+    return (
+      <Link to="/watchlist/$itemId" params={{ itemId }} className={cardClass}>
+        <PosterCardBody t={t} accent={accent} />
+      </Link>
+    );
+  }
+  return (
+    <button type="button" onClick={onOpen} className={cardClass}>
+      <PosterCardBody t={t} accent={accent} />
     </button>
   );
 }
 
-const PROVIDER_GROUPS: { type: WatchProvider["type"]; label: string }[] = [
-  { type: "flatrate", label: "Stream" },
-  { type: "rent", label: "Rent" },
-  { type: "buy", label: "Buy" },
-];
-
-// "Where to watch" — providers grouped by how you get the title (stream / rent / buy). JustWatch
-// attribution is mandatory wherever provider data renders (see CLAUDE.md / TMDB terms).
-function WhereToWatch({ t, accent }: { t: TitleEntry; accent: Accent }) {
-  const providers = t.providers ?? [];
-  if (providers.length === 0) return null;
-  return (
-    <section>
-      <h4 className="font-serif text-lg text-ink">Where to watch</h4>
-      <div className="mt-3 space-y-3">
-        {PROVIDER_GROUPS.map(({ type, label }) => {
-          const group = providers.filter((p) => p.type === type);
-          if (group.length === 0) return null;
-          return (
-            <div key={type} className="flex flex-wrap items-center gap-2">
-              <span className="w-14 shrink-0 text-xs uppercase tracking-wider text-ink-soft">
-                {label}
-              </span>
-              {group.map((p, i) => (
-                <span
-                  key={`${p.name}-${i}`}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card py-1 pl-1 pr-2.5"
-                >
-                  {p.logo_url ? (
-                    <img
-                      src={p.logo_url}
-                      alt=""
-                      loading="lazy"
-                      className="h-5 w-5 rounded-full object-cover"
-                    />
-                  ) : (
-                    <span className={`h-5 w-5 rounded-full ${accent.soft}`} />
-                  )}
-                  <span className="text-sm text-ink">{p.name}</span>
-                </span>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-3 text-xs text-ink-soft">
-        Streaming data by JustWatch{t.providers_region ? ` · ${t.providers_region}` : ""}
-      </p>
-    </section>
-  );
+// The watchlist doc id for a title, or null if it never resolved to a TMDB entry. Mirrors the
+// backend key (services/watchlist.py `_doc_id`): tv → `t_`, everything else → `m_`.
+function watchItemId(t: TitleEntry): string | null {
+  if (!t.tmdb_id) return null;
+  return `${t.mediaType === "tv" ? "t" : "m"}_${t.tmdb_id}`;
 }
 
-// The rich detail view: backdrop/poster hero, genres, overview, why-it-was-saved, and the
-// "where to watch" providers. Opens in a dialog when a poster card is tapped.
+// The rich detail view: backdrop/poster hero, genres, overview, why-it-was-saved. Opens in a
+// dialog only for titles with no TMDB id (which can't deep-link to a watchlist detail page).
 function TitleDetail({ t, accent }: { t: TitleEntry; accent: Accent }) {
   const genres = t.genres ?? [];
   return (
@@ -198,8 +172,6 @@ function TitleDetail({ t, accent }: { t: TitleEntry; accent: Accent }) {
             <p className="mt-2 leading-relaxed text-ink">{t.why}</p>
           </section>
         )}
-
-        <WhereToWatch t={t} accent={accent} />
       </div>
     </div>
   );
@@ -222,7 +194,13 @@ export function WatchNote({ note }: { note: Note }) {
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
         {titles.map((t, i) => (
-          <PosterCard key={`${t.title}-${i}`} t={t} accent={accent} onOpen={() => setOpenIndex(i)} />
+          <PosterCard
+            key={`${t.title}-${i}`}
+            t={t}
+            accent={accent}
+            itemId={watchItemId(t)}
+            onOpen={() => setOpenIndex(i)}
+          />
         ))}
       </div>
 

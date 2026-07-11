@@ -3,6 +3,7 @@ import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow } from "@vis.gl/react
 import { MapIcon } from "lucide-react";
 import type { TripDay } from "@/lib/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { reportMapsLoadError, useMapsLoadFailed } from "@/lib/maps";
 
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY as string | undefined;
 const MAP_ID = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined) || "DEMO_MAP_ID";
@@ -69,6 +70,7 @@ export function TripMap({
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const pinned = useMemo(() => pinnedStops(days), [days]);
+  const loadFailed = useMapsLoadFailed();
 
   const center = useMemo(() => {
     if (!pinned.length) return { lat: 19.076, lng: 72.8777 }; // Mumbai default
@@ -81,21 +83,24 @@ export function TripMap({
 
   const open = pinned.find((i) => i.id === openId) ?? null;
 
+  const failedNotice = (
+    <MapNotice heightClass={heightClass}>
+      <p className="text-sm font-medium text-ink">Map couldn’t load</p>
+      <p className="max-w-xs text-xs text-ink-soft">
+        The day-by-day plan still works. (If this persists, the Maps JavaScript API may not be
+        enabled for this site’s key.)
+      </p>
+    </MapNotice>
+  );
+
+  // Auth failures (bad referrer, billing) surface async via the shared gm_authFailure global —
+  // catch them here too, not just render-time exceptions.
+  if (loadFailed) return failedNotice;
+
   return (
-    <ErrorBoundary
-      label="trip-map"
-      fallback={
-        <MapNotice heightClass={heightClass}>
-          <p className="text-sm font-medium text-ink">Map couldn’t load</p>
-          <p className="max-w-xs text-xs text-ink-soft">
-            The day-by-day plan still works. (If this persists, the Maps JavaScript API may not be
-            enabled for this site’s key.)
-          </p>
-        </MapNotice>
-      }
-    >
+    <ErrorBoundary label="trip-map" fallback={failedNotice}>
       <div className={`${heightClass} overflow-hidden rounded-2xl border border-border`}>
-        <APIProvider apiKey={API_KEY}>
+        <APIProvider apiKey={API_KEY} onError={reportMapsLoadError}>
           <Map
             mapId={MAP_ID}
             defaultCenter={center}

@@ -23,7 +23,7 @@ export function MiniAppHeader({
   return (
     <header className={`sticky top-0 z-30 border-b ${tool.wash}`}>
       <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-3 md:gap-3 md:px-8">
-        <Link to="/" aria-label="Back to Library" title="Library" className={ICON_BTN}>
+        <Link to="/collections" aria-label="Back to Collections" title="Collections" className={ICON_BTN}>
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <span

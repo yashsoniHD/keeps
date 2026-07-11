@@ -91,7 +91,10 @@ async def _geocode_days(days: list, destination: str | None, region: str | None)
         stops = day.get("stops") or []
         out_stops = []
         for stop in stops:
-            if isinstance(stop, dict) and stop.get("place") and budget > 0:
+            # Stops already carrying coords (enrich_note_data geocodes them onto the note's
+            # days[] at ingest) are kept as-is — no lookup, and they don't spend the budget.
+            if (isinstance(stop, dict) and stop.get("place") and budget > 0
+                    and (stop.get("lat") is None or stop.get("lng") is None)):
                 budget -= 1
                 place = stop["place"]
                 try:

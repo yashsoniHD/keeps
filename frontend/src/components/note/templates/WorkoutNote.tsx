@@ -1,6 +1,7 @@
-import { Target, Gauge, Clock, Repeat, Dumbbell, Lightbulb } from "lucide-react";
+import { Target, Gauge, Clock, Repeat, Dumbbell, Lightbulb, type LucideIcon } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { noteAccent, type NoteAccent } from "@/lib/note-meta";
+import { StatGrid, type Stat } from "../StatGrid";
 
 interface Exercise {
   name: string;
@@ -25,29 +26,18 @@ interface WorkoutData {
 export function WorkoutNote({ note }: { note: Note }) {
   const data = note.data as WorkoutData;
   const accent = noteAccent(note.content_type);
-  const stats = [
-    { icon: Target, label: "Goal", value: data.goal },
-    { icon: Gauge, label: "Level", value: data.level },
-    { icon: Clock, label: "Duration", value: data.duration },
-    { icon: Repeat, label: "Frequency", value: data.frequency },
-  ].filter((s) => s.value);
+  const stats: Stat[] = (
+    [
+      { icon: Target, label: "Goal", value: data.goal },
+      { icon: Gauge, label: "Level", value: data.level },
+      { icon: Clock, label: "Duration", value: data.duration },
+      { icon: Repeat, label: "Frequency", value: data.frequency },
+    ] as { icon: LucideIcon; label: string; value?: string }[]
+  ).filter((s): s is Stat => Boolean(s.value));
 
   return (
     <div>
-      {stats.length > 0 && (
-        <div
-          className={`grid gap-3 rounded-2xl border border-border p-4 ${accent.soft}`}
-          style={{ gridTemplateColumns: `repeat(${Math.min(stats.length, 4)}, 1fr)` }}
-        >
-          {stats.map((s, i) => (
-            <div key={i} className="flex flex-col items-center gap-1 text-center">
-              <s.icon className={`h-4 w-4 ${accent.text}`} />
-              <div className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</div>
-              <div className="font-serif text-base text-ink capitalize">{s.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      <StatGrid stats={stats} accent={accent} capitalize />
 
       {data.equipment && data.equipment.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-2">

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
+import { StatGrid, type Stat } from "../StatGrid";
 
 interface RecipeData {
   totalTime?: string;
@@ -53,35 +54,24 @@ export function RecipeNote({ note }: { note: Note }) {
     );
   }
 
-  const stats: { icon: LucideIcon; label: string; value?: string }[] = [
-    { icon: Clock, label: "Total", value: data.totalTime },
-    { icon: Timer, label: "Prep", value: data.prepTime },
-    { icon: Flame, label: "Cook", value: data.cookTime },
-    { icon: Users, label: "Serves", value: data.servings },
-    { icon: Gauge, label: "Effort", value: data.difficulty },
-    { icon: Globe, label: "Cuisine", value: data.cuisine },
-    { icon: Zap, label: "Calories", value: data.calories },
-  ].filter((s) => s.value);
+  const stats: Stat[] = (
+    [
+      { icon: Clock, label: "Total", value: data.totalTime },
+      { icon: Timer, label: "Prep", value: data.prepTime },
+      { icon: Flame, label: "Cook", value: data.cookTime },
+      { icon: Users, label: "Serves", value: data.servings },
+      { icon: Gauge, label: "Effort", value: data.difficulty },
+      { icon: Globe, label: "Cuisine", value: data.cuisine },
+      { icon: Zap, label: "Calories", value: data.calories },
+    ] as { icon: LucideIcon; label: string; value?: string }[]
+  ).filter((s): s is Stat => Boolean(s.value));
 
-  // Always show something useful even when the model only gave a cook time.
-  if (stats.length === 0) {
-    stats.push({ icon: Clock, label: "Time", value: data.cookTime ?? "—" });
-  }
+  // No stats extracted: StatGrid renders nothing and the note opens straight into
+  // Ingredients/Method (hasContent guarantees those exist).
 
   return (
     <div>
-      <div
-        className={`grid gap-3 rounded-2xl border border-border p-4 ${accent.soft}`}
-        style={{ gridTemplateColumns: `repeat(${Math.min(stats.length, 4)}, minmax(0, 1fr))` }}
-      >
-        {stats.map((s, i) => (
-          <div key={i} className="flex flex-col items-center gap-1 text-center">
-            <s.icon className={`h-4 w-4 ${accent.text}`} />
-            <div className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</div>
-            <div className="font-serif text-lg text-ink capitalize">{s.value}</div>
-          </div>
-        ))}
-      </div>
+      <StatGrid stats={stats} accent={accent} capitalize />
 
       <div className="mt-10 grid gap-10 md:grid-cols-[1fr_1.4fr]">
         <section>

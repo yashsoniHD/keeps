@@ -71,8 +71,8 @@ SEARCH_FIELD_MASK = (
     "places.types,places.photos"
 )
 DETAILS_FIELD_MASK = (
-    "id,displayName,formattedAddress,location,rating,userRatingCount,priceLevel,"
-    "primaryType,types,photos,regularOpeningHours,websiteUri,internationalPhoneNumber,"
+    "id,displayName,formattedAddress,addressComponents,location,rating,userRatingCount,"
+    "priceLevel,primaryType,types,photos,regularOpeningHours,websiteUri,internationalPhoneNumber,"
     "googleMapsUri,editorialSummary,reservable"
 )
 
@@ -168,6 +168,18 @@ def _search_candidate(p: dict) -> dict | None:
     }
 
 
+def _locality_from_components(components: list | None) -> str | None:
+    """The city name Google itself assigns this place ("locality"; "postal_town" covers a few
+    countries — e.g. parts of the UK — that use that type instead). Preferred over splitting the
+    free-text formatted address, which is exactly what produces inconsistent spellings
+    ("Bangalore" vs "Bengaluru") across venues geocoded at different times."""
+    for wanted in ("locality", "postal_town"):
+        for c in components or []:
+            if wanted in (c.get("types") or []):
+                return c.get("longText") or c.get("long_name")
+    return None
+
+
 def _parse_details(raw: dict) -> dict:
     """Flatten a Place Details (New) response into a frontend-ready map. Pure — the photo URI is
     resolved separately (one extra call) and merged in by `place_details`."""
@@ -178,6 +190,7 @@ def _parse_details(raw: dict) -> dict:
         "place_id": raw.get("id"),
         "name": (raw.get("displayName") or {}).get("text") or "",
         "formatted_address": raw.get("formattedAddress"),
+        "locality": _locality_from_components(raw.get("addressComponents")),
         "lat": loc.get("latitude"),
         "lng": loc.get("longitude"),
         "rating": raw.get("rating"),
