@@ -263,8 +263,8 @@ export function BoardCard({ note }: { note: Note }) {
   const { hasCover, onImageError } = useCoverPresent(note);
   const video = isVideoNote(note);
   const duration = videoDuration(note);
-  // Sub-line: source favicon (the same favicon mechanism NoteCard's footer uses), the note's
-  // category, then the short date. Manual captures have no domain, so the type icon stands in.
+  // Sub-line: the category chip (icon + label) plus the short date. The source is only
+  // indicated by the chip on the cover — repeating it down here read as a duplicate.
   const date = formatDateShort(note.created_at);
   const placeholderAspect = PLACEHOLDER_ASPECTS[seedFromId(note.id) % PLACEHOLDER_ASPECTS.length];
 
@@ -322,25 +322,12 @@ export function BoardCard({ note }: { note: Note }) {
 
         <div className="flex min-w-0 flex-col p-3">
           <h3 className="font-serif text-base leading-snug text-ink line-clamp-2">{note.title}</h3>
-          <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
-            {note.source_domain ? (
-              // Same favicon + error fallback as NoteCard's footer: a failed favicon goes
-              // invisible (keeping alignment) instead of rendering a broken image.
-              <img
-                src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
-                onError={(e) => {
-                  e.currentTarget.style.visibility = "hidden";
-                }}
-                alt=""
-                className="h-3.5 w-3.5 shrink-0 rounded-sm"
-              />
-            ) : (
-              // Manual capture (typed/voice/upload/Clip AI): no web source — the note's
-              // type icon stands in so the sub-line never starts with a hole.
-              <TypeIcon className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
-            )}
-            <span className={`truncate font-medium ${accent.text}`}>
-              {noteLabel(note.content_type)}
+          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
+            <span
+              className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${accent.chip}`}
+            >
+              <TypeIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{noteLabel(note.content_type)}</span>
             </span>
             {date && <span className="shrink-0">· {date}</span>}
           </p>
