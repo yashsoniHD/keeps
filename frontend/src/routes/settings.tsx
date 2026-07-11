@@ -12,6 +12,7 @@ import {
   Moon,
   Sun,
   LayoutGrid,
+  LayoutDashboard,
   Rows3,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -227,11 +228,13 @@ function AppearanceSection() {
           <span className="block text-sm font-medium text-ink">Feed view</span>
           <span className="block text-xs text-ink-soft">How notes are laid out in your feed.</span>
         </span>
-        {/* Segmented control: cards vs a condensed list. Persisted via the shared layout hook. */}
+        {/* Segmented control: cards / masonry board / condensed list. Persisted via the
+            shared layout hook. */}
         <div className="inline-flex shrink-0 rounded-full border border-border bg-background p-0.5">
           {(
             [
               { value: "standard", label: "Cards", icon: LayoutGrid },
+              { value: "board", label: "Board", icon: LayoutDashboard },
               { value: "condensed", label: "Compact", icon: Rows3 },
             ] as const
           ).map((opt) => {
@@ -365,7 +368,9 @@ function ConnectPhone() {
           <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
             <div>
               <div className="text-sm font-medium text-ink">Android</div>
-              <div className="text-xs text-ink-soft">Appears in your share sheet after install.</div>
+              <div className="text-xs text-ink-soft">
+                Appears in your share sheet after install.
+              </div>
             </div>
             {installPrompt && (
               <button
@@ -383,7 +388,9 @@ function ConnectPhone() {
           <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
             <div>
               <div className="text-sm font-medium text-ink">iPhone</div>
-              <div className="text-xs text-ink-soft">One-tap Shortcut for any app's share sheet.</div>
+              <div className="text-xs text-ink-soft">
+                One-tap Shortcut for any app's share sheet.
+              </div>
             </div>
             <button
               type="button"

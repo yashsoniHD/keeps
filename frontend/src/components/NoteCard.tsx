@@ -402,9 +402,10 @@ export function NoteRowList({
   // Desktop (lg+) packs rows into 2 columns. `divide-y` can't draw the dividers there
   // (it's a sibling selector, blind to grid geometry), so each child gets its own
   // border-b instead — minus the bottom row, which would double the container border.
+  // Full-strength border-border (not /70) so the hairlines stay visible in dark mode.
   return (
     <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card lg:max-w-6xl">
-      <div className="divide-y divide-border/70 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-border/70 lg:[&>*:nth-last-child(-n+2)]:border-b-0">
+      <div className="divide-y divide-border lg:grid lg:grid-cols-2 lg:gap-x-6 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-border lg:[&>*:nth-last-child(-n+2)]:border-b-0">
         {failedJobs.map((j) => (
           <FailedRow
             key={j.id}

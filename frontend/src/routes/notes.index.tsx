@@ -18,9 +18,6 @@ import {
   ArrowLeft,
   Pin,
   Settings as SettingsIcon,
-  LayoutGrid,
-  LayoutDashboard,
-  Rows3,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -62,7 +59,7 @@ import { AddNoteSheet } from "@/components/AddNoteSheet";
 import { AppShell } from "@/components/AppShell";
 import { CategoryChips, CollectionsMenu } from "@/components/feed/CategoryFilter";
 import { ClipMark, ClipLoader } from "@/components/ClipMark";
-import type { Layout } from "@/lib/layout";
+import { useLayout, type Layout } from "@/lib/layout";
 import type { Note, Job, Collection } from "@/lib/types";
 
 // The notes feed. Home (`/`) is the ONE feed (Feed with `home`). The old `/notes` view was a
@@ -78,48 +75,6 @@ export const Route = createFileRoute("/notes/")({
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const GRID_CLS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
-
-// Feed view: the two Settings-owned layouts (Cards / Compact) plus a feed-only "board" — a
-// Pinterest-style masonry that celebrates cover imagery. We deliberately reuse the SAME
-// localStorage key + sync event as @/lib/layout so this and the Settings toggle stay
-// consistent for the shared values; "board" is a third value Settings simply doesn't offer
-// (its segmented control just shows neither option selected while board is active). Kept local
-// here because the shared `Layout` union — and the Settings control — are owned elsewhere.
-type FeedView = Layout | "board";
-const LAYOUT_KEY = "clipnote.layout";
-const LAYOUT_EVENT = "clipnote:layout";
-
-function readFeedView(): FeedView {
-  try {
-    const v = localStorage.getItem(LAYOUT_KEY);
-    return v === "condensed" || v === "board" ? v : "standard";
-  } catch {
-    return "standard";
-  }
-}
-
-function useFeedView(): [FeedView, (next: FeedView) => void] {
-  const [view, setView] = useState<FeedView>(readFeedView);
-  useEffect(() => {
-    const sync = () => setView(readFeedView());
-    window.addEventListener(LAYOUT_EVENT, sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener(LAYOUT_EVENT, sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, []);
-  const set = (next: FeedView) => {
-    try {
-      localStorage.setItem(LAYOUT_KEY, next);
-    } catch {
-      /* private mode — the in-memory state below still applies for this session */
-    }
-    setView(next);
-    window.dispatchEvent(new Event(LAYOUT_EVENT));
-  };
-  return [view, set];
-}
 
 // A source-filter option: either a web domain (rendered with its favicon) or a synthetic
 // "manual" group for captures that have no web source (typed/voice/uploaded/Clip-AI notes),
@@ -200,10 +155,9 @@ export function Feed({
   const [source, setSource] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  // Feed view (Cards / Board / Compact). Toggled in-feed (FeedViewToggle) and, for the two
-  // shared values, in Settings; both write the same localStorage key + event, so they stay in
-  // sync. Board is a feed-only masonry that Settings doesn't surface.
-  const [layout, setLayout] = useFeedView();
+  // Read-only here — the view toggle (Cards / Board / Compact) lives in Settings (Appearance).
+  // The hook keeps this in sync via localStorage, so changing it there reflects immediately.
+  const [layout] = useLayout();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
     try {
@@ -775,66 +729,61 @@ export function Feed({
               />
             )
           ) : (
-            <div className="space-y-5">
-              <div className="flex justify-end">
-                <FeedViewToggle view={layout} setView={setLayout} />
-              </div>
-              <div className="space-y-8">
-                {/* In-flight captures ("just now") sit above the dated groups. */}
-                {(failedJobs.length > 0 ||
-                  queuedJobs.length > 0 ||
-                  deferredJobs.length > 0 ||
-                  pendingJobs.length > 0) &&
-                  (layout === "condensed" ? (
-                    <NoteRowList
-                      notes={[]}
-                      jobs={pendingJobs}
-                      queuedJobs={queuedJobs}
-                      deferredJobs={deferredJobs}
-                      failedJobs={failedJobs}
-                      onRetry={retryJob}
-                      onDismiss={dismissJob}
-                    />
-                  ) : (
-                    <section className={GRID_CLS}>
-                      {failedJobs.map((j) => (
-                        <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
-                      ))}
-                      {deferredJobs.map((j) => (
-                        <ProcessingCard key={j.id} job={j} label="Queued, high demand" />
-                      ))}
-                      {queuedJobs.map((j) => (
-                        <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
-                      ))}
-                      {pendingJobs.map((j) => (
-                        <ProcessingCard key={j.id} job={j} />
-                      ))}
-                    </section>
-                  ))}
-
-                {pinnedNotes.length > 0 && (
-                  <div>
-                    <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
-                      <Pin className="h-3.5 w-3.5" />
-                      Pinned
-                    </h2>
-                    <NotesView notes={pinnedNotes} layout={layout} />
-                  </div>
-                )}
-
-                {dateGroups ? (
-                  dateGroups.map((g) => (
-                    <div key={g.key}>
-                      <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
-                        {g.label}
-                      </h2>
-                      <NotesView notes={g.notes} layout={layout} />
-                    </div>
-                  ))
+            <div className="space-y-8">
+              {/* In-flight captures ("just now") sit above the dated groups. */}
+              {(failedJobs.length > 0 ||
+                queuedJobs.length > 0 ||
+                deferredJobs.length > 0 ||
+                pendingJobs.length > 0) &&
+                (layout === "condensed" ? (
+                  <NoteRowList
+                    notes={[]}
+                    jobs={pendingJobs}
+                    queuedJobs={queuedJobs}
+                    deferredJobs={deferredJobs}
+                    failedJobs={failedJobs}
+                    onRetry={retryJob}
+                    onDismiss={dismissJob}
+                  />
                 ) : (
-                  <NotesView notes={displayNotes} layout={layout} />
-                )}
-              </div>
+                  <section className={GRID_CLS}>
+                    {failedJobs.map((j) => (
+                      <FailedCard key={j.id} job={j} onRetry={retryJob} onDismiss={dismissJob} />
+                    ))}
+                    {deferredJobs.map((j) => (
+                      <ProcessingCard key={j.id} job={j} label="Queued, high demand" />
+                    ))}
+                    {queuedJobs.map((j) => (
+                      <ProcessingCard key={j.id} job={j} label="Waiting for connection" />
+                    ))}
+                    {pendingJobs.map((j) => (
+                      <ProcessingCard key={j.id} job={j} />
+                    ))}
+                  </section>
+                ))}
+
+              {pinnedNotes.length > 0 && (
+                <div>
+                  <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+                    <Pin className="h-3.5 w-3.5" />
+                    Pinned
+                  </h2>
+                  <NotesView notes={pinnedNotes} layout={layout} />
+                </div>
+              )}
+
+              {dateGroups ? (
+                dateGroups.map((g) => (
+                  <div key={g.key}>
+                    <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
+                      {g.label}
+                    </h2>
+                    <NotesView notes={g.notes} layout={layout} />
+                  </div>
+                ))
+              ) : (
+                <NotesView notes={displayNotes} layout={layout} />
+              )}
             </div>
           )}
 
@@ -1005,7 +954,7 @@ function SourceFilter({
 
 // Picks the card layout for a slice of notes. Cards (grid) / Compact (ledger rows) / Board
 // (masonry) — one switch so every render site (pinned, each date group, search) stays in step.
-function NotesView({ notes, layout }: { notes: Note[]; layout: FeedView }) {
+function NotesView({ notes, layout }: { notes: Note[]; layout: Layout }) {
   if (layout === "condensed") return <NoteRowList notes={notes} />;
   if (layout === "board") return <BoardMasonry notes={notes} />;
   return <NoteGrid notes={notes} />;
@@ -1039,39 +988,6 @@ function BoardMasonry({ notes }: { notes: Note[] }) {
         </div>
       ))}
     </section>
-  );
-}
-
-// In-feed view switcher: Cards / Board / Compact. Persists via the shared layout key (see
-// useFeedView), so switching here mirrors into Settings for the two shared values. Icon-only
-// to stay compact above the stream.
-function FeedViewToggle({ view, setView }: { view: FeedView; setView: (v: FeedView) => void }) {
-  const options = [
-    { value: "standard", label: "Cards", icon: LayoutGrid },
-    { value: "board", label: "Board", icon: LayoutDashboard },
-    { value: "condensed", label: "Compact", icon: Rows3 },
-  ] as const;
-  return (
-    <div className="inline-flex shrink-0 rounded-full border border-border bg-card p-0.5">
-      {options.map((opt) => {
-        const isActive = view === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => setView(opt.value)}
-            aria-label={`${opt.label} view`}
-            aria-pressed={isActive}
-            title={opt.label}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-              isActive ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
-            } ${FOCUS_RING}`}
-          >
-            <opt.icon className="h-4 w-4" />
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
