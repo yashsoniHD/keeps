@@ -259,12 +259,12 @@ function videoDuration(note: Note): string | null {
 
 export function BoardCard({ note }: { note: Note }) {
   const accent = noteAccent(note.content_type);
+  const TypeIcon = noteIcon(note.content_type);
   const { hasCover, onImageError } = useCoverPresent(note);
   const video = isVideoNote(note);
   const duration = videoDuration(note);
-  // Sub-line: the source (web brand, or how it was saved) then the short date — the same
-  // derivations every other card uses, so the board stays consistent with the feed.
-  const primary = note.source_domain ? sourceLabel(note.source_domain) : savedLabel(note);
+  // Sub-line: source favicon (the same favicon mechanism NoteCard's footer uses), the note's
+  // category, then the short date. Manual captures have no domain, so the type icon stands in.
   const date = formatDateShort(note.created_at);
   const placeholderAspect = PLACEHOLDER_ASPECTS[seedFromId(note.id) % PLACEHOLDER_ASPECTS.length];
 
@@ -322,9 +322,27 @@ export function BoardCard({ note }: { note: Note }) {
 
         <div className="flex min-w-0 flex-col p-3">
           <h3 className="font-serif text-base leading-snug text-ink line-clamp-2">{note.title}</h3>
-          <p className="mt-1 truncate text-[11px] text-ink-soft">
-            <span className="capitalize">{primary}</span>
-            {date && <> · {date}</>}
+          <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
+            {note.source_domain ? (
+              // Same favicon + error fallback as NoteCard's footer: a failed favicon goes
+              // invisible (keeping alignment) instead of rendering a broken image.
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+                onError={(e) => {
+                  e.currentTarget.style.visibility = "hidden";
+                }}
+                alt=""
+                className="h-3.5 w-3.5 shrink-0 rounded-sm"
+              />
+            ) : (
+              // Manual capture (typed/voice/upload/Clip AI): no web source — the note's
+              // type icon stands in so the sub-line never starts with a hole.
+              <TypeIcon className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+            )}
+            <span className={`truncate font-medium ${accent.text}`}>
+              {noteLabel(note.content_type)}
+            </span>
+            {date && <span className="shrink-0">· {date}</span>}
           </p>
         </div>
       </Link>

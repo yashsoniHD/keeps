@@ -9,9 +9,11 @@ const VALUES: readonly Layout[] = ["standard", "board", "condensed"];
 const KEY = "clipnote.layout";
 const EVENT = "clipnote:layout";
 
+// Board (masonry) is the default: an explicit stored choice always wins; anything
+// missing or unrecognised falls back here.
 export function getLayout(): Layout {
   const v = localStorage.getItem(KEY) as Layout | null;
-  return v && VALUES.includes(v) ? v : "standard";
+  return v && VALUES.includes(v) ? v : "board";
 }
 
 export function useLayout(): [Layout, (next: Layout) => void] {
