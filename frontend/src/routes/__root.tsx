@@ -4,6 +4,8 @@ import { AuthProvider } from "@/contexts/auth-context";
 import { AskProvider } from "@/contexts/ask-context";
 import { CategoryMetaProvider } from "@/contexts/category-meta";
 import { AskFab } from "@/components/ask/AskFab";
+import { BottomNav } from "@/components/BottomNav";
+import { CaptureProvider } from "@/components/CaptureProvider";
 import { ThemeProvider } from "@/lib/theme";
 
 function NotFoundComponent() {
@@ -74,9 +76,16 @@ function RootComponent() {
         <CategoryMetaProvider>
           <QueryClientProvider client={queryClient}>
             <AskProvider>
-              <Outlet />
-              {/* Global Ask-AI FAB + chat overlay; hides itself on signed-out routes. */}
-              <AskFab />
+              <CaptureProvider>
+                {/* Bottom padding clears the mobile tab bar on every route; desktop has none. */}
+                <div className="pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0">
+                  <Outlet />
+                </div>
+                {/* Global Ask-AI FAB + chat overlay; hides itself on signed-out routes. */}
+                <AskFab />
+                {/* Mobile-only bottom tab bar (Home · Collections · + · Ask · Search). */}
+                <BottomNav />
+              </CaptureProvider>
             </AskProvider>
           </QueryClientProvider>
         </CategoryMetaProvider>

@@ -83,8 +83,11 @@ function usePullToRefresh() {
   return { pull, refreshing };
 }
 
-// The app frame: pull-to-refresh and the shell-owned capture flow. Navigation lives in each
-// screen's header (back links, gear → settings) — no bottom tab bar on any size.
+// The app frame: pull-to-refresh and the shell-owned capture flow. On mobile, primary
+// navigation now lives in the global bottom tab bar (components/BottomNav.tsx: Home ·
+// Collections · + · Ask · Search); desktop keeps per-screen header nav (back links, gear
+// → settings). This shell's own CaptureContext below is legacy/unused — the live capture
+// path is CaptureProvider in __root.tsx, which the bottom bar's + button drives.
 export function AppShell({ children }: { children: ReactNode }) {
   const { pull, refreshing } = usePullToRefresh();
   const { user } = useAuth();

@@ -705,7 +705,7 @@ export function Feed({
           </div>
         </header>
 
-        <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8">
+        <main className="mx-auto max-w-7xl px-4 pb-6 pt-5 md:pb-28 md:px-8">
           {ingestError && (
             <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -834,7 +834,8 @@ export function Feed({
           )}
         </main>
 
-        {/* Primary action FAB: capture a new note. (Clip AI is reached from the search bar.) */}
+        {/* Primary action FAB: capture a new note. Desktop only — on mobile the bottom tab bar's
+            center + button owns capture (BottomNav). (Clip AI is reached from the search bar.) */}
         <button
           type="button"
           onClick={() => {
@@ -843,7 +844,7 @@ export function Feed({
           }}
           aria-label="New note"
           title="New note"
-          className="fixed bottom-8 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95"
+          className="fixed bottom-8 right-5 z-40 hidden h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 md:flex"
         >
           <Plus className="h-6 w-6" />
         </button>
