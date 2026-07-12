@@ -70,6 +70,32 @@
   --color-favorite-soft: var(--favorite-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
+
+  /* Accent foregrounds (WCAG 4.5:1). `-on` = text/icon color for a solid `bg-{x}` fill;
+     `-chip` = text color for a `bg-{x}-soft` chip. Both flip per mode via the tokens below
+     so `text-{x}-on` / `text-{x}-chip` never hard-code white against a light accent. */
+  --color-recipe-on: var(--recipe-on);
+  --color-recipe-chip: var(--recipe-chip);
+  --color-place-on: var(--place-on);
+  --color-place-chip: var(--place-chip);
+  --color-product-on: var(--product-on);
+  --color-product-chip: var(--product-chip);
+  --color-summary-on: var(--summary-on);
+  --color-summary-chip: var(--summary-chip);
+  --color-media-on: var(--media-on);
+  --color-media-chip: var(--media-chip);
+  --color-tech-on: var(--tech-on);
+  --color-tech-chip: var(--tech-chip);
+  --color-business-on: var(--business-on);
+  --color-business-chip: var(--business-chip);
+  --color-health-on: var(--health-on);
+  --color-health-chip: var(--health-chip);
+  --color-trip-on: var(--trip-on);
+  --color-trip-chip: var(--trip-chip);
+  --color-favorite-on: var(--favorite-on);
+  --color-favorite-chip: var(--favorite-chip);
+  --color-success-on: var(--success-on);
+  --color-success-chip: var(--success-chip);
 }
 
 :root {
@@ -107,31 +133,58 @@
      affordance, not a decoration. */
   --ring: oklch(0.5 0.06 55);
 
-  /* type accents */
+  /* type accents.
+     `-on`  = foreground on a solid `bg-{x}` fill. White fails WCAG on the lighter accents
+              (recipe/summary), so those carry ink instead; the rest carry paper.
+     `-chip`= darker accent shade for `text-{x}` on a near-white `bg-{x}-soft` chip, where the
+              base accent itself is too light for 4.5:1 at 11-12px. (place/trip base nudged a
+              touch darker so white clears 4.5 on their fills.) */
   --recipe: oklch(0.62 0.16 38);          /* terracotta */
   --recipe-soft: oklch(0.94 0.04 40);
-  --place: oklch(0.55 0.09 155);          /* sage — venues (Places app) */
+  --recipe-on: var(--ink);
+  --recipe-chip: oklch(0.535 0.16 38);
+  --place: oklch(0.53 0.09 155);          /* sage — venues (Places app) */
   --place-soft: oklch(0.94 0.03 155);
+  --place-on: var(--paper);
+  --place-chip: oklch(0.515 0.09 155);
   --product: oklch(0.48 0.14 265);        /* indigo */
   --product-soft: oklch(0.94 0.03 265);
+  --product-on: var(--paper);
+  --product-chip: oklch(0.48 0.14 265);
   --summary: oklch(0.65 0.13 75);         /* amber */
   --summary-soft: oklch(0.95 0.04 80);
+  --summary-on: var(--ink);
+  --summary-chip: oklch(0.53 0.13 75);
   --media: oklch(0.52 0.16 330);          /* plum — film & entertainment */
   --media-soft: oklch(0.94 0.04 330);
+  --media-on: var(--paper);
+  --media-chip: oklch(0.52 0.16 330);
   --tech: oklch(0.52 0.11 230);           /* steel blue — software & AI */
   --tech-soft: oklch(0.94 0.03 230);
+  --tech-on: var(--paper);
+  --tech-chip: oklch(0.515 0.11 230);
   --business: oklch(0.5 0.09 195);        /* deep teal — business & career */
   --business-soft: oklch(0.94 0.03 195);
+  --business-on: var(--paper);
+  --business-chip: oklch(0.5 0.09 195);
   --health: oklch(0.55 0.15 10);          /* rose — fitness & health */
   --health-soft: oklch(0.95 0.03 10);
-  --trip: oklch(0.55 0.11 240);           /* sky — trips & itineraries */
+  --health-on: var(--paper);
+  --health-chip: oklch(0.545 0.15 10);
+  --trip: oklch(0.53 0.11 240);           /* sky — trips & itineraries */
   --trip-soft: oklch(0.94 0.03 240);
+  --trip-on: var(--paper);
+  --trip-chip: oklch(0.52 0.11 240);
 
   /* semantic accents */
   --favorite: oklch(0.72 0.15 78);        /* warm gold — the ⭐ everywhere */
   --favorite-soft: oklch(0.95 0.05 85);
+  --favorite-on: var(--ink);
+  --favorite-chip: oklch(0.53 0.15 78);
   --success: oklch(0.58 0.13 160);        /* calm green — "target hit", positive signals */
   --success-soft: oklch(0.94 0.04 160);
+  --success-on: var(--ink);
+  --success-chip: oklch(0.505 0.13 160);
 }
 
 .dark {
@@ -162,31 +215,56 @@
   --ring: oklch(0.68 0.02 60);
 
   /* type accents — base nudged lighter for legibility on charcoal; -soft inverts from
-     near-white fills to dark, low-chroma tints that sit just above the card surface. */
+     near-white fills to dark, low-chroma tints that sit just above the card surface.
+     Bases are now light (~0.68-0.80 L), so `-on` (text on a solid fill) is near-black ink
+     — white would fail WCAG on every one. `-chip` (text on the dark `-soft` tint) stays the
+     light base, which already clears 4.5:1 against the dark tint. */
   --recipe: oklch(0.72 0.15 38);
   --recipe-soft: oklch(0.30 0.05 40);
+  --recipe-on: oklch(0.16 0.01 80);
+  --recipe-chip: oklch(0.72 0.15 38);
   --place: oklch(0.70 0.11 155);
   --place-soft: oklch(0.30 0.04 155);
+  --place-on: oklch(0.16 0.01 80);
+  --place-chip: oklch(0.70 0.11 155);
   --product: oklch(0.68 0.14 265);
   --product-soft: oklch(0.31 0.05 265);
+  --product-on: oklch(0.16 0.01 80);
+  --product-chip: oklch(0.70 0.14 265);
   --summary: oklch(0.76 0.13 80);
   --summary-soft: oklch(0.32 0.05 80);
+  --summary-on: oklch(0.16 0.01 80);
+  --summary-chip: oklch(0.76 0.13 80);
   --media: oklch(0.70 0.16 330);
   --media-soft: oklch(0.31 0.05 330);
+  --media-on: oklch(0.16 0.01 80);
+  --media-chip: oklch(0.70 0.16 330);
   --tech: oklch(0.70 0.12 230);
   --tech-soft: oklch(0.30 0.04 230);
+  --tech-on: oklch(0.16 0.01 80);
+  --tech-chip: oklch(0.70 0.12 230);
   --business: oklch(0.68 0.10 195);
   --business-soft: oklch(0.30 0.04 195);
+  --business-on: oklch(0.16 0.01 80);
+  --business-chip: oklch(0.70 0.10 195);
   --health: oklch(0.72 0.15 10);
   --health-soft: oklch(0.31 0.05 10);
+  --health-on: oklch(0.16 0.01 80);
+  --health-chip: oklch(0.72 0.15 10);
   --trip: oklch(0.70 0.12 240);
   --trip-soft: oklch(0.30 0.04 240);
+  --trip-on: oklch(0.16 0.01 80);
+  --trip-chip: oklch(0.70 0.12 240);
 
   /* semantic accents */
   --favorite: oklch(0.8 0.14 82);
   --favorite-soft: oklch(0.32 0.06 82);
+  --favorite-on: oklch(0.16 0.01 80);
+  --favorite-chip: oklch(0.8 0.14 82);
   --success: oklch(0.7 0.13 160);
   --success-soft: oklch(0.3 0.05 160);
+  --success-on: oklch(0.16 0.01 80);
+  --success-chip: oklch(0.7 0.13 160);
 }
 
 @layer base {

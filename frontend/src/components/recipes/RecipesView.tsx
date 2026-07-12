@@ -34,7 +34,7 @@ type SortKey = "added" | "time";
 type TimeBucket = "all" | "u30" | "30_60" | "60p";
 
 // Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
-const ACCENT_ACTIVE = "bg-recipe text-white";
+const ACCENT_ACTIVE = "bg-recipe text-recipe-on";
 
 const dedupeKey = (i: RecipeItem) =>
   i.source_url?.trim().toLowerCase() ||
@@ -120,7 +120,7 @@ function TonightsPick({ item, onReroll }: { item: RecipeItem; onReroll: () => vo
             <Link
               to="/recipes/$itemId"
               params={{ itemId: item.id }}
-              className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-3.5 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+              className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-3.5 py-1.5 text-xs font-medium text-recipe-on transition-opacity hover:opacity-90 ${FOCUS_RING}`}
             >
               Start cooking
               <ArrowRight className="h-3.5 w-3.5" />
@@ -282,7 +282,7 @@ export function RecipesView({ uid }: { uid: string }) {
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-3 py-1.5 text-xs font-medium text-recipe-on transition-opacity hover:opacity-90 ${FOCUS_RING}`}
         >
           <Plus className="h-3.5 w-3.5" />
           Add recipe
@@ -353,7 +353,7 @@ export function RecipesView({ uid }: { uid: string }) {
             aria-pressed={favOnly}
             className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
               favOnly
-                ? "border-transparent bg-recipe text-white"
+                ? "border-transparent bg-recipe text-recipe-on"
                 : "border-border bg-card text-ink-soft"
             }`}
           >
@@ -414,7 +414,7 @@ export function RecipesView({ uid }: { uid: string }) {
             type="button"
             onClick={() => setShowList(true)}
             disabled={selected.size === 0}
-            className={`inline-flex items-center gap-2 rounded-full bg-recipe px-5 py-2.5 text-sm font-medium text-white shadow-lg transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
+            className={`inline-flex items-center gap-2 rounded-full bg-recipe px-5 py-2.5 text-sm font-medium text-recipe-on shadow-lg transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
           >
             <ShoppingCart className="h-4 w-4" />
             Build list ({selected.size})

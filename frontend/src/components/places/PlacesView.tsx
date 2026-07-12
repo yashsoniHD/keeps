@@ -18,7 +18,7 @@ type SortKey = "added" | "rating";
 type Tab = "saved" | "starred";
 
 // Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
-const ACCENT_ACTIVE = "bg-place text-white";
+const ACCENT_ACTIVE = "bg-place text-place-on";
 
 const STATUS_RANK: Record<PlaceItem["place_status"], number> = {
   visited: 2,
@@ -133,7 +133,7 @@ export function PlacesView({ uid }: { uid: string }) {
               type="button"
               onClick={() => setTab(t.key)}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
-                tab === t.key ? "bg-place text-white" : "text-ink-soft hover:text-ink"
+                tab === t.key ? "bg-place text-place-on" : "text-ink-soft hover:text-ink"
               }`}
             >
               {t.label} · {counts[t.key]}
@@ -143,7 +143,7 @@ export function PlacesView({ uid }: { uid: string }) {
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className={`inline-flex items-center gap-1.5 rounded-full bg-place px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 rounded-full bg-place px-3 py-1.5 text-xs font-medium text-place-on transition-opacity hover:opacity-90 ${FOCUS_RING}`}
         >
           <Plus className="h-3.5 w-3.5" />
           Add place

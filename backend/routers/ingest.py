@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -130,8 +131,40 @@ async def _create_job(db, user_id: str, body: IngestRequest) -> JobStatus:
                  extra={"job_id": job_id, "user_id": user_id, "url": body.url})
         return JobStatus(job_id=job_id, status="deferred")
 
-    enqueue_process_job(job_id)
+    # Dev inline path: with no Cloud Tasks SA configured (local dev) there's no queue to
+    # enqueue onto — run the worker in-process so a localhost capture actually processes.
+    if not settings.CLOUD_TASKS_SA_EMAIL:
+        log.info("inline dev processing active (no Cloud Tasks SA configured)",
+                 extra={"job_id": job_id, "user_id": user_id})
+        asyncio.create_task(_run_inline(job_id))
+        return JobStatus(job_id=job_id, status="pending")
+
+    # Enqueue off the event loop (the SDK call is blocking). A queue failure must not orphan
+    # a "pending" job that renders an eternal "Saving…" card — mark it failed so the client
+    # sees a terminal state instead of a 500.
+    try:
+        await asyncio.to_thread(enqueue_process_job, job_id)
+    except Exception as e:  # noqa: BLE001 — any enqueue failure is terminal for this capture
+        log.error("enqueue failed, marking job failed: %s: %s", type(e).__name__, e,
+                  extra={"job_id": job_id, "user_id": user_id, "url": body.url})
+        await db.collection("jobs").document(job_id).update({
+            "status": "failed",
+            "error": "Couldn't queue this capture for processing. Please try again.",
+            "updated_at": datetime.now(timezone.utc),
+        })
+        return JobStatus(job_id=job_id, status="failed")
     return JobStatus(job_id=job_id, status="pending")
+
+
+async def _run_inline(job_id: str) -> None:
+    """Dev-only worker invocation (no Cloud Tasks hop, so OIDC is bypassed). Best-effort:
+    a crash here only affects this one capture, and the job doc already exists."""
+    try:
+        from routers.process import _process_job  # local import avoids a heavy import cycle
+        await _process_job(job_id)
+    except Exception as e:  # noqa: BLE001
+        log.error("inline dev processing failed: %s: %s", type(e).__name__, e,
+                  extra={"job_id": job_id})
 
 
 @router.post("/ingest", response_model=JobStatus)

@@ -90,7 +90,7 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
           // Done: report the sweep honestly, then hand over to the collection page.
           <div className="text-center">
             <span
-              className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${accent.dot} text-white shadow-md`}
+              className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${accent.dot} ${accent.on} shadow-md`}
             >
               <Icon className="h-6 w-6" />
             </span>
@@ -129,7 +129,7 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
                 aria-expanded={pickerOpen}
                 aria-label="Change icon and colour"
                 title="Change icon and colour"
-                className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${accent.dot} text-white shadow-sm transition-transform active:scale-95 ${FOCUS_RING}`}
+                className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${accent.dot} ${accent.on} shadow-sm transition-transform active:scale-95 ${FOCUS_RING}`}
               >
                 <Icon className="h-6 w-6" />
                 <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-card text-ink-soft shadow-sm">

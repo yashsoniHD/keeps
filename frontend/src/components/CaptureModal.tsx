@@ -110,7 +110,7 @@ export function CaptureModal({ url, onClose }: { url: string; onClose: () => voi
                         complete
                           ? "bg-ink text-paper"
                           : active
-                            ? "bg-summary-soft text-summary"
+                            ? "bg-summary-soft text-summary-chip"
                             : "bg-muted text-ink-soft"
                       }`}
                     >

@@ -71,7 +71,7 @@ export const WishCard = memo(function WishCard({
             onClick={() => onToggleBought(item)}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
               bought
-                ? "border-transparent bg-product text-white"
+                ? "border-transparent bg-product text-product-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
             }`}
           >
@@ -84,7 +84,7 @@ export const WishCard = memo(function WishCard({
             onClick={() => onToggleFavorite(item)}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
               favorite
-                ? "border-transparent bg-favorite text-white"
+                ? "border-transparent bg-favorite text-favorite-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
             }`}
           >
@@ -93,7 +93,7 @@ export const WishCard = memo(function WishCard({
         </div>
         {/* Deal-met chip */}
         {dealMet && !bought && (
-          <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-medium text-white">
+          <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-medium text-success-on">
             <Tag className="h-3 w-3" />
             Target hit
           </span>
@@ -103,7 +103,7 @@ export const WishCard = memo(function WishCard({
           <span
             className={`absolute bottom-1.5 left-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold shadow-sm backdrop-blur ${
               dealMet && !bought
-                ? "border-success/30 bg-success-soft/90 text-success"
+                ? "border-success/30 bg-success-soft/90 text-success-chip"
                 : "border-border bg-card/90 text-ink"
             }`}
           >

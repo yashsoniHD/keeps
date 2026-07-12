@@ -181,7 +181,7 @@ export function PlaceDetail({
           aria-pressed={favorite}
           className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
             favorite
-              ? "border-transparent bg-favorite text-white"
+              ? "border-transparent bg-favorite text-favorite-on"
               : "border-border bg-card text-ink hover:bg-place-soft"
           }`}
         >
@@ -193,7 +193,7 @@ export function PlaceDetail({
           onClick={toggleVisited}
           className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
             visited
-              ? "border-transparent bg-place text-white"
+              ? "border-transparent bg-place text-place-on"
               : "border-border bg-card text-ink hover:bg-place-soft"
           }`}
         >

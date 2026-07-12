@@ -213,6 +213,35 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: 
     return note_id
 
 
+async def _salvage_and_complete(db, job_ref, *, job_id: str, user_id: str, url: str,
+                                source: str, input_type: str, title: str | None,
+                                bundle: ContentBundle | None, now: datetime,
+                                error: str) -> dict:
+    """Write an honest is_fallback bookmark and mark the job completed with it. Shared by the
+    unreachable-source short-circuit and the extraction-failure ladder so both preserve the
+    capture identically (stable salvage id → idempotent on a Cloud Tasks retry)."""
+    note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
+                                  input_type=input_type, user_title=title,
+                                  bundle=bundle, now=now,
+                                  note_id=_stable_id("salvage", job_id))
+    try:
+        await add_user_category(user_id, "bookmark")
+        if input_type == "url" and url:
+            await add_user_source(user_id, _domain_of(url))
+        # Keep even a salvaged bookmark searchable.
+        salvaged = await db.collection("notes").document(note_id).get()
+        if salvaged.exists:
+            await search_index.upsert_for_note(db, note_id, salvaged.to_dict())
+    except Exception:
+        pass  # category/source chips + index are cosmetic — never fail the salvage over it
+    await job_ref.update({"status": "completed", "note_id": note_id,
+                          "destination": {"kind": "note", "note_id": note_id},
+                          "error": error[:500],
+                          "updated_at": datetime.now(timezone.utc)})
+    await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
+    return {"status": "completed", "note_id": note_id, "salvaged": True}
+
+
 def _verify_oidc(request: Request) -> None:
     """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email.
     Thin wrapper over the shared verifier (kept as a module-level name so existing tests can
@@ -237,7 +266,13 @@ def _raw_text_extraction(text: str, title: str | None) -> NoteExtraction:
 @router.post("/process/{job_id}")
 async def process_job(job_id: str, request: Request):
     _verify_oidc(request)
+    return await _process_job(job_id)
 
+
+async def _process_job(job_id: str) -> dict:
+    """The full URL→note pipeline, minus the OIDC gate. Split out so the dev inline path
+    (no Cloud Tasks) can invoke it directly, and so tests can drive it after stubbing
+    _verify_oidc. Idempotency + salvage semantics live here, unchanged."""
     db = get_db()
     job_ref = db.collection("jobs").document(job_id)
     job, early = await _claim_job(db, job_ref)
@@ -305,6 +340,19 @@ async def process_job(job_id: str, request: Request):
                                    strategy="device_content")
         else:
             bundle = await sources.acquire(url)
+
+        # Unreachable source: every strategy failed and the resolver returned only a metadata
+        # stub. Do NOT hand it to Gemini — it would confidently hallucinate a whole note from
+        # the URL slug (a real 404 produced a full fake recipe). Write an honest is_fallback
+        # bookmark and stop: no classify, no extract, no mini-app fan-out.
+        if bundle.kind == "metadata_only" or bundle.strategy == "unreachable":
+            log.warning("source unreachable, salvaging bookmark instead of extracting",
+                        extra={"job_id": job_id, "user_id": user_id, "url": url})
+            return await _salvage_and_complete(
+                db, job_ref, job_id=job_id, user_id=user_id, url=url, source=source,
+                input_type=input_type, title=title, bundle=bundle,
+                now=datetime.now(timezone.utc),
+                error="unreachable: content could not be retrieved")
 
         collection_id: str | None = None
         if input_type == "text" and not process_ai:
@@ -436,26 +484,11 @@ async def process_job(job_id: str, request: Request):
         log.error("process job failed, salvaging bookmark note: %s: %s", type(e).__name__, e,
                   extra={"job_id": job_id, "user_id": user_id, "url": url}, exc_info=True)
         try:
-            note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
-                                          input_type=input_type, user_title=title,
-                                          bundle=bundle, now=datetime.now(timezone.utc),
-                                          note_id=_stable_id("salvage", job_id))
-            try:
-                await add_user_category(user_id, "bookmark")
-                if input_type == "url" and url:
-                    await add_user_source(user_id, _domain_of(url))
-                # Keep even a salvaged bookmark searchable.
-                salvaged = await db.collection("notes").document(note_id).get()
-                if salvaged.exists:
-                    await search_index.upsert_for_note(db, note_id, salvaged.to_dict())
-            except Exception:
-                pass  # category/source chips + index are cosmetic — never fail the salvage over it
-            await job_ref.update({"status": "completed", "note_id": note_id,
-                                  "destination": {"kind": "note", "note_id": note_id},
-                                  "error": f"salvaged: {type(e).__name__}: {e}"[:500],
-                                  "updated_at": datetime.now(timezone.utc)})
-            await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
-            return {"status": "completed", "note_id": note_id, "salvaged": True}
+            return await _salvage_and_complete(
+                db, job_ref, job_id=job_id, user_id=user_id, url=url, source=source,
+                input_type=input_type, title=title, bundle=bundle,
+                now=datetime.now(timezone.utc),
+                error=f"salvaged: {type(e).__name__}: {e}")
         except Exception as salvage_exc:
             # Even the URL-only Firestore write failed — the one path left is "failed".
             log.error("salvage write failed: %s: %s", type(salvage_exc).__name__, salvage_exc,

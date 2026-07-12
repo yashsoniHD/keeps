@@ -85,7 +85,7 @@ export const RecipeCard = memo(function RecipeCard({
             <span
               className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${
                 selected
-                  ? "border-transparent bg-recipe text-white"
+                  ? "border-transparent bg-recipe text-recipe-on"
                   : "border-border bg-background/80 text-ink-soft"
               }`}
             >
@@ -108,7 +108,7 @@ export const RecipeCard = memo(function RecipeCard({
               onClick={() => onToggleFavorite(item)}
               className={`absolute right-1.5 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-favorite text-white"
+                  ? "border-transparent bg-favorite text-favorite-on"
                   : "border-border bg-background/80 text-ink-soft hover:text-ink"
               }`}
             >

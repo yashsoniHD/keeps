@@ -113,6 +113,12 @@ export function watchJob(jobId: string, callback: (job: Partial<Job>) => void): 
 // How long a failed job stays visible in the feed (it can also be dismissed).
 const FAILED_JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
+// A `pending` job that never advances is orphaned — a backend enqueue failure or a network
+// partition dropped the capture, so no worker will ever pick it up. Past this age we stop
+// rendering it as an immortal "Saving…" placeholder and surface it through the failed-card path
+// instead (dismissible + retryable). `processing`/`deferred` are real live states — left alone.
+const STALE_PENDING_MS = 10 * 60 * 1000;
+
 // In-flight + recently-failed captures: drives the "processing" and "failed" cards in
 // the feed. Reuses the existing (user_id, created_at) jobs index — a freshly created job
 // always has the newest created_at, so the most-recent slice is guaranteed to include any
@@ -130,16 +136,28 @@ export function watchPendingJobs(
     limit(max),
   );
   return onSnapshot(q, (snap) => {
-    const cutoff = Date.now() - FAILED_JOB_TTL_MS;
-    const jobs = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }) as Job)
-      .filter(
-        (j) =>
-          j.status === "pending" ||
-          j.status === "processing" ||
-          j.status === "deferred" || // parked by the global cap — shown as "Queued"
-          (j.status === "failed" && ((j.updated_at ?? j.created_at)?.toMillis() ?? 0) > cutoff),
-      );
+    const now = Date.now();
+    const failedCutoff = now - FAILED_JOB_TTL_MS;
+    const jobs: Job[] = [];
+    for (const d of snap.docs) {
+      const j = { id: d.id, ...d.data() } as Job;
+      const ts = (j.updated_at ?? j.created_at)?.toMillis() ?? now;
+      if (j.status === "pending") {
+        if (now - ts > STALE_PENDING_MS) {
+          // Orphaned pending job → present as failed so the feed shows a dismissible/retryable
+          // card instead of "Saving…" forever. No failed-TTL gate: these were never explicitly
+          // marked failed, so they render until dismissed or they fall out of the recent window.
+          jobs.push({ ...j, status: "failed", error: j.error || "Capture didn't go through" });
+        } else {
+          jobs.push(j); // still fresh — a genuine in-flight capture
+        }
+      } else if (j.status === "processing" || j.status === "deferred") {
+        // deferred = parked by the global cap — shown as "Queued"
+        jobs.push(j);
+      } else if (j.status === "failed" && ts > failedCutoff) {
+        jobs.push(j);
+      }
+    }
     callback(jobs);
   });
 }
@@ -333,12 +351,14 @@ export async function getManualNotesCount(userId: string): Promise<number> {
 
 // One-shot aggregate counts for the five mini-app subcollections, for the Collections launcher
 // tiles. A snapshot on mount is enough (no listener) — these are quiet counts, not a live wall.
+// A per-app value of `null` means that one aggregate failed (the tile renders a quiet dash, not
+// a skeleton) — distinct from the whole map being null, which the caller uses for "still loading".
 export type MiniAppItemCounts = {
-  watchlist: number;
-  wishlist: number;
-  places: number;
-  recipes: number;
-  trips: number;
+  watchlist: number | null;
+  wishlist: number | null;
+  places: number | null;
+  recipes: number | null;
+  trips: number | null;
 };
 
 const MINI_APP_SUBCOLLECTIONS: Record<keyof MiniAppItemCounts, string> = {
@@ -349,16 +369,27 @@ const MINI_APP_SUBCOLLECTIONS: Record<keyof MiniAppItemCounts, string> = {
   trips: "trip_items",
 };
 
+// Resilient like the mini-app walls (see wall.tsx): `Promise.allSettled`, not `Promise.all`, so
+// one failing aggregate doesn't reject the whole fetch and freeze every tile on a skeleton. A
+// rejected count comes back as `null` (its tile shows a dash) and the reason is logged once so
+// failures are no longer silently masked.
 export async function getMiniAppItemCounts(userId: string): Promise<MiniAppItemCounts> {
-  const entries = await Promise.all(
-    (Object.entries(MINI_APP_SUBCOLLECTIONS) as [keyof MiniAppItemCounts, string][]).map(
-      async ([key, sub]) => {
-        const snap = await getCountFromServer(collection(db, "users", userId, sub));
-        return [key, snap.data().count] as const;
-      },
+  const keys = Object.keys(MINI_APP_SUBCOLLECTIONS) as (keyof MiniAppItemCounts)[];
+  const results = await Promise.allSettled(
+    keys.map((key) =>
+      getCountFromServer(collection(db, "users", userId, MINI_APP_SUBCOLLECTIONS[key])),
     ),
   );
-  return Object.fromEntries(entries) as MiniAppItemCounts;
+  const counts = {} as MiniAppItemCounts;
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      counts[keys[i]] = r.value.data().count;
+    } else {
+      counts[keys[i]] = null;
+      console.error(`getMiniAppItemCounts: "${keys[i]}" count failed`, r.reason);
+    }
+  });
+  return counts;
 }
 
 // Note count for a single user-created collection — equality-only aggregate (user_id +

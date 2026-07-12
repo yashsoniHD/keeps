@@ -145,7 +145,7 @@ export function ProductDetail({
               </span>
             ) : null}
             {dealMet && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-xs font-medium text-white">
+              <span className="inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-xs font-medium text-success-on">
                 <Tag className="h-3 w-3" />
                 Below your target
               </span>
@@ -158,7 +158,7 @@ export function ProductDetail({
               href={item.buy_url}
               target="_blank"
               rel="noopener noreferrer"
-              className={`mt-4 inline-flex items-center gap-1.5 rounded-full bg-product px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+              className={`mt-4 inline-flex items-center gap-1.5 rounded-full bg-product px-4 py-2 text-sm font-medium text-product-on transition-opacity hover:opacity-90 ${FOCUS_RING}`}
             >
               <ExternalLink className="h-4 w-4" />
               View on {item.domain ?? "store"}
@@ -172,7 +172,7 @@ export function ProductDetail({
               onClick={toggleBought}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 bought
-                  ? "border-transparent bg-product text-white"
+                  ? "border-transparent bg-product text-product-on"
                   : "border-border bg-card text-ink hover:bg-product-soft"
               }`}
             >
@@ -186,7 +186,7 @@ export function ProductDetail({
               aria-pressed={favorite}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-favorite text-white"
+                  ? "border-transparent bg-favorite text-favorite-on"
                   : "border-border bg-card text-ink hover:bg-product-soft"
               }`}
             >

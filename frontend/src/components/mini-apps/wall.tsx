@@ -85,7 +85,7 @@ export function IconSelect({
   icon: ReactNode;
   value: string;
   active: boolean;
-  activeClass: string; // e.g. "bg-media text-white" — full literals for the Tailwind JIT
+  activeClass: string; // e.g. "bg-media text-media-on" — full literals for the Tailwind JIT
   onChange: (v: string) => void;
   title: string;
   children: ReactNode;

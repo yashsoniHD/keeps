@@ -4,7 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <!-- Set the theme class before first paint so a dark-mode user never sees a light flash. -->
+    <!-- Static light-paper value; the inline script below overwrites it to the dark-paper
+         value before first paint when dark mode resolves, so this tag must come before that
+         script in document order (the script runs synchronously during parsing and can only
+         query elements already parsed). Both hexes are the computed sRGB of --paper (styles.css)
+         for light/dark respectively — see theme.tsx THEME_COLOR for the source of truth. -->
+    <meta name="theme-color" content="#fdf8f0" />
+    <!-- Set the theme class before first paint so a dark-mode user never sees a light flash.
+         Also flips the theme-color meta above to the dark paper value in that case, so the
+         status bar/address bar never flashes light before React's ThemeProvider (theme.tsx)
+         takes over. -->
     <script>
       (function () {
         try {
@@ -14,24 +23,27 @@
             ((!t || t === "system") &&
               window.matchMedia &&
               window.matchMedia("(prefers-color-scheme: dark)").matches);
-          if (dark) document.documentElement.classList.add("dark");
+          if (dark) {
+            document.documentElement.classList.add("dark");
+            var m = document.querySelector('meta[name="theme-color"]');
+            if (m) m.setAttribute("content", "#090909");
+          }
         } catch (e) {}
       })();
     </script>
-    <title>Clipnote: your saves become tools</title>
+    <title>Clipnote: notes worth re-reading</title>
     <meta
       name="description"
-      content="Save anything — links, reels, products, places — and Clipnote turns it into a living collection you can watch, cook, visit, or buy from."
+      content="Save anything. It becomes a note worth re-reading."
     />
-    <meta property="og:title" content="Clipnote: your saves become tools" />
+    <meta property="og:title" content="Clipnote: notes worth re-reading" />
     <meta
       property="og:description"
-      content="Save anything and it becomes an actionable collection — a watchlist, a wishlist, a recipe book, a map of places."
+      content="Save anything. It becomes a note worth re-reading."
     />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary" />
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#1c1917" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

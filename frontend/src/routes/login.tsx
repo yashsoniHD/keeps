@@ -14,11 +14,11 @@ import { useAuth } from "@/contexts/auth-context";
 // The promise, shown not told: the kinds of saves that become rich structured notes, each in
 // its domain color. (Literal class strings — Tailwind's JIT needs them spelled out.)
 const DOMAIN_CHIPS: { label: string; icon: LucideIcon; cls: string }[] = [
-  { label: "Movies", icon: Clapperboard, cls: "bg-media-soft text-media" },
-  { label: "Products", icon: ShoppingBag, cls: "bg-product-soft text-product" },
-  { label: "Places", icon: MapPin, cls: "bg-place-soft text-place" },
-  { label: "Recipes", icon: ChefHat, cls: "bg-recipe-soft text-recipe" },
-  { label: "Trips", icon: Plane, cls: "bg-trip-soft text-trip" },
+  { label: "Movies", icon: Clapperboard, cls: "bg-media-soft text-media-chip" },
+  { label: "Products", icon: ShoppingBag, cls: "bg-product-soft text-product-chip" },
+  { label: "Places", icon: MapPin, cls: "bg-place-soft text-place-chip" },
+  { label: "Recipes", icon: ChefHat, cls: "bg-recipe-soft text-recipe-chip" },
+  { label: "Trips", icon: Plane, cls: "bg-trip-soft text-trip-chip" },
 ];
 
 export const Route = createFileRoute("/login")({

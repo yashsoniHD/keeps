@@ -207,7 +207,7 @@ export function MovieDetail({
               href={sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={`mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-media-soft hover:text-media ${FOCUS_RING}`}
+              className={`mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-media-soft hover:text-media-chip ${FOCUS_RING}`}
             >
               <ExternalLink className="h-4 w-4" />
               View on {sourceDomain ?? "source"}
@@ -241,7 +241,7 @@ export function MovieDetail({
               onClick={toggleWatched}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 watched
-                  ? "border-transparent bg-media text-white"
+                  ? "border-transparent bg-media text-media-on"
                   : "border-border bg-card text-ink hover:bg-media-soft"
               }`}
             >
@@ -255,7 +255,7 @@ export function MovieDetail({
               aria-pressed={favorite}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-favorite text-white"
+                  ? "border-transparent bg-favorite text-favorite-on"
                   : "border-border bg-card text-ink hover:bg-media-soft"
               }`}
             >

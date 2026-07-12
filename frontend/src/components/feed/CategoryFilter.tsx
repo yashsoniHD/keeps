@@ -90,7 +90,7 @@ export function CategoryChips({
               type="button"
               onClick={() => setActive(rep)}
               className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${FOCUS_RING} ${
-                isActive ? `${accent.dot} text-white` : accent.chip
+                isActive ? `${accent.dot} ${accent.on}` : accent.chip
               }`}
             >
               <Icon className="h-4 w-4 shrink-0" />

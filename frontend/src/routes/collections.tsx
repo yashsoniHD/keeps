@@ -24,11 +24,21 @@ export const Route = createFileRoute("/collections")({ component: CollectionsPag
 const TILE_GRID = "grid grid-cols-2 gap-3 lg:grid-cols-3";
 const TILE_BASE = `flex min-h-[120px] flex-col justify-between gap-6 rounded-2xl border p-4 text-left transition-transform active:scale-[0.98] ${FOCUS_RING}`;
 
-// Quiet count in a tile's top-right corner: skeleton while loading, then just the number
-// (the label word is dropped visually; `unit` still fills the aria-label for screen readers).
-function CountCorner({ count, unit }: { count: number | null; unit: string }) {
-  if (count === null)
+// Quiet count in a tile's top-right corner. Three states: "loading" → skeleton; "error" → a
+// quiet dash (a terminal state, never a perpetual pulse); a number → the count itself (the label
+// word is dropped visually; `unit` still fills the aria-label for screen readers).
+function CountCorner({ count, unit }: { count: number | "loading" | "error"; unit: string }) {
+  if (count === "loading")
     return <span className="mt-1 h-4 w-8 shrink-0 animate-pulse rounded bg-ink/10" aria-hidden />;
+  if (count === "error")
+    return (
+      <span
+        className="mt-1 shrink-0 whitespace-nowrap text-xs text-ink-soft"
+        aria-label={`${unit} count unavailable`}
+      >
+        &ndash;
+      </span>
+    );
   return (
     <span
       className="mt-1 shrink-0 whitespace-nowrap text-xs text-ink-soft"
@@ -53,7 +63,9 @@ function CollectionsPage() {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
 
-  // One aggregate shot per subcollection on mount — quiet counts, no listeners.
+  // One aggregate shot per subcollection on mount — quiet counts, no listeners. getMiniAppItemCounts
+  // is already resilient (per-app nulls on partial failure); this catch only covers a total failure
+  // (e.g. it threw before settling) and lands on a terminal all-dashes state, never an eternal pulse.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -61,7 +73,17 @@ function CollectionsPage() {
       .then((c) => {
         if (!cancelled) setAppCounts(c);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("getMiniAppItemCounts failed", err);
+        if (!cancelled)
+          setAppCounts({
+            watchlist: null,
+            wishlist: null,
+            places: null,
+            recipes: null,
+            trips: null,
+          });
+      });
     return () => {
       cancelled = true;
     };
@@ -125,7 +147,14 @@ function CollectionsPage() {
                   >
                     <Icon className="h-5 w-5" />
                   </span>
-                  <CountCorner count={appCounts ? appCounts[t.app as AppKey] : null} unit="saved" />
+                  <CountCorner
+                    count={
+                      appCounts === null
+                        ? "loading"
+                        : (appCounts[t.app as AppKey] ?? "error") // per-app null → failed → dash
+                    }
+                    unit="saved"
+                  />
                 </div>
                 <div className="min-w-0">
                   <div className={`truncate font-semibold ${t.text}`}>{t.label}</div>
@@ -152,7 +181,7 @@ function CollectionsPage() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span
-                      className={`inline-flex h-10 w-10 items-center justify-center rounded-full ${accent.dot} text-white`}
+                      className={`inline-flex h-10 w-10 items-center justify-center rounded-full ${accent.dot} ${accent.on}`}
                     >
                       <Icon className="h-5 w-5" />
                     </span>

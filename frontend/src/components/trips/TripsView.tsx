@@ -18,7 +18,7 @@ type SortKey = "added" | "duration";
 type LengthBucket = "all" | "weekend" | "week" | "long";
 
 // Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
-const ACCENT_ACTIVE = "bg-trip text-white";
+const ACCENT_ACTIVE = "bg-trip text-trip-on";
 
 const dedupeKey = (i: TripItem) =>
   i.source_url?.trim().toLowerCase() ||
@@ -200,7 +200,7 @@ export function TripsView({ uid }: { uid: string }) {
               aria-pressed={favOnly}
               className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
                 favOnly
-                  ? "border-transparent bg-trip text-white"
+                  ? "border-transparent bg-trip text-trip-on"
                   : "border-border bg-card text-ink-soft"
               }`}
             >
@@ -211,7 +211,7 @@ export function TripsView({ uid }: { uid: string }) {
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full bg-trip px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full bg-trip px-3 py-1.5 text-xs font-medium text-trip-on transition-opacity hover:opacity-90 ${FOCUS_RING}`}
         >
           <Plus className="h-3.5 w-3.5" />
           Add trip

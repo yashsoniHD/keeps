@@ -52,7 +52,7 @@ export function AddRecipeSheet({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-3 p-4">
           {state === "done" ? (
-            <div className="flex items-center gap-2 rounded-xl bg-recipe-soft px-3 py-4 text-sm text-recipe">
+            <div className="flex items-center gap-2 rounded-xl bg-recipe-soft px-3 py-4 text-sm text-recipe-chip">
               <Check className="h-4 w-4" />
               Got it. Pulling the ingredients and method. It’ll appear here in a moment.
             </div>
@@ -77,7 +77,7 @@ export function AddRecipeSheet({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={submit}
                 disabled={!url.trim() || state === "submitting"}
-                className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-recipe px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
+                className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-recipe px-3 py-2 text-sm font-medium text-recipe-on transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
               >
                 {state === "submitting" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

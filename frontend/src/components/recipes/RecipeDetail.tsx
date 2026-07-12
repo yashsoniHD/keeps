@@ -133,7 +133,7 @@ export function RecipeDetail({
               aria-pressed={favorite}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING} ${
                 favorite
-                  ? "border-transparent bg-favorite text-white"
+                  ? "border-transparent bg-favorite text-favorite-on"
                   : "border-border bg-card text-ink hover:bg-recipe-soft"
               }`}
             >

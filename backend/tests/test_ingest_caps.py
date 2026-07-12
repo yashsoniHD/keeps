@@ -4,6 +4,8 @@ Per-user caps are an abuse backstop and hard-reject with 429. The *global* daily
 NOT reject — it defers the capture (status "deferred", nothing enqueued) so a brand-new user
 isn't errored on their first save during a launch spike. The parked capture is drained later.
 """
+import asyncio
+
 import pytest
 from fastapi import HTTPException
 
@@ -38,6 +40,9 @@ def patch_ingest(fake_db, monkeypatch):
     fake_db.transaction = lambda: FakeTransaction(fake_db)
     monkeypatch.setattr(ingest_mod, "get_db", lambda: fake_db)
     monkeypatch.setattr(ingest_mod.fs, "async_transactional", lambda f: f)
+    # A configured SA email means the normal Cloud Tasks enqueue path (not the dev inline path)
+    # runs by default; the inline-path test overrides this back to "".
+    monkeypatch.setattr(settings, "CLOUD_TASKS_SA_EMAIL", "sa@example.com")
     calls = []
     monkeypatch.setattr(ingest_mod, "enqueue_process_job", lambda job_id: calls.append(job_id))
 
@@ -105,3 +110,41 @@ async def test_ingest_route_enqueues_when_clear(fake_db, patch_ingest):
     )
     assert res.status == "pending"
     assert patch_ingest == [res.job_id]
+
+
+async def test_enqueue_failure_marks_job_failed(fake_db, patch_ingest, monkeypatch):
+    """A Cloud Tasks enqueue failure must not 500 or orphan a 'pending' job: the job goes
+    terminal ('failed') so the client stops showing an eternal 'Saving…' card."""
+    def boom(job_id):
+        raise RuntimeError("cloud tasks unavailable")
+
+    monkeypatch.setattr(ingest_mod, "enqueue_process_job", boom)
+
+    res = await ingest_mod.ingest(
+        FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u"
+    )
+    assert res.status == "failed"
+    job = fake_db.docs[("jobs", res.job_id)]
+    assert job["status"] == "failed"
+    assert job["error"]  # a human-readable message, not a stack trace
+
+
+async def test_empty_sa_email_runs_inline(fake_db, patch_ingest, monkeypatch):
+    """With no Cloud Tasks SA (local dev) the worker runs inline instead of enqueuing."""
+    monkeypatch.setattr(settings, "CLOUD_TASKS_SA_EMAIL", "")
+    ran = []
+
+    async def fake_process(job_id):
+        ran.append(job_id)
+        return {"status": "completed"}
+
+    import routers.process as process_mod
+    monkeypatch.setattr(process_mod, "_process_job", fake_process)
+
+    res = await ingest_mod.ingest(
+        FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u"
+    )
+    assert res.status == "pending"
+    assert patch_ingest == []          # nothing enqueued to Cloud Tasks
+    await asyncio.sleep(0)             # let the scheduled inline task run
+    assert ran == [res.job_id]

@@ -73,7 +73,7 @@ export const WatchCard = memo(function WatchCard({
             onClick={() => onToggleWatched(item)}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
               watched
-                ? "border-transparent bg-media text-white"
+                ? "border-transparent bg-media text-media-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
             }`}
           >
@@ -86,7 +86,7 @@ export const WatchCard = memo(function WatchCard({
             onClick={() => onToggleFavorite(item)}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
               favorite
-                ? "border-transparent bg-favorite text-white"
+                ? "border-transparent bg-favorite text-favorite-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
             }`}
           >

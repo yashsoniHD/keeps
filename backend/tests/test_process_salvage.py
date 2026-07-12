@@ -144,6 +144,57 @@ async def test_transient_at_cap_salvages(fake_db, monkeypatch):
     assert salvaged_notes(fake_db)[0]["content_type"] == "bookmark"
 
 
+UNREACHABLE = ContentBundle(
+    kind="metadata_only",
+    text="URL: https://example.com/post (content could not be retrieved)",
+    metadata={"title": "example.com", "platform": "example.com"},
+    strategy="unreachable",
+)
+
+
+async def test_unreachable_source_salvages_without_extracting(fake_db, monkeypatch):
+    """When every strategy fails the resolver returns a metadata-only stub. The pipeline must
+    salvage an honest bookmark rather than feed the stub to Gemini (which fabricates a full
+    note from the URL slug). classify/extract must NOT run, and nothing is fanned out."""
+    seed_job(fake_db)
+
+    async def unreachable(url):
+        return UNREACHABLE
+
+    monkeypatch.setattr(process.sources, "acquire", unreachable)
+
+    classify_calls, extract_calls, fan_calls = [], [], []
+
+    async def spy_classify(*a, **k):
+        classify_calls.append(a)
+        return "summary", None
+
+    async def spy_extract(*a, **k):
+        extract_calls.append(a)
+        return NoteExtraction(content_type="summary", title="t", ai_summary="s",
+                              cover_image_prompt="", data={"body": "x" * 60})
+
+    async def spy_fan(user_id, note_id, note_doc):
+        fan_calls.append(note_id)
+
+    monkeypatch.setattr(process.gemini_service, "classify", spy_classify)
+    monkeypatch.setattr(process.gemini_service, "extract_async", spy_extract)
+    monkeypatch.setattr(process, "fan_out_note", spy_fan)
+
+    result = await process.process_job("job-1", DummyRequest())
+
+    assert result["status"] == "completed"
+    assert result.get("salvaged") is True
+    note = salvaged_notes(fake_db)[0]
+    assert note["is_fallback"] is True
+    assert note["content_type"] == "bookmark"
+    assert note["template"] == "bookmark"
+    assert note["acquisition"] == "salvage"
+    assert extract_calls == []   # (a) Gemini extraction never ran on the fabrication path
+    assert classify_calls == []
+    assert fan_calls == []        # (b) a salvaged bookmark is not fanned out to mini-apps
+
+
 async def test_blocked_url_still_hard_fails(fake_db, monkeypatch):
     """SSRF blocks stay permanent: failed job, no note, no retry."""
     seed_job(fake_db)

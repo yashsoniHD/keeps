@@ -7,8 +7,12 @@ export type Theme = "light" | "dark" | "system";
 type Resolved = "light" | "dark";
 
 const STORAGE_KEY = "clipnote-theme";
-// Browser-chrome colors (status bar / address bar). Light mirrors --paper, dark --paper.
-const THEME_COLOR: Record<Resolved, string> = { light: "#faf8f3", dark: "#141414" };
+// Browser-chrome colors (status bar / address bar). These are the computed sRGB hex of the
+// CSS `--paper` custom property (styles.css `:root`/`.dark`, defined in OKLCH) for each mode —
+// keep in sync if those OKLCH values change. index.html's first-paint script and manifest.json
+// must match these exactly so there's no theme-color flash across the light/dark boundary.
+// light: oklch(0.98 0.012 80) -> #fdf8f0 · dark: oklch(0.14 0 0) -> #090909
+const THEME_COLOR: Record<Resolved, string> = { light: "#fdf8f0", dark: "#090909" };
 
 function readStored(): Theme {
   try {

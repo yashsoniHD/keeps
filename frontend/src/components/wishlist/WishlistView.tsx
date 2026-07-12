@@ -23,7 +23,7 @@ type SortKey = "added" | "price" | "rating" | "target";
 type Queue = "saved" | "purchased";
 
 // Full literals so the Tailwind JIT sees them (see mini-apps/wall.tsx).
-const ACCENT_ACTIVE = "bg-product text-white";
+const ACCENT_ACTIVE = "bg-product text-product-on";
 
 // Status priority for collapsing duplicates: keep the most-progressed copy.
 const STATUS_RANK: Record<WishItem["wish_status"], number> = { purchased: 2, to_buy: 1, saved: 0 };
@@ -252,7 +252,7 @@ export function WishlistView({ uid }: { uid: string }) {
               }}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
                 !favOnly && queue === t.key
-                  ? "bg-product text-white"
+                  ? "bg-product text-product-on"
                   : "text-ink-soft hover:text-ink"
               }`}
             >
@@ -263,7 +263,7 @@ export function WishlistView({ uid }: { uid: string }) {
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className={`inline-flex items-center gap-1.5 rounded-full bg-product px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 rounded-full bg-product px-3 py-1.5 text-xs font-medium text-product-on transition-opacity hover:opacity-90 ${FOCUS_RING}`}
         >
           <Plus className="h-3.5 w-3.5" />
           Add product
@@ -310,7 +310,7 @@ export function WishlistView({ uid }: { uid: string }) {
             aria-pressed={favOnly}
             className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
               favOnly
-                ? "border-transparent bg-product text-white"
+                ? "border-transparent bg-product text-product-on"
                 : "border-border bg-card text-ink-soft"
             }`}
           >

@@ -134,7 +134,7 @@ export function GroceryListSheet({
                       <span
                         className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
                           isChecked
-                            ? "border-transparent bg-recipe text-white"
+                            ? "border-transparent bg-recipe text-recipe-on"
                             : "border-border bg-card"
                         }`}
                       >
@@ -173,7 +173,7 @@ export function GroceryListSheet({
             type="button"
             onClick={share}
             disabled={remaining === 0}
-            className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
+            className={`inline-flex items-center gap-1.5 rounded-full bg-recipe px-4 py-2 text-sm font-medium text-recipe-on transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
           >
             <Share2 className="h-4 w-4" />
             Share

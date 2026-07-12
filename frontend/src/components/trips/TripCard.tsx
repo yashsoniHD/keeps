@@ -61,13 +61,13 @@ export const TripCard = memo(function TripCard({
           )}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {shape && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-trip-soft px-2 py-0.5 text-[11px] font-medium text-trip">
+              <span className="inline-flex items-center gap-1 rounded-full bg-trip-soft px-2 py-0.5 text-[11px] font-medium text-trip-chip">
                 <Calendar className="h-3 w-3" />
                 {shape}
               </span>
             )}
             {item.best_season && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-summary-soft px-2 py-0.5 text-[11px] font-medium text-summary">
+              <span className="inline-flex items-center gap-1 rounded-full bg-summary-soft px-2 py-0.5 text-[11px] font-medium text-summary-chip">
                 <Sun className="h-3 w-3" />
                 {item.best_season}
               </span>
@@ -94,7 +94,7 @@ export const TripCard = memo(function TripCard({
         onClick={() => onToggleFavorite(item)}
         className={`absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
           favorite
-            ? "border-transparent bg-favorite text-white"
+            ? "border-transparent bg-favorite text-favorite-on"
             : "border-border bg-background/80 text-ink-soft hover:text-ink"
         }`}
       >

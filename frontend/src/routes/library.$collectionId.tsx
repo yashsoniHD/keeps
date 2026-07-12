@@ -148,7 +148,7 @@ function VirtualFolder({ uid, kind }: { uid: string; kind: "favorites" | "manual
 
   const meta =
     kind === "favorites"
-      ? { name: "Favorites", Icon: Star, chip: "bg-favorite-soft text-favorite" }
+      ? { name: "Favorites", Icon: Star, chip: "bg-favorite-soft text-favorite-chip" }
       : { name: "Your notes", Icon: PenLine, chip: "bg-ink/5 text-ink-soft" };
 
   const unfavorite = (noteId: string) => {
@@ -323,7 +323,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
         <div className="rounded-2xl border border-dashed border-border bg-card/50 px-4 py-10 text-center">
           <span
             className={`mx-auto flex h-12 w-12 items-center justify-center rounded-2xl ${
-              accent ? `${accent.dot} text-white` : "bg-secondary text-ink-soft"
+              accent ? `${accent.dot} ${accent.on}` : "bg-secondary text-ink-soft"
             }`}
           >
             <Icon className="h-5 w-5" />

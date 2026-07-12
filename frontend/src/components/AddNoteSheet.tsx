@@ -239,7 +239,7 @@ export function AddNoteSheet({
             aria-pressed={voiceOpen}
             aria-label="Record a voice note"
             title="Record a voice note"
-            className={`${iconBtn} ${voiceOpen ? "border-transparent bg-health-soft text-health" : ""}`}
+            className={`${iconBtn} ${voiceOpen ? "border-transparent bg-health-soft text-health-chip" : ""}`}
           >
             <Mic className="h-4.5 w-4.5" />
           </button>

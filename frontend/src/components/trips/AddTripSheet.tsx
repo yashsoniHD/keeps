@@ -51,7 +51,7 @@ export function AddTripSheet({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-3 p-4">
           {state === "done" ? (
-            <div className="flex items-center gap-2 rounded-xl bg-trip-soft px-3 py-4 text-sm text-trip">
+            <div className="flex items-center gap-2 rounded-xl bg-trip-soft px-3 py-4 text-sm text-trip-chip">
               <Check className="h-4 w-4" />
               Got it. Mapping out the days and stops. It’ll appear here in a moment.
             </div>
@@ -76,7 +76,7 @@ export function AddTripSheet({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={submit}
                 disabled={!url.trim() || state === "submitting"}
-                className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-trip px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
+                className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-trip px-3 py-2 text-sm font-medium text-trip-on transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
               >
                 {state === "submitting" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

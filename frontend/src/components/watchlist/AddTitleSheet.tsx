@@ -107,7 +107,7 @@ export function AddTitleSheet({ onClose }: { onClose: () => void }) {
                   onClick={() => add(r)}
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
                     isAdded
-                      ? "border-transparent bg-media text-white"
+                      ? "border-transparent bg-media text-media-on"
                       : "border-border bg-card text-ink-soft hover:text-ink"
                   }`}
                   aria-label={isAdded ? "Added" : "Add to watchlist"}

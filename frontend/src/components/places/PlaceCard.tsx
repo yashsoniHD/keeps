@@ -54,13 +54,13 @@ export const PlaceCard = memo(function PlaceCard({ item }: { item: PlaceItem }) 
         {item.favorite && (
           <span
             aria-label="Starred"
-            className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-favorite text-white shadow-sm"
+            className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-favorite text-favorite-on shadow-sm"
           >
             <Star className="h-3.5 w-3.5 fill-current" />
           </span>
         )}
         {visits && (
-          <span className="absolute left-1.5 top-1.5 rounded-full bg-place px-2 py-0.5 text-[10px] font-medium text-white">
+          <span className="absolute left-1.5 top-1.5 rounded-full bg-place px-2 py-0.5 text-[10px] font-medium text-place-on">
             {visits}
           </span>
         )}

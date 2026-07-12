@@ -102,7 +102,7 @@ export function PackingList({ uid, itemId }: { uid: string; itemId: string }) {
                 onClick={() => toggle(idx)}
                 className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${FOCUS_RING} ${
                   it.checked
-                    ? "border-transparent bg-trip text-white"
+                    ? "border-transparent bg-trip text-trip-on"
                     : "border-border bg-background"
                 }`}
                 aria-pressed={it.checked}
@@ -142,7 +142,7 @@ export function PackingList({ uid, itemId }: { uid: string; itemId: string }) {
           onClick={add}
           disabled={!draft.trim()}
           aria-label="Add item"
-          className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-trip text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
+          className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-trip text-trip-on transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
         >
           <Plus className="h-4 w-4" />
         </button>
