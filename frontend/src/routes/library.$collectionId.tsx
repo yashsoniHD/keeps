@@ -34,7 +34,9 @@ import { FOCUS_RING, HIT_44_SM } from "@/lib/ui";
 import { NoteCard } from "@/components/NoteCard";
 import { NoteMenuProvider } from "@/components/NoteContextMenu";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { AppShell } from "@/components/AppShell";
+import { reportClientError } from "@/lib/client-errors";
 import type { Collection, Note } from "@/lib/types";
 
 export const Route = createFileRoute("/library/$collectionId")({ component: CollectionDetail });
@@ -193,6 +195,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   const [collection, setCollection] = useState<Collection | null>(null);
   const [resolved, setResolved] = useState(false); // the collections subscription has reported
   const [notes, setNotes] = useState<Note[]>([]);
+  const [notesError, setNotesError] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState("");
@@ -211,15 +214,32 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
         setCollection(cols.find((c) => c.id === collectionId) ?? null);
         setResolved(true);
       },
-      { onError: () => setResolved(true) },
+      {
+        onError: (err) => {
+          console.error("watchCollections failed", err);
+          setResolved(true);
+        },
+      },
     );
   }, [uid, collectionId]);
 
   // Membership is a live query on each note's collection_ids array (multi-home, backend-written
   // by the embedding matcher/rescore/pin/exclude), not a stored note_ids list — so a newly-filed
-  // note appears here live.
+  // note appears here live. A listener failure (e.g. a missing composite index) must not render
+  // as a false "Nothing filed here yet" — surface it as a real error state instead.
   useEffect(() => {
-    return watchNotesInCollection(uid, collectionId, setNotes, { onError: () => setNotes([]) });
+    setNotesError(false);
+    return watchNotesInCollection(uid, collectionId, (ns) => {
+      setNotesError(false);
+      setNotes(ns);
+    }, {
+      onError: (err) => {
+        console.error("watchNotesInCollection failed", err);
+        reportClientError("collection-notes", err.message, err.stack);
+        setNotesError(true);
+        setNotes([]);
+      },
+    });
   }, [uid, collectionId]);
 
   useEffect(() => {
@@ -287,6 +307,16 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   };
 
   if (!resolved) return <Loader />;
+
+  if (notesError) {
+    return (
+      <ErrorState
+        title="Couldn't load this collection"
+        body="Something went wrong reaching your notes. Give it another try."
+        onRetry={() => window.location.reload()}
+      />
+    );
+  }
 
   if (!collection) {
     return (

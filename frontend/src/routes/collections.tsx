@@ -106,7 +106,7 @@ function CollectionsPage() {
         .then((n) => {
           if (!cancelled) setNoteCounts((prev) => ({ ...prev, [c.id]: n }));
         })
-        .catch(() => {});
+        .catch((err) => console.error("getCollectionNoteCount failed", err));
     });
     return () => {
       cancelled = true;
