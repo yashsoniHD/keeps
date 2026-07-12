@@ -45,6 +45,7 @@ import { groupNotesByDate, noteLabel, sourceLabel } from "@/lib/note-meta";
 import { setFeedOrder } from "@/lib/note-nav";
 import { getCached, hasCached, setCached } from "@/lib/swr-cache";
 import { FOCUS_RING } from "@/lib/ui";
+import { PillButton } from "@/components/shared/PillButton";
 import {
   NoteCard,
   NoteRowList,
@@ -557,7 +558,7 @@ export function Feed({
   return (
     <NoteMenuProvider categories={categories} collections={collections} uid={user?.uid ?? null}>
       <AppShell>
-        <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
+        <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur">
           <div className="mx-auto max-w-7xl px-4 pt-4 pb-3 md:px-8">
             <div className="mb-3 flex items-center justify-between gap-3">
               {/* The Clipnote paper-clip mark + wordmark. */}
@@ -937,14 +938,10 @@ function EmptyState({ hasNotes, onTrySample }: { hasNotes: boolean; onTrySample?
           : "Tap + to clip your first link, or see one in action."}
       </p>
       {!hasNotes && onTrySample && (
-        <button
-          type="button"
-          onClick={onTrySample}
-          className={`mt-5 inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 ${FOCUS_RING}`}
-        >
+        <PillButton type="button" onClick={onTrySample} className="mt-5">
           <WandSparkles className="h-4 w-4" />
           Try a sample note
-        </button>
+        </PillButton>
       )}
     </div>
   );

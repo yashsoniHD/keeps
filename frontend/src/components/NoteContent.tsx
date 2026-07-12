@@ -4,7 +4,7 @@ import { RotateCcw, ArrowRight, BookmarkPlus, Loader2, Sparkles } from "lucide-r
 import type { Note, Collection } from "@/lib/types";
 import { ingest } from "@/lib/api";
 import { useAsk } from "@/contexts/ask-context";
-import { FOCUS_RING, PRESS } from "@/lib/ui";
+import { PillButton, PillLink } from "@/components/shared/PillButton";
 import { ClipMark } from "@/components/ClipMark";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
@@ -131,15 +131,17 @@ function FallbackBanner({ note }: { note: Note }) {
       <span>Limited preview. We couldn't fully process this capture.</span>
       {/* Retry re-ingests the original URL; a typed/uploaded capture has none, so it's hidden. */}
       {note.source_url && (
-        <button
+        <PillButton
           type="button"
+          variant="secondary"
+          size="sm"
           onClick={retry}
           disabled={retrying}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
+          className="shrink-0"
         >
           <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />
           {retrying ? "Retrying…" : "Retry"}
-        </button>
+        </PillButton>
       )}
     </div>
   );
@@ -182,19 +184,14 @@ function PublicSaveBar({ onSave, saving, isAuthed }: PublicSaveProps) {
   return (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
       <p className="text-sm text-ink-soft">Save this note to your Clipnote.</p>
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={saving}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
-      >
+      <PillButton type="button" onClick={onSave} disabled={saving} className="shrink-0">
         {saving ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           <BookmarkPlus className="h-4 w-4" />
         )}
         {saving ? "Saving…" : isAuthed ? "Save" : "Save to Clipnote"}
-      </button>
+      </PillButton>
     </div>
   );
 }
@@ -214,27 +211,19 @@ function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
         </p>
       </div>
       {onSave ? (
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95 disabled:opacity-60"
-        >
+        <PillButton type="button" onClick={onSave} disabled={saving} className="shrink-0">
           {saving ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <BookmarkPlus className="h-4 w-4" />
           )}
           {saving ? "Saving…" : isAuthed ? "Save to my notes" : "Sign up to save"}
-        </button>
+        </PillButton>
       ) : (
-        <Link
-          to="/"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-transform active:scale-95"
-        >
+        <PillLink to="/" className="shrink-0">
           Sign up free
           <ArrowRight className="h-4 w-4" />
-        </Link>
+        </PillLink>
       )}
     </div>
   );
@@ -300,15 +289,16 @@ function CoverFallback({ note, className = "" }: { note: Note; className?: strin
 function AskAboutNote() {
   const { openChat } = useAsk();
   return (
-    <button
+    <PillButton
       type="button"
+      variant="secondary"
       onClick={() => openChat()}
       aria-label="Ask Clip AI about this note"
-      className={`mt-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent ${PRESS} ${FOCUS_RING}`}
+      className="mt-6"
     >
       <Sparkles className="h-4 w-4 text-summary" aria-hidden />
       Ask about this note
-    </button>
+    </PillButton>
   );
 }
 

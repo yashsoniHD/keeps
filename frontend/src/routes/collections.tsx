@@ -121,7 +121,7 @@ function CollectionsPage() {
 
   return (
     <AppShell>
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-4 md:px-8">
           <Link
             to="/"

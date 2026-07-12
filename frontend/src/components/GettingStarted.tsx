@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { PillButton, PillLink } from "@/components/shared/PillButton";
 import { Check, ChevronRight, Compass, MonitorDown, Share, Smartphone, X } from "lucide-react";
 import { listTokensCached } from "@/lib/api";
 import { getInstallPrompt, isIOS, isStandalone } from "@/lib/platform";
@@ -55,21 +55,13 @@ export function GettingStarted({
       action: (
         <div className="flex shrink-0 items-center gap-2">
           {onTrySample && (
-            <button
-              type="button"
-              onClick={onTrySample}
-              className="rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-ink"
-            >
+            <PillButton type="button" variant="secondary" size="sm" onClick={onTrySample}>
               Try a sample
-            </button>
+            </PillButton>
           )}
-          <button
-            type="button"
-            onClick={onAddLink}
-            className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper"
-          >
+          <PillButton type="button" size="sm" onClick={onAddLink}>
             Add a link
-          </button>
+          </PillButton>
         </div>
       ),
     },
@@ -92,13 +84,9 @@ export function GettingStarted({
       ),
       action:
         !ios && installPrompt ? (
-          <button
-            type="button"
-            onClick={handleInstall}
-            className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper"
-          >
+          <PillButton type="button" size="sm" onClick={handleInstall}>
             Install
-          </button>
+          </PillButton>
         ) : undefined,
     },
     {
@@ -117,13 +105,10 @@ export function GettingStarted({
         </>
       ),
       action: (
-        <Link
-          to="/settings"
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-ink"
-        >
+        <PillLink to="/settings" variant="secondary" size="sm">
           Set up
           <ChevronRight className="h-3 w-3" />
-        </Link>
+        </PillLink>
       ),
     },
   ];

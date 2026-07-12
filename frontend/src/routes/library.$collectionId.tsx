@@ -24,7 +24,7 @@ import {
 } from "@/lib/firestore";
 import { updateNote, moveNoteToCollection } from "@/lib/api";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
-import { FOCUS_RING } from "@/lib/ui";
+import { FOCUS_RING, HIT_44_SM } from "@/lib/ui";
 import { NoteCard } from "@/components/NoteCard";
 import { NoteMenuProvider } from "@/components/NoteContextMenu";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -69,7 +69,7 @@ function FolderShell({
   return (
     <NoteMenuProvider categories={categories} collections={[]} uid={uid}>
       <AppShell>
-        <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
+        <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur">
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 md:px-8">
             <Link
               to="/"
@@ -121,7 +121,7 @@ const RemoveButton = ({ onClick, label }: { onClick: () => void; label: string }
     onClick={onClick}
     aria-label={label}
     title={label}
-    className="absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-ink-soft opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100"
+    className={`absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-ink-soft opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100 ${HIT_44_SM}`}
   >
     <X className="h-3.5 w-3.5" />
   </button>

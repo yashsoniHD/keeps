@@ -60,7 +60,7 @@ export const PlaceCard = memo(function PlaceCard({ item }: { item: PlaceItem }) 
           </span>
         )}
         {visits && (
-          <span className="absolute left-1.5 top-1.5 rounded-full bg-place px-2 py-0.5 text-[10px] font-medium text-place-on">
+          <span className="absolute left-1.5 top-1.5 rounded-full bg-place px-2 py-0.5 text-[11px] font-medium text-place-on">
             {visits}
           </span>
         )}

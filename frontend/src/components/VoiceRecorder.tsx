@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, Square, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { PillButton } from "@/components/shared/PillButton";
 
 // Picks an audio container the browser can actually record. Chrome/Android do webm/opus;
 // Safari/iOS (14.3+) only do mp4/aac. Empty string lets MediaRecorder choose its default.
@@ -111,13 +112,14 @@ export function VoiceRecorder({
           </span>
         </div>
         {phase === "denied" && (
-          <button
+          <PillButton
             type="button"
+            variant="secondary"
             onClick={() => setPhase("idle")}
-            className="mt-3 w-full rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink"
+            className="mt-3 w-full"
           >
             Try again
-          </button>
+          </PillButton>
         )}
       </div>
     );
@@ -168,21 +170,17 @@ export function VoiceRecorder({
 
       {(phase === "recorded" || phase === "saving") && (
         <div className="mt-3 flex gap-2">
-          <button
+          <PillButton
             type="button"
+            variant="secondary"
             onClick={reset}
             disabled={phase === "saving"}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-ink disabled:opacity-50"
+            className="flex-1"
           >
             <Trash2 className="h-4 w-4" />
             Re-record
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={phase === "saving"}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-60"
-          >
+          </PillButton>
+          <PillButton type="button" onClick={save} disabled={phase === "saving"} className="flex-1">
             {phase === "saving" ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -191,7 +189,7 @@ export function VoiceRecorder({
             ) : (
               "Save"
             )}
-          </button>
+          </PillButton>
         </div>
       )}
     </div>

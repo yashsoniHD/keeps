@@ -12,6 +12,7 @@ import {
   paletteAccent,
 } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
+import { PillButton } from "@/components/shared/PillButton";
 
 // Creation sheet for a smart collection. Unlike the old inline name-only input, this collects
 // a real description (it steers BOTH the backfill embedding and the ingest classifier — the
@@ -106,17 +107,17 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
                 "No existing notes matched yet. New saves that fit will land here automatically."
               )}
             </p>
-            <button
+            <PillButton
               type="button"
               onClick={() => {
                 onClose();
                 navigate({ to: "/library/$collectionId", params: { collectionId: created.id } });
               }}
-              className={`mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper ${FOCUS_RING}`}
+              className="mt-5 w-full"
             >
               Open collection
               <ArrowRight className="h-4 w-4" />
-            </button>
+            </PillButton>
           </div>
         ) : (
           <>
@@ -197,11 +198,11 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
 
             {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 
-            <button
+            <PillButton
               type="button"
               onClick={create}
               disabled={!name.trim() || busy}
-              className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper transition-opacity disabled:opacity-40 ${FOCUS_RING}`}
+              className="mt-4 w-full"
             >
               {busy ? (
                 <>
@@ -211,7 +212,7 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
               ) : (
                 "Create collection"
               )}
-            </button>
+            </PillButton>
           </>
         )}
       </div>

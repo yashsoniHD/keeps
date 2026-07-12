@@ -1,4 +1,5 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { PillLink } from "@/components/shared/PillButton";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { ClipLoader } from "@/components/ClipMark";
@@ -94,9 +95,7 @@ function PublicNote() {
           <Sparkles className="h-6 w-6" />
         </span>
         <p className="text-ink-soft">This note isn't available. It may be private or removed.</p>
-        <Link to="/" className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper">
-          Go to Clipnote
-        </Link>
+        <PillLink to="/">Go to Clipnote</PillLink>
       </div>
     );
   }
@@ -116,13 +115,10 @@ function PublicNote() {
                 Turn any link (recipe, reel, product, article) into a structured note like this.
               </p>
             </div>
-            <Link
-              to="/login"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90"
-            >
+            <PillLink to="/login" className="shrink-0">
               <Sparkles className="h-4 w-4" />
               Start your own, free
-            </Link>
+            </PillLink>
           </div>
         </div>
       )}

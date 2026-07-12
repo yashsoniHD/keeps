@@ -21,7 +21,7 @@ export function MiniAppHeader({
 }) {
   const Icon = tool.icon;
   return (
-    <header className={`sticky top-0 z-30 border-b ${tool.wash}`}>
+    <header className={`sticky top-0 z-30 border-b pt-[env(safe-area-inset-top)] ${tool.wash}`}>
       <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-3 md:gap-3 md:px-8">
         <Link to="/collections" aria-label="Back to Collections" title="Collections" className={ICON_BTN}>
           <ArrowLeft className="h-4 w-4" />

@@ -2,7 +2,7 @@ import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Clapperboard, Tv, Eye, CheckCircle2, Star, Plus } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
-import { FOCUS_RING } from "@/lib/ui";
+import { FOCUS_RING, HIT_44_STACK_TOP, HIT_44_STACK_BOTTOM } from "@/lib/ui";
 import type { WatchItem } from "@/lib/types";
 // Rating is edited on the detail page; cards show it read-only (a compact star + number) so the
 // poster wall stays uncluttered.
@@ -71,7 +71,7 @@ export const WatchCard = memo(function WatchCard({
             aria-label={watched ? "Mark as to watch" : "Mark as watched"}
             title={watched ? "Watched" : "Mark watched"}
             onClick={() => onToggleWatched(item)}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${HIT_44_STACK_TOP} ${
               watched
                 ? "border-transparent bg-media text-media-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
@@ -84,7 +84,7 @@ export const WatchCard = memo(function WatchCard({
             aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
             title={favorite ? "Favorite" : "Add to favorites"}
             onClick={() => onToggleFavorite(item)}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${HIT_44_STACK_BOTTOM} ${
               favorite
                 ? "border-transparent bg-favorite text-favorite-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
@@ -95,7 +95,7 @@ export const WatchCard = memo(function WatchCard({
         </div>
         {/* Media-type chip */}
         <span
-          className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${MEDIA_ACCENT.chip}`}
+          className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${MEDIA_ACCENT.chip}`}
         >
           {item.media_type === "tv" ? "TV" : item.media_type === "movie" ? "Film" : "Title"}
         </span>

@@ -2,7 +2,7 @@ import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Plane, Calendar, MapPin, Star, Sun, Wallet } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
-import { FOCUS_RING } from "@/lib/ui";
+import { FOCUS_RING, HIT_44 } from "@/lib/ui";
 import type { TripItem } from "@/lib/types";
 
 const TRIP_ACCENT = paletteAccent(8); // the "trip" palette, shared with itinerary notes
@@ -92,7 +92,7 @@ export const TripCard = memo(function TripCard({
         aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
         title={favorite ? "Favorite" : "Add to favorites"}
         onClick={() => onToggleFavorite(item)}
-        className={`absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+        className={`absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${HIT_44} ${
           favorite
             ? "border-transparent bg-favorite text-favorite-on"
             : "border-border bg-background/80 text-ink-soft hover:text-ink"

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Note } from "@/lib/types";
+import { pillClasses } from "@/components/shared/PillButton";
 import { noteAccent } from "@/lib/note-meta";
 import { StatGrid, type Stat } from "../StatGrid";
 
@@ -44,7 +45,7 @@ export function RecipeNote({ note }: { note: Note }) {
             href={note.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper"
+            className={pillClasses("primary", "md", "mt-4")}
           >
             <Globe className="h-4 w-4" />
             Open the source

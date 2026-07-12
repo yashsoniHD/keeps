@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
+import { PillButton, PillLink } from "@/components/shared/PillButton";
+import { HIT_44_ROW } from "@/lib/ui";
 import { goToNote } from "@/lib/nav";
 import {
   AlertCircle,
@@ -219,22 +221,18 @@ function ArtifactCard({
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-3">
         {done && noteId ? (
-          <Link
-            to="/notes/$noteId"
-            params={{ noteId }}
-            onClick={onNavigate}
-            className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
-          >
+          <PillLink to="/notes/$noteId" params={{ noteId }} onClick={onNavigate}>
             <Check className="h-4 w-4" />{" "}
             {state === "added" ? "Added. View note" : "Saved. View note"}
-          </Link>
+          </PillLink>
         ) : (
           <>
-            <button
+            <PillButton
               type="button"
+              variant="secondary"
               onClick={save}
               disabled={state === "saving"}
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
+              className="bg-background"
             >
               {state === "saving" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -242,17 +240,18 @@ function ArtifactCard({
                 <BookmarkPlus className="h-4 w-4" />
               )}
               Save as note
-            </button>
+            </PillButton>
             {focalNoteId && (
-              <button
+              <PillButton
                 type="button"
+                variant="secondary"
                 onClick={addToNote}
                 disabled={state === "saving"}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50"
+                className="bg-background"
               >
                 <BookmarkPlus className="h-4 w-4" />
                 Add to {focalTitle ? `“${focalTitle}”` : "this note"}
-              </button>
+              </PillButton>
             )}
           </>
         )}
@@ -756,7 +755,7 @@ export function AskChat({
           type="button"
           onClick={historyOpen ? () => setHistoryOpen(false) : openHistory}
           aria-label="Chat history"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink"
+          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink ${HIT_44_ROW}`}
         >
           <Clock className="h-4 w-4" />
         </button>
@@ -774,7 +773,7 @@ export function AskChat({
             type="button"
             onClick={onClose}
             aria-label="Close chat"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink"
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink ${HIT_44_ROW}`}
           >
             <X className="h-4 w-4" />
           </button>
@@ -849,24 +848,22 @@ export function AskChat({
                     </p>
                   )}
                   {m.resultNoteId && (
-                    <Link
+                    <PillLink
                       to="/notes/$noteId"
                       params={{ noteId: m.resultNoteId }}
                       onClick={onClose}
-                      className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
                     >
                       <Check className="h-4 w-4" /> Done. View the note
-                    </Link>
+                    </PillLink>
                   )}
                   {m.saved_note_id && (
-                    <Link
+                    <PillLink
                       to="/notes/$noteId"
                       params={{ noteId: m.saved_note_id }}
                       onClick={onClose}
-                      className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
                     >
                       <Check className="h-4 w-4" /> View saved note
-                    </Link>
+                    </PillLink>
                   )}
                   {m.artifact && (
                     <ArtifactCard
@@ -937,13 +934,9 @@ export function AskChat({
         <div className="shrink-0 border-t border-border bg-card px-3 pt-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-ink">Reference specific notes</p>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(false)}
-              className="rounded-full bg-ink px-3 py-1 text-xs font-medium text-paper"
-            >
+            <PillButton type="button" size="sm" onClick={() => setPickerOpen(false)}>
               Done
-            </button>
+            </PillButton>
           </div>
           <label className="mt-2 flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
             <Search className="h-4 w-4 shrink-0 text-ink-soft" />

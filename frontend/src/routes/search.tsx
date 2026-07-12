@@ -7,6 +7,7 @@ import { searchNotes, type SearchResult } from "@/lib/api";
 import { goToNote } from "@/lib/nav";
 import { noteAccent, noteIcon } from "@/lib/note-meta";
 import { FOCUS_RING, PRESS } from "@/lib/ui";
+import { PillButton } from "@/components/shared/PillButton";
 import { AppShell } from "@/components/AppShell";
 
 // Global semantic search across everything saved (GET /api/search over the search_index).
@@ -93,7 +94,7 @@ function SearchScreen() {
 
   return (
     <AppShell>
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 md:px-8">
           <Link
             to="/"
@@ -133,15 +134,15 @@ function SearchScreen() {
         {/* Clip AI hand-off: exact keyword search not finding it? Ask over the whole corpus.
             Mirrors the escape hatch the feed search used to offer. */}
         {trimmed.length >= MIN_CHARS && (
-          <button
+          <PillButton
             type="button"
             onClick={() => openChat(trimmed)}
             aria-label={`Ask Clip AI about ${trimmed}`}
-            className={`mb-4 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper ${PRESS} ${FOCUS_RING}`}
+            className="mb-4 w-full"
           >
             <Sparkles className="h-4 w-4" aria-hidden />
             Ask Clip AI about “{trimmed}”
-          </button>
+          </PillButton>
         )}
         {trimmed.length < MIN_CHARS ? (
           <div className="flex flex-col items-center gap-3 py-24 text-center text-ink-soft">

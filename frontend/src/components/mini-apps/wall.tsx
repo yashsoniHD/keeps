@@ -7,6 +7,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { AlertCircle } from "lucide-react";
 import type { Unsubscribe } from "firebase/firestore";
 import { FOCUS_RING } from "@/lib/ui";
+import { PillButton } from "@/components/shared/PillButton";
 import { getCached, setCached } from "@/lib/swr-cache";
 
 // Firestore listener page size. The walls were previously hard-capped here with no way to
@@ -121,13 +122,9 @@ export function WallError({ onRetry }: { onRetry: () => void }) {
       <AlertCircle className="mx-auto h-10 w-10 text-ink-soft/50" />
       <p className="mt-4 font-medium text-ink">Couldn’t load your saves</p>
       <p className="mt-1 text-sm text-ink-soft">Check your connection and try again.</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className={`press mt-5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper ${FOCUS_RING}`}
-      >
+      <PillButton type="button" onClick={onRetry} className="mt-5">
         Retry
-      </button>
+      </PillButton>
     </div>
   );
 }

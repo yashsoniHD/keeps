@@ -2,7 +2,7 @@ import { memo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ShoppingBag, Check, Star, Tag } from "lucide-react";
 import { paletteAccent } from "@/lib/note-meta";
-import { FOCUS_RING } from "@/lib/ui";
+import { FOCUS_RING, HIT_44_STACK_TOP, HIT_44_STACK_BOTTOM } from "@/lib/ui";
 import { formatPrice } from "@/lib/format";
 import type { WishItem } from "@/lib/types";
 
@@ -69,7 +69,7 @@ export const WishCard = memo(function WishCard({
             aria-label={bought ? "Mark as not bought" : "Mark as bought"}
             title={bought ? "Bought" : "Mark bought"}
             onClick={() => onToggleBought(item)}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${HIT_44_STACK_TOP} ${
               bought
                 ? "border-transparent bg-product text-product-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"
@@ -82,7 +82,7 @@ export const WishCard = memo(function WishCard({
             aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
             title={favorite ? "Favorite" : "Add to favorites"}
             onClick={() => onToggleFavorite(item)}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition-colors ${FOCUS_RING} ${HIT_44_STACK_BOTTOM} ${
               favorite
                 ? "border-transparent bg-favorite text-favorite-on"
                 : "border-border bg-background/80 text-ink-soft hover:text-ink"

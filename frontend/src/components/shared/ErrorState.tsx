@@ -1,5 +1,4 @@
-import { Link } from "@tanstack/react-router";
-import { FOCUS_RING } from "@/lib/ui";
+import { PillButton, PillLink } from "@/components/shared/PillButton";
 
 // A full-height, house-style error / empty panel: serif title, soft body, and up to two ink-pill
 // actions (an optional Retry and an optional "Back to home"). Used for note-load failures and any
@@ -26,21 +25,14 @@ export function ErrorState({
       {(onRetry || showHome) && (
         <div className="flex flex-wrap items-center justify-center gap-3">
           {onRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className={`rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 ${FOCUS_RING}`}
-            >
+            <PillButton type="button" onClick={onRetry}>
               {retryLabel}
-            </button>
+            </PillButton>
           )}
           {showHome && (
-            <Link
-              to="/"
-              className={`rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-accent ${FOCUS_RING}`}
-            >
+            <PillLink to="/" variant="secondary">
               Back to home
-            </Link>
+            </PillLink>
           )}
         </div>
       )}

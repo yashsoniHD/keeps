@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkle, Paperclip, Mic, ArrowUp, Link2, X } from "lucide-react";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { FOCUS_RING } from "@/lib/ui";
+import { PillButton } from "@/components/shared/PillButton";
 import type { CaptureMode } from "@/components/AppShell";
 
 // One trimmed token that reads as a web address → capture it as a link. Anything with
@@ -244,11 +245,11 @@ export function AddNoteSheet({
             <Mic className="h-4.5 w-4.5" />
           </button>
 
-          <button
+          <PillButton
             type="button"
             onClick={submit}
             disabled={!canSubmit || uploading}
-            className={`ml-auto inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-40 ${FOCUS_RING}`}
+            className="ml-auto"
           >
             {uploading
               ? "Adding…"
@@ -258,7 +259,7 @@ export function AddNoteSheet({
                   ? "Save as is"
                   : "Save"}
             {!uploading && <ArrowUp className="h-4 w-4" />}
-          </button>
+          </PillButton>
         </div>
       </div>
     </div>
