@@ -58,14 +58,28 @@ async def get_user_categories(uid: str) -> list[str]:
 
 
 async def get_user_collections(uid: str) -> list[dict]:
-    """The user's smart buckets from collections/{cid} — [{id, name, description}] — fed to the
-    classifier so it can file a new note into one at ingest. One indexed query, not a note scan."""
+    """The user's smart buckets from collections/{cid} — [{id, name, description, topic_embedding,
+    pinned_note_ids, excluded_note_ids, match_threshold}] — fed to the classifier (name/description
+    only) so it can file a new note into one at ingest, and to the rescore/matcher path (the extra
+    fields) so a note's membership can be re-derived by cosine similarity. Extra keys are additive —
+    callers that only read id/name/description (e.g. gemini.classify) are unaffected. One indexed
+    query, not a note scan."""
     query = get_db().collection("collections").where("user_id", "==", uid)
     out: list[dict] = []
     async for doc in query.stream():
         d = doc.to_dict() or {}
-        out.append({"id": doc.id, "name": d.get("name", ""),
-                    "description": d.get("description") or ""})
+        # topic_embedding is stored as a Firestore Vector; normalize to a plain list of floats
+        # (same convention as reading note embeddings elsewhere) so callers can do plain-Python math.
+        topic_embedding = d.get("topic_embedding")
+        out.append({
+            "id": doc.id,
+            "name": d.get("name", ""),
+            "description": d.get("description") or "",
+            "topic_embedding": list(topic_embedding) if topic_embedding is not None else None,
+            "pinned_note_ids": d.get("pinned_note_ids") or [],
+            "excluded_note_ids": d.get("excluded_note_ids") or [],
+            "match_threshold": d.get("match_threshold"),
+        })
     return out
 
 
@@ -355,6 +369,31 @@ async def reserve_backfill_run(user_id: str, app: str) -> bool:
         snap = await ref.get(transaction=tx)
         n = (snap.to_dict() or {}).get(field, 0)
         if n >= settings.MAX_BACKFILLS_PER_APP_PER_DAY:
+            return False
+        tx.set(ref, {"user_id": user_id, "date": today, field: n + 1}, merge=True)
+        return True
+
+    return await _claim(db.transaction())
+
+
+async def reserve_collection_rescore(user_id: str, collection_id: str) -> bool:
+    """Transactionally claim one collection rescore for today (per user, per collection) —
+    same pattern as reserve_backfill_run. Each rescore is a paid query-embed plus a vector
+    sweep over the whole corpus, so repeats are capped (MAX_RESCORES_PER_COLLECTION_PER_DAY).
+    Returns False when today's budget for this collection is used up — the router turns that
+    into a 429."""
+    from google.cloud import firestore as fs
+
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    field = f"rescore_{collection_id}_count"
+
+    @fs.async_transactional
+    async def _claim(tx) -> bool:
+        ref = db.collection("usage").document(f"{user_id}-{today}")
+        snap = await ref.get(transaction=tx)
+        n = (snap.to_dict() or {}).get(field, 0)
+        if n >= settings.MAX_RESCORES_PER_COLLECTION_PER_DAY:
             return False
         tx.set(ref, {"user_id": user_id, "date": today, field: n + 1}, merge=True)
         return True

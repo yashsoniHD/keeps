@@ -253,9 +253,9 @@ def capture_pipeline(fake_db, monkeypatch):
     async def no_embed(*a, **k):
         return None
 
-    async def fake_classify(url, bundle, existing, collections=None, note_hint=None):
+    async def fake_classify(url, bundle, existing, note_hint=None):
         captured["assign_bundle"] = bundle
-        return "summary", None
+        return "summary"
 
     async def fake_extract(url, bundle, content_type, note_hint=None):
         captured["bundle"] = bundle

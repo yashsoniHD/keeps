@@ -13,7 +13,6 @@ import {
   doc,
   documentId,
   arrayUnion,
-  arrayRemove,
   onSnapshot,
   serverTimestamp,
   getCountFromServer,
@@ -65,7 +64,12 @@ export function watchNotes(
     // A single slug (==) or a group of slugs (Firestore `in`, capped at 10) that all render
     // as the same chip label — see the category-chip dedupe in the feed.
     contentType?: string | string[];
-    collectionId?: string | null;
+    // A real collection id — array-contains membership in `collection_ids` (multi-home: a note
+    // can belong to more than one collection). There is no caller that needs "notes with no
+    // collection" through this param (that would need a separate scalar `collection_id == null`
+    // query, since Firestore can't express "array is empty" as array-contains) — grepped and
+    // confirmed unused, so it isn't supported here.
+    collectionId?: string;
     onError?: (e: Error) => void;
   } = {},
 ): Unsubscribe {
@@ -78,9 +82,8 @@ export function watchNotes(
       : types.length > 1
         ? [where("content_type", "in", types.slice(0, 10))]
         : []),
-    // collectionId "" is the Notes catch-all (collection_id == null); a real id is a bucket.
-    // Backed by the (user_id, collection_id, created_at) composite index.
-    ...(collectionId !== undefined ? [where("collection_id", "==", collectionId || null)] : []),
+    // Backed by the (user_id, collection_ids array-contains, created_at) composite index.
+    ...(collectionId ? [where("collection_ids", "array-contains", collectionId)] : []),
     orderBy("created_at", "desc"),
     limit(max),
   ];
@@ -279,8 +282,8 @@ export async function updateCollectionMeta(
   await updateDoc(doc(db, "collections", cid), clean);
 }
 
-// Live notes in a smart bucket, newest first. Replaces the old note_ids[] membership read —
-// membership now lives on each note's collection_id (backend-written by the AI classifier).
+// Live notes in a smart bucket, newest first. Membership lives on each note's `collection_ids`
+// array (multi-home, backend-written: embedding match at ingest + rescore + pin/exclude).
 export function watchNotesInCollection(
   userId: string,
   collectionId: string,
@@ -294,22 +297,11 @@ export function watchNotesInCollection(
   });
 }
 
+// Client-side fallback delete (no member-note sweep) — kept as a last resort for
+// `deleteCollectionApi` (backend, `DELETE /api/collections/{id}`) to fall back to on failure,
+// so the folder still goes away even if the sweep couldn't run.
 export async function deleteCollection(cid: string): Promise<void> {
   await deleteDoc(doc(db, "collections", cid));
-}
-
-export async function addNoteToCollection(cid: string, noteId: string): Promise<void> {
-  await updateDoc(doc(db, "collections", cid), {
-    note_ids: arrayUnion(noteId),
-    updated_at: serverTimestamp(),
-  });
-}
-
-export async function removeNoteFromCollection(cid: string, noteId: string): Promise<void> {
-  await updateDoc(doc(db, "collections", cid), {
-    note_ids: arrayRemove(noteId),
-    updated_at: serverTimestamp(),
-  });
 }
 
 // Fetch notes by id for a collection detail view. Firestore caps `in` queries at 10 ids, so
@@ -395,9 +387,10 @@ export async function getMiniAppItemCounts(userId: string): Promise<MiniAppItemC
   return counts;
 }
 
-// Note count for a single user-created collection — equality-only aggregate (user_id +
-// collection_id, no orderBy) so it needs no composite index. Best-effort: callers should
-// treat a rejected promise as "unknown" rather than block the tile on it.
+// Note count for a single user-created collection — user_id equality + collection_ids
+// array-contains (no orderBy) so it needs no composite index beyond the existing
+// array-contains one. Best-effort: callers should treat a rejected promise as "unknown"
+// rather than block the tile on it.
 export async function getCollectionNoteCount(
   userId: string,
   collectionId: string,
@@ -405,7 +398,7 @@ export async function getCollectionNoteCount(
   const q = query(
     collection(db, "notes"),
     where("user_id", "==", userId),
-    where("collection_id", "==", collectionId),
+    where("collection_ids", "array-contains", collectionId),
   );
   const snap = await getCountFromServer(q);
   return snap.data().count;

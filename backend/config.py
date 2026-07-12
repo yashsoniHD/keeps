@@ -87,16 +87,34 @@ class Settings:
     # recipes", "consolidate my trip notes") — bounds token cost on a big match set.
     ASK_EXHAUSTIVE_CAP: int = int(os.getenv("ASK_EXHAUSTIVE_CAP", "40"))
 
-    # --- Smart collections backfill (assign pre-existing notes to a new bucket) ---
-    # How many nearest notes to consider when a collection is created, and the max COSINE
+    # --- Smart collections (hybrid multi-membership rescore) ---
+    # How many nearest notes to consider when a collection is (re)scored, and the max COSINE
     # distance (1 - similarity) to still count as a match. Tuned for precision over recall —
-    # a missed note can always be moved manually, a wrong one is annoying.
-    COLLECTION_BACKFILL_K: int = int(os.getenv("COLLECTION_BACKFILL_K", "50"))
+    # a missed note can always be pinned manually, a wrong one is annoying. K bumped from 50 to
+    # 200 now that rescoring can both add AND remove membership across a user's whole corpus,
+    # not just sweep unassigned notes.
+    COLLECTION_BACKFILL_K: int = int(os.getenv("COLLECTION_BACKFILL_K", "200"))
     COLLECTION_BACKFILL_MAX_DISTANCE: float = float(
         os.getenv("COLLECTION_BACKFILL_MAX_DISTANCE", "0.45"))
     # Name+description shorter than this is too thin to embed well ("AI") — expand it into a
     # descriptive query via one lite-model call before the vector sweep.
     COLLECTION_QUERY_EXPAND_BELOW: int = int(os.getenv("COLLECTION_QUERY_EXPAND_BELOW", "48"))
+    # Cosine-similarity floor for a note to belong to a collection (the multi-membership
+    # matcher). Derived from the distance threshold above by default (similarity = 1 - distance)
+    # so the two stay in lockstep unless explicitly overridden; a collection can still set its
+    # own per-collection `match_threshold` that takes priority over this default.
+    COLLECTION_MATCH_MIN_SIMILARITY: float = float(
+        os.getenv("COLLECTION_MATCH_MIN_SIMILARITY", str(1 - COLLECTION_BACKFILL_MAX_DISTANCE)))
+    # Ceiling on how many collections a user may have when they next hit /rescore. Collections
+    # are created directly by the client in Firestore (no backend create path), so this is NOT
+    # enforced at creation — `routers/collections.py`'s `/rescore` endpoint is the one place that
+    # checks it (a user over the cap is told to delete some before rescoring again). Exists so an
+    # unbounded collection count can't make rescoring unbounded cost/latency too.
+    MAX_COLLECTIONS_PER_USER: int = int(os.getenv("MAX_COLLECTIONS_PER_USER", "30"))
+    # Per-collection daily cap on manual/triggered rescores — each rescore is a query-embed
+    # (paid Vertex call) plus a vector sweep, so repeats are capped like the mini-app backfills.
+    MAX_RESCORES_PER_COLLECTION_PER_DAY: int = int(
+        os.getenv("MAX_RESCORES_PER_COLLECTION_PER_DAY", "5"))
 
     # --- Agent (orchestrator + subagents + tools) ---
     # Master kill switch: when false, /api/ask/stream answers with no tools (falls back to

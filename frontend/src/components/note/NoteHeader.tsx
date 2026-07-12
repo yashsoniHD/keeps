@@ -153,9 +153,11 @@ export function NoteHeader({
     }
   };
 
-  // Single-home membership drives the folder button's "on" look (in a bucket or not).
-  const inCollections =
-    note.collection_id && collections.some((c) => c.id === note.collection_id) ? 1 : 0;
+  // Multi-home membership drives the folder button's "on" look (in any bucket or not). Falls
+  // back to the legacy scalar for a note that hasn't been touched since the migration lifted
+  // it onto collection_ids.
+  const memberIds = note.collection_ids ?? (note.collection_id ? [note.collection_id] : []);
+  const inCollections = memberIds.some((id) => collections.some((c) => c.id === id)) ? 1 : 0;
 
   return (
     <header className="mb-8 flex flex-col gap-5">

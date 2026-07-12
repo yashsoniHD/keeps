@@ -66,8 +66,8 @@ def patch_pipeline(monkeypatch, *, acquire_exc=None, extract_exc=None, extractio
 
     monkeypatch.setattr(process.sources, "acquire", fake_acquire)
 
-    async def fake_classify(url, bundle, existing, collections=None, note_hint=None):
-        return "summary", None
+    async def fake_classify(url, bundle, existing, note_hint=None):
+        return "summary"
 
     async def fake_extract(url, bundle, content_type, note_hint=None):
         if extract_exc:
@@ -167,7 +167,7 @@ async def test_unreachable_source_salvages_without_extracting(fake_db, monkeypat
 
     async def spy_classify(*a, **k):
         classify_calls.append(a)
-        return "summary", None
+        return "summary"
 
     async def spy_extract(*a, **k):
         extract_calls.append(a)

@@ -42,9 +42,13 @@ async def _embed(title: str, summary: str, existing: Vector | None) -> Vector | 
 async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
                  summary: str = "", cover_image_url: str | None = None,
                  content_type: str | None = None,
-                 collection_id: str | None = None, created_at=None,
+                 collection_id: str | None = None,
+                 collection_ids: list[str] | None = None, created_at=None,
                  embedding: Vector | None = None) -> None:
-    """Create/replace the index entry for a note. Idempotent per (kind, ref_id)."""
+    """Create/replace the index entry for a note. Idempotent per (kind, ref_id).
+
+    Carries collection membership two ways, kept coherent: the legacy scalar `collection_id`
+    (deprecated shim, first match or null) and the multi-membership `collection_ids` array."""
     try:
         now = datetime.now(timezone.utc)
         vec = await _embed(title, summary, embedding)
@@ -54,6 +58,7 @@ async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
             "ref_id": ref_id,
             "content_type": content_type or "",
             "collection_id": collection_id,
+            "collection_ids": collection_ids or [],
             "title": title or "",
             "summary": summary or "",
             "cover_image_url": cover_image_url,
@@ -77,6 +82,7 @@ async def upsert_for_note(db, note_id: str, note_doc: dict,
         cover_image_url=note_doc.get("cover_image_url"),
         content_type=note_doc.get("content_type", ""),
         collection_id=note_doc.get("collection_id"),
+        collection_ids=note_doc.get("collection_ids"),
         created_at=note_doc.get("created_at"), embedding=embedding,
     )
 

@@ -54,15 +54,31 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow create, update: if false;
     }
-    // Collections (user-created folders). Owner-only, and — unlike notes — written directly
-    // by the client (they hold only the user's own organisation: name, style, and a note_ids[]
-    // membership list, never note content). Mirrors the owner-writable users/{uid} doc.
+    // Collections (user-created folders). Owner-only, and — unlike notes — partly written
+    // directly by the client: name/description/icon/palette/updated_at are pure organisation
+    // (style, no note content), so the client may set those freely. Everything else on the doc
+    // — topic_embedding/topic_query (the match-scoring vector + the text it was built from),
+    // pinned_note_ids/excluded_note_ids (hard membership overrides), match_threshold — is
+    // written ONLY by the backend (services/collections.py rescore_collection / add_pin /
+    // add_exclusion), because a client that could set its own topic_embedding or pin/exclude
+    // list could forge membership without ever going through the embedding matcher.
     // create checks the INCOMING doc's user_id (no resource yet); other ops check the stored one.
     match /collections/{cid} {
       allow read, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow create:       if request.auth != null && request.auth.uid == request.resource.data.user_id;
+      allow create:       if request.auth != null && request.auth.uid == request.resource.data.user_id
+                          && !request.resource.data.keys().hasAny([
+                               'topic_embedding', 'topic_query', 'pinned_note_ids',
+                               'excluded_note_ids', 'match_threshold',
+                             ]);
       allow update:       if request.auth != null && request.auth.uid == resource.data.user_id
-                          && request.resource.data.user_id == resource.data.user_id;
+                          && request.resource.data.user_id == resource.data.user_id
+                          // Backend-only fields must be byte-for-byte unchanged by a client write
+                          // (absent-before counts as a value too, so a client can't introduce
+                          // one of these keys for the first time either).
+                          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                               'topic_embedding', 'topic_query', 'pinned_note_ids',
+                               'excluded_note_ids', 'match_threshold',
+                             ]);
     }
     // Search index (one doc per note). Backend-write-only — the worker keeps it in sync
     // (upsert on create/edit, delete on delete). Owner reads live via onSnapshot to power the

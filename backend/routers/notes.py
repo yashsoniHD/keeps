@@ -16,7 +16,6 @@ from services.firebase import (
     firestore_safe,
     get_db,
     get_user_categories,
-    get_user_collections,
     prune_category_if_empty,
 )
 from services.gemini import match_existing, normalize_slug
@@ -34,9 +33,6 @@ class NoteUpdate(BaseModel):
     pinned: bool | None = None        # float to the top of the feed (sets/clears pinned_at)
     ai_summary: str | None = Field(default=None, max_length=2000)
     data: dict[str, Any] | None = None  # body/structured fields (e.g. {"body": "…"} on a typed note)
-    # Move to a smart bucket (its id) or the Notes catch-all (null). Uses model_fields_set to tell
-    # "sent as null" from "omitted", so a PATCH that doesn't touch it leaves membership alone.
-    collection_id: str | None = None
 
 
 class AugmentNoteIn(BaseModel):
@@ -187,16 +183,6 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
         if old_ct != slug:
             await reconcile_note_items(user_id, note_id, old_ct, slug)
 
-    # Move to a smart bucket (or the catch-all). "sent" is distinguished from "omitted" so a PATCH
-    # that never mentions collection_id doesn't clobber membership.
-    if "collection_id" in body.model_fields_set:
-        cid = body.collection_id
-        if cid is not None:
-            valid = {c["id"] for c in await get_user_collections(user_id)}
-            if cid not in valid:
-                raise HTTPException(404, "Collection not found")
-        await ref.update({"collection_id": cid, "updated_at": datetime.now(timezone.utc)})
-
     if body.user_note is not None:
         await db.collection("annotations").document(note_id).set(
             {"user_id": user_id, "note_id": note_id, "user_note": body.user_note,
@@ -204,9 +190,8 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
             merge=True,
         )
 
-    # Re-sync the search index if anything it mirrors (title/summary/collection) changed.
-    if ({"title", "ai_summary"} & body.model_fields_set) or body.content_type is not None \
-            or "collection_id" in body.model_fields_set:
+    # Re-sync the search index if anything it mirrors (title/summary/category) changed.
+    if ({"title", "ai_summary"} & body.model_fields_set) or body.content_type is not None:
         cur = (await ref.get()).to_dict() or {}
         await search_index.upsert_for_note(db, note_id, cur, cur.get("embedding"))
 

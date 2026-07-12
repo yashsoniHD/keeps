@@ -32,6 +32,7 @@ from services import search_index
 from services import sources
 from services.agent_tools import AgentContext, run_agent_collect
 from services.cloud_tasks import enqueue_process_job
+from services.collections import match_collections_by_embedding
 from services.covers import persist_cover
 from services.embeddings import embedding_service
 from services.firebase import (
@@ -71,6 +72,29 @@ async def _note_embedding(title: str, ai_summary: str = "") -> Vector | None:
         log.warning("note embedding failed, writing note without it: %s: %s",
                     type(e).__name__, e)
         return None
+
+
+async def _match_collections(user_id: str, note_id: str,
+                             embedding: Vector | None) -> list[str]:
+    """Smart-collection membership at ingest: pure in-memory cosine match between the note's
+    already-computed embedding and each of the user's collections' `topic_embedding` (no new
+    AI calls). A note with no embedding (embed failure is non-fatal) matches nothing.
+
+    Strictly best-effort: this runs after the paid classify+extract call, so any failure here
+    (e.g. a Firestore hiccup in get_user_collections) must never fall through to the generic
+    exception handler and salvage the job — that would throw away the extraction we already
+    paid for over a purely cosmetic feature. A miss just leaves the note unfiled."""
+    if embedding is None:
+        return []
+    try:
+        collections = await get_user_collections(user_id)
+    except Exception as e:  # noqa: BLE001 — see docstring: never fail the note over this.
+        log.warning("collection matching failed, note will have no collection_ids: %s: %s",
+                    type(e).__name__, e, extra={"user_id": user_id, "note_id": note_id})
+        return []
+    if not collections:
+        return []
+    return match_collections_by_embedding(list(embedding), note_id, collections)
 
 # A transient failure below this many attempts re-raises as 500 (Cloud Tasks retries,
 # max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
@@ -354,7 +378,6 @@ async def _process_job(job_id: str) -> dict:
                 now=datetime.now(timezone.utc),
                 error="unreachable: content could not be retrieved")
 
-        collection_id: str | None = None
         if input_type == "text" and not process_ai:
             # Save-as-is: skip Gemini entirely. The text is the note; the user titles and
             # categorises it themselves (and can edit the body later). Still embedded below
@@ -362,12 +385,10 @@ async def _process_job(job_id: str) -> dict:
             extracted = _raw_text_extraction(job.get("text") or "", title)
             cover_image_url = None
         else:
-            # 2. Classify against this user's own categories AND smart collections (one lite call):
-            #    content_type routes rendering + mini-apps; collection_id files a note into a bucket.
+            # 2. Classify against this user's own categories (one lite call, content_type only —
+            #    smart-collection membership is resolved later, by embedding match, not here).
             existing = await get_user_categories(user_id)
-            collections = await get_user_collections(user_id)
-            content_type, collection_id = await gemini_service.classify(
-                url, bundle, existing, collections, note_hint)
+            content_type = await gemini_service.classify(url, bundle, existing, note_hint)
 
             # 3. Type-focused extraction (structured data only — never HTML).
             extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
@@ -417,6 +438,12 @@ async def _process_job(job_id: str) -> dict:
         # Every capture is a note.
         note_id = _stable_id("note", job_id)
         embedding = await _note_embedding(extracted.title, extracted.ai_summary)
+        # Smart-bucket membership: pure in-memory cosine match against the user's collections'
+        # topic_embedding (no new AI calls). A note can now belong to more than one collection;
+        # the legacy scalar `collection_id` is kept coherent (first match, or null) for the
+        # not-yet-migrated frontend/API surface.
+        collection_ids = await _match_collections(user_id, note_id, embedding)
+        collection_id = collection_ids[0] if collection_ids else None
         note_doc = {
             "user_id": user_id,
             "input_type": input_type,
@@ -432,7 +459,9 @@ async def _process_job(job_id: str) -> dict:
             "source_domain": source_domain,
             "source": source,
             "cover_image_url": cover_image_url,
-            # Smart-bucket membership from the classifier; null → the Notes catch-all.
+            # Smart-bucket membership by embedding match; collection_id is the legacy scalar
+            # (deprecated shim, first match or null) kept coherent with collection_ids.
+            "collection_ids": collection_ids,
             "collection_id": collection_id,
             "data": firestore_safe(extracted.data),
             "acquisition": bundle.strategy,
@@ -595,6 +624,8 @@ async def process_agent_job(job_id: str, request: Request):
         slug = match_existing(normalize_slug(content_type), await get_user_categories(user_id))
         new_id = _stable_id("agent-note", job_id)
         embedding = await _note_embedding(title, ai_summary)
+        collection_ids = await _match_collections(user_id, new_id, embedding)
+        collection_id = collection_ids[0] if collection_ids else None
         note_doc = {
             "user_id": user_id,
             "content_type": slug,
@@ -607,7 +638,9 @@ async def process_agent_job(job_id: str, request: Request):
             "cover_image_url": None,
             "data": firestore_safe(data),
             "acquisition": "ai_deep_task",
-            "collection_id": None,  # AI-authored notes land in the Notes catch-all
+            # AI-authored notes still get matched by embedding, same as any other note.
+            "collection_ids": collection_ids,
+            "collection_id": collection_id,
             "source_note_ids": list(dict.fromkeys(ctx.cited_ids))[:50],
             "created_at": now,
             "updated_at": datetime.now(timezone.utc),

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowRight, Check, FolderPlus, Loader2, Pencil, Sparkles, X } from "lucide-react";
 import { createCollection } from "@/lib/firestore";
-import { backfillCollection } from "@/lib/api";
+import { rescoreCollection } from "@/lib/api";
 import {
   CATEGORY_ICONS,
   PALETTE_DOTS,
@@ -15,9 +15,9 @@ import { FOCUS_RING } from "@/lib/ui";
 import { PillButton } from "@/components/shared/PillButton";
 
 // Creation sheet for a smart collection. Unlike the old inline name-only input, this collects
-// a real description (it steers BOTH the backfill embedding and the ingest classifier — the
+// a real description (it steers BOTH the rescore embedding and the ingest classifier — the
 // difference between an empty "AI" bucket and a working one) and an icon + colour, then awaits
-// the backfill and reports what it swept in, so creating a collection never *looks* broken.
+// the rescore and reports what it swept in, so creating a collection never *looks* broken.
 export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () => void }) {
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -52,7 +52,7 @@ export function NewCollectionSheet({ uid, onClose }: { uid: string; onClose: () 
       // Await the sweep so we can say what happened instead of silently hoping.
       let assigned = 0;
       try {
-        assigned = (await backfillCollection(id)).assigned;
+        assigned = (await rescoreCollection(id)).added;
       } catch {
         // Sweep is best-effort — the collection exists; new saves will still be filed into it.
       }

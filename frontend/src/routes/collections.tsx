@@ -96,7 +96,7 @@ function CollectionsPage() {
   }, [user]);
 
   // Note counts per collection: cheap aggregate queries, best-effort (Collection docs carry
-  // no count field; membership lives on each note's collection_id).
+  // no count field; membership lives on each note's collection_ids array).
   useEffect(() => {
     if (!user) return;
     let cancelled = false;

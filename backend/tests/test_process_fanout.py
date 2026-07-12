@@ -43,8 +43,8 @@ def wire(fake_db, monkeypatch):
     async def cols(uid):
         return []
 
-    async def classify(url, bundle, existing, collections=None, note_hint=None):
-        return "movie", None
+    async def classify(url, bundle, existing, note_hint=None):
+        return "movie"
 
     async def extract(url, bundle, ct, note_hint=None):
         return NoteExtraction(content_type=ct, title="5 sci-fi films", ai_summary="A roundup.",

@@ -212,18 +212,6 @@ categories exactly as written — do NOT invent a new slug, even if none is a pe
 Pick the closest existing category."""
 
 
-# Appended to CATEGORY_SYSTEM only when the user has smart collections, so the same lite call
-# that assigns content_type also files the note into (at most) one user bucket. Kept separate so
-# the base prompt is untouched for users with no collections.
-COLLECTION_RULE = """
-
-You are ALSO given the user's named COLLECTIONS (buckets they created to organise notes).
-If the content clearly belongs in exactly ONE of them, set "collection_id" to that collection's
-id. If none clearly fits, set "collection_id" to null. Assign to AT MOST ONE, and only ever use
-an id from the provided list.
-Return JSON: {"content_type":"slug","collection_id":"<id>" or null}."""
-
-
 COLLECTION_QUERY_SYSTEM = """You expand a user's collection name into a semantic search query.
 The user named a folder for their saved notes; write 2-3 sentences describing what content
 belongs in it — topics, typical note subjects, related terms and synonyms. Be concrete and
@@ -622,13 +610,16 @@ class GeminiService:
 
     async def classify(self, url: str, bundle: ContentBundle,
                        existing_categories: list[str],
-                       collections: list[dict] | None = None,
-                       note_hint: str | None = None) -> tuple[str, str | None]:
-        """One lite call that assigns the content_type AND (when the user has smart collections)
-        files the note into at most one of them. Returns (content_type, collection_id|None).
-        collection_id files the note into a smart collection (null → the Notes catch-all)."""
-        collections = collections or []
-        valid_ids = {c["id"] for c in collections}
+                       note_hint: str | None = None) -> str:
+        """One lite call that assigns a note's content_type against the user's existing
+        categories. Returns the resolved slug.
+
+        Collection membership is NO LONGER decided here — a classifier call used to also
+        file the note into at most one user-created bucket, but that's now resolved by
+        embedding similarity at ingest (services.collections.match_collections_by_embedding,
+        called from routers/process.py after the note embedding is computed), which lets a
+        note belong to more than one collection instead of the old at-most-one assignment.
+        Dropping collection routing from this prompt also shaves its output tokens."""
         categories_str = ", ".join(existing_categories) if existing_categories else "none yet"
         prompt = (
             f"URL: {url}\n"
@@ -636,24 +627,12 @@ class GeminiService:
             f"Content preview: {bundle.preview[:600]}\n"
             f"User's existing categories: {categories_str}\n"
         )
-        if collections:
-            lines = "\n".join(
-                f"- id={c['id']} name={c['name']}"
-                + (f" — {c['description']}" if c.get("description") else "")
-                for c in collections
-            )
-            prompt += f"User's collections:\n{lines}\n"
         prompt += (
             (f"User instruction: {note_hint}\n" if note_hint else "")
-            + "Choose the content_type"
-            + (" and collection_id." if collections else ".")
+            + "Choose the content_type."
         )
         at_cap = len(existing_categories) >= settings.MAX_USER_CATEGORIES
-        system = (
-            CATEGORY_SYSTEM
-            + (CATEGORY_CAP_RULE if at_cap else "")
-            + (COLLECTION_RULE if collections else "")
-        )
+        system = CATEGORY_SYSTEM + (CATEGORY_CAP_RULE if at_cap else "")
         # An uploaded image/PDF often has no useful preview text — classify from the file
         # itself (the lite model is multimodal). Video is left out: it's the expensive path
         # and its title/description text is enough for categorization.
@@ -682,13 +661,9 @@ class GeminiService:
             ),
         )
         record_usage(settings.GEMINI_LITE_MODEL, response)
-        collection_id: str | None = None
         try:
             parsed = json.loads(_strip_code_fences(response.text))
             slug = parsed.get("content_type", "summary")
-            raw_cid = parsed.get("collection_id")
-            if isinstance(raw_cid, str) and raw_cid in valid_ids:
-                collection_id = raw_cid
         except (json.JSONDecodeError, AttributeError):
             slug = "summary"
         resolved = match_existing(slug, existing_categories)
@@ -696,15 +671,14 @@ class GeminiService:
         # net-new slug is snapped onto the closest existing category, never appended.
         if at_cap and resolved not in existing_categories:
             resolved = closest_existing(resolved, existing_categories)
-        return resolved, collection_id
+        return resolved
 
     async def assign_category(self, url: str, bundle: ContentBundle,
                               existing_categories: list[str],
                               note_hint: str | None = None) -> str:
-        """Back-compat wrapper — content_type only (no collection routing)."""
-        content_type, _ = await self.classify(url, bundle, existing_categories,
-                                              collections=None, note_hint=note_hint)
-        return content_type
+        """Back-compat alias — identical to classify now that collection routing has moved
+        to embedding match at ingest (kept so any external caller of the old name still works)."""
+        return await self.classify(url, bundle, existing_categories, note_hint=note_hint)
 
     # ---------- Backfill: pull titles out of an already-saved note ----------
 

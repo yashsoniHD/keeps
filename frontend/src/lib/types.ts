@@ -19,8 +19,13 @@ export interface Note {
   is_public?: boolean; // owner shared it — readable via /p/{id} without login
   is_favorite?: boolean; // starred for quick access in the Library
   pinned_at?: Timestamp | null; // set → floats to the top of the feed; doubles as the sort key
-  collection_id?: string | null; // smart-bucket membership (backend-written by the AI classifier);
-  // null → lives in the Notes catch-all. Single-home: a note belongs to at most one collection.
+  /** @deprecated transition shim only — kept coherent by the backend as `collection_ids[0]` or
+   * null. Read `collection_ids` instead; this stays only for reading not-yet-migrated docs. */
+  collection_id?: string | null;
+  // Multi-home smart-bucket membership (backend-written: embedding match at ingest, reconciled
+  // by rescore, pin/exclude overrides). A note can belong to more than one collection now;
+  // absent/empty → lives in the Notes catch-all.
+  collection_ids?: string[];
 
   created_at: Timestamp;
   updated_at: Timestamp;
@@ -61,8 +66,10 @@ export interface PlaceAction {
 }
 
 // A user-created smart bucket. Owner-writable directly from the client for its presentation
-// (name/icon/palette/description); membership is no longer stored here — notes carry a
-// `collection_id` written by the backend AI classifier, so the collection view is a live query.
+// (name/icon/palette/description); membership is no longer stored here — notes carry
+// `collection_ids` (multi-home, backend-written: embedding match + rescore + pin/exclude
+// overrides), so the collection view is a live query. `topic_query`/`topic_embedding`/
+// `pinned_note_ids`/`excluded_note_ids` are backend-only fields the client never reads directly.
 // `note_ids` is retained (optional) only for reading legacy docs during migration.
 export interface Collection {
   id: string;

@@ -140,7 +140,6 @@ export async function updateNote(
     data?: Record<string, unknown>;
     is_favorite?: boolean;
     pinned?: boolean;
-    collection_id?: string | null; // move to a bucket (id) or the catch-all (null)
   },
 ): Promise<void> {
   const res = await apiFetch(`/api/notes/${id}`, {
@@ -155,24 +154,67 @@ export async function updateNote(
   invalidateCache("feed:");
 }
 
-// Move a note into a smart bucket (or back to the catch-all with null). Membership is
-// backend-written (notes are backend-write-only), so this is a thin PATCH wrapper.
-export async function moveNoteToCollection(
-  noteId: string,
-  collectionId: string | null,
-): Promise<void> {
-  await updateNote(noteId, { collection_id: collectionId });
+// Pin: manually add a note to a collection — a hard override that survives future rescores
+// (the note stays in even if a later cosine sweep says it doesn't match). Notes are
+// backend-write-only, so membership changes always go through the backend.
+export async function pinNoteToCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await apiFetch(`/api/collections/${collectionId}/notes/${noteId}`, {
+    method: "POST",
+  });
+  if (!res.ok)
+    throw new ApiError(
+      await errorDetail(res, "Couldn't add the note to the collection."),
+      res.status,
+    );
+  invalidateCache("feed:");
 }
 
-// After creating a collection, sweep the user's existing unassigned notes into it (embedding
-// match, backend). Returns how many were filed. Best-effort — a failure just leaves them unfiled.
-export async function backfillCollection(collectionId: string): Promise<{ assigned: number }> {
-  const res = await apiFetch(`/api/collections/${collectionId}/backfill`, { method: "POST" });
+// Exclude: manually remove a note from a collection — a hard override that survives future
+// rescores (it won't be re-added even if it becomes a strong match again).
+export async function excludeNoteFromCollection(
+  collectionId: string,
+  noteId: string,
+): Promise<void> {
+  const res = await apiFetch(`/api/collections/${collectionId}/notes/${noteId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok)
+    throw new ApiError(
+      await errorDetail(res, "Couldn't remove the note from the collection."),
+      res.status,
+    );
+  invalidateCache("feed:");
+}
+
+export interface RescoreResult {
+  matched: number;
+  added: number;
+  removed: number;
+  reason?: string;
+}
+
+// (Re)compute a collection's embedding-matched membership across the user's whole corpus —
+// called right after creating a collection (sweep existing notes in) and from the collection
+// page's "Rescan" action (re-sync after a rename/description edit). Respects pin/exclude
+// overrides; best-effort from the caller's point of view, but awaited so the UI can report
+// what changed.
+export async function rescoreCollection(collectionId: string): Promise<RescoreResult> {
+  const res = await apiFetch(`/api/collections/${collectionId}/rescore`, { method: "POST" });
   if (!res.ok)
     throw new ApiError(
       await errorDetail(res, "Couldn't sort notes into the collection."),
       res.status,
     );
+  return res.json();
+}
+
+// Delete a collection: the backend strips its id from every member note (best-effort sweep)
+// before deleting the doc itself. Callers should fall back to the client-side `deleteCollection`
+// on failure so the folder still goes away even if the sweep couldn't run.
+export async function deleteCollectionApi(collectionId: string): Promise<{ stripped: number }> {
+  const res = await apiFetch(`/api/collections/${collectionId}`, { method: "DELETE" });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't delete the collection."), res.status);
   return res.json();
 }
 

@@ -5,6 +5,7 @@ import {
   FolderPlus,
   PenLine,
   Pencil,
+  RefreshCw,
   Sparkles,
   Star,
   Trash2,
@@ -22,7 +23,12 @@ import {
   deleteCollection,
   getUserCategories,
 } from "@/lib/firestore";
-import { updateNote, moveNoteToCollection } from "@/lib/api";
+import {
+  updateNote,
+  excludeNoteFromCollection,
+  rescoreCollection,
+  deleteCollectionApi,
+} from "@/lib/api";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING, HIT_44_SM } from "@/lib/ui";
 import { NoteCard } from "@/components/NoteCard";
@@ -179,7 +185,8 @@ function VirtualFolder({ uid, kind }: { uid: string; kind: "favorites" | "manual
   );
 }
 
-// A real, user-created collection — membership is a stored note_ids list; supports rename + delete.
+// A real, user-created collection — membership is a live query on collection_ids; supports
+// rename + delete + a manual rescan.
 function RealCollection({ uid, collectionId }: { uid: string; collectionId: string }) {
   useCategoryMeta();
   const navigate = useNavigate();
@@ -190,6 +197,8 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanMsg, setRescanMsg] = useState<string | null>(null);
 
   // Live subscription so a removal/rename reflects immediately. Find this collection by id.
   useEffect(() => {
@@ -206,8 +215,9 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
     );
   }, [uid, collectionId]);
 
-  // Membership is a live query on each note's collection_id (backend-written by the AI
-  // classifier), not a stored note_ids list — so a newly-classified note appears here live.
+  // Membership is a live query on each note's collection_ids array (multi-home, backend-written
+  // by the embedding matcher/rescore/pin/exclude), not a stored note_ids list — so a newly-filed
+  // note appears here live.
   useEffect(() => {
     return watchNotesInCollection(uid, collectionId, setNotes, { onError: () => setNotes([]) });
   }, [uid, collectionId]);
@@ -222,6 +232,25 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   );
   const Icon = iconByName(collection?.icon) ?? FolderPlus;
 
+  const rescan = async (silent = false) => {
+    if (rescanning) return;
+    setRescanning(true);
+    if (!silent) setRescanMsg(null);
+    try {
+      const res = await rescoreCollection(collectionId);
+      setRescanMsg(
+        res.added || res.removed
+          ? `${res.added} added, ${res.removed} removed`
+          : "Everything's up to date",
+      );
+    } catch {
+      setRescanMsg("Couldn't rescan. Try again.");
+    } finally {
+      setRescanning(false);
+      setTimeout(() => setRescanMsg(null), 4000);
+    }
+  };
+
   const saveName = async () => {
     const next = name.trim();
     setEditingName(false);
@@ -230,12 +259,16 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
       return;
     }
     await updateCollectionMeta(collection.id, { name: next }).catch(() => {});
+    // Renaming changes the topic — resync the embedding + membership. Best-effort: a failure
+    // just leaves the old embedding until the next manual rescan.
+    rescan(true).catch(() => {});
   };
 
-  // Removing a note from a collection moves it back to the Notes catch-all (collection_id=null),
-  // written through the backend (notes are backend-write-only). The live query drops it here.
+  // Removing a note from a collection excludes it — a hard override that survives a later
+  // rescore (it won't silently reappear on the next resync). Written through the backend
+  // (notes are backend-write-only); the live query drops it here.
   const remove = async (noteId: string) => {
-    await moveNoteToCollection(noteId, null).catch(() => {});
+    await excludeNoteFromCollection(collectionId, noteId).catch(() => {});
   };
 
   const del = async () => {
@@ -245,7 +278,11 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
       return;
     }
     if (!collection) return;
-    await deleteCollection(collection.id).catch(() => {});
+    try {
+      await deleteCollectionApi(collection.id);
+    } catch {
+      await deleteCollection(collection.id).catch(() => {}); // fallback: at least remove the folder
+    }
     navigate({ to: "/" });
   };
 
@@ -302,19 +339,39 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
         )
       }
       headerAction={
-        <button
-          type="button"
-          onClick={del}
-          aria-label="Delete collection"
-          className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border text-sm transition-colors ${
-            confirmDelete
-              ? "border-destructive bg-destructive px-3 text-white"
-              : "w-9 border-border bg-card text-ink-soft hover:text-destructive"
-          }`}
-        >
-          <Trash2 className="h-4 w-4" />
-          {confirmDelete && "Sure?"}
-        </button>
+        <div className="flex items-center gap-2">
+          {rescanMsg && (
+            <span
+              role="status"
+              className="hidden max-w-[10rem] truncate text-xs text-ink-soft sm:inline"
+            >
+              {rescanMsg}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => rescan()}
+            disabled={rescanning}
+            aria-label="Rescan collection"
+            title="Rescan collection"
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink disabled:opacity-60 ${FOCUS_RING}`}
+          >
+            <RefreshCw className={`h-4 w-4 ${rescanning ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            type="button"
+            onClick={del}
+            aria-label="Delete collection"
+            className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border text-sm transition-colors ${
+              confirmDelete
+                ? "border-destructive bg-destructive px-3 text-white"
+                : "w-9 border-border bg-card text-ink-soft hover:text-destructive"
+            }`}
+          >
+            <Trash2 className="h-4 w-4" />
+            {confirmDelete && "Sure?"}
+          </button>
+        </div>
       }
       noteAction={(n) => (
         <RemoveButton onClick={() => remove(n.id)} label="Remove from collection" />

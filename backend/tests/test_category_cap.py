@@ -72,7 +72,7 @@ def _fifteen():
 async def test_at_cap_snaps_new_slug_to_existing(monkeypatch):
     seen = _patch_model(monkeypatch, "idli-dosa-recipe")  # net-new, shares "recipe"
     existing = _fifteen()
-    slug, _ = await gemini_service.classify("http://x", _bundle(), existing, collections=None)
+    slug = await gemini_service.classify("http://x", _bundle(), existing)
     assert slug == "recipe"          # snapped, not appended
     assert slug in existing          # taxonomy never grows
     # the model was also TOLD the list is full
@@ -82,14 +82,14 @@ async def test_at_cap_snaps_new_slug_to_existing(monkeypatch):
 async def test_at_cap_reuses_exact_existing(monkeypatch):
     _patch_model(monkeypatch, "recipe")
     existing = _fifteen()
-    slug, _ = await gemini_service.classify("http://x", _bundle(), existing, collections=None)
+    slug = await gemini_service.classify("http://x", _bundle(), existing)
     assert slug == "recipe"
 
 
 async def test_under_cap_allows_new_slug(monkeypatch):
     seen = _patch_model(monkeypatch, "home-decor")
     existing = ["recipe"]            # well under the cap
-    slug, _ = await gemini_service.classify("http://x", _bundle(), existing, collections=None)
+    slug = await gemini_service.classify("http://x", _bundle(), existing)
     assert slug == "home-decor"      # a genuinely new category is still minted
     assert CATEGORY_CAP_RULE not in (seen["config"].system_instruction or "")
 
@@ -99,5 +99,31 @@ async def test_cap_boundary_is_inclusive(monkeypatch):
     monkeypatch.setattr(settings, "MAX_USER_CATEGORIES", 2)
     _patch_model(monkeypatch, "brand-new-thing")
     existing = ["recipe", "travel"]  # len == cap
-    slug, _ = await gemini_service.classify("http://x", _bundle(), existing, collections=None)
+    slug = await gemini_service.classify("http://x", _bundle(), existing)
     assert slug in existing
+
+
+# ---------------- classify() no longer routes collection membership ----------------
+
+async def test_classify_returns_content_type_only(monkeypatch):
+    """classify() is content_type-only now — smart-collection membership was moved to
+    embedding match at ingest (services.collections.match_collections_by_embedding), so
+    classify no longer takes a `collections` argument and never returns a collection_id."""
+    _patch_model(monkeypatch, "recipe")
+    result = await gemini_service.classify("http://x", _bundle(), ["recipe"])
+    assert result == "recipe"  # a bare string, not a (content_type, collection_id) tuple
+
+
+def test_collection_rule_removed_from_gemini_module():
+    """COLLECTION_RULE (the classifier prompt block that used to ask the model to also pick a
+    collection_id) no longer exists — dropping it also shaves the classify call's output tokens."""
+    import services.gemini as gemini_mod
+    assert not hasattr(gemini_mod, "COLLECTION_RULE")
+
+
+async def test_assign_category_back_compat_alias_still_works(monkeypatch):
+    """assign_category is a thin back-compat alias for classify (kept for any external caller
+    of the old name) — still content_type-only."""
+    _patch_model(monkeypatch, "travel")
+    result = await gemini_service.assign_category("http://x", _bundle(), ["travel"])
+    assert result == "travel"

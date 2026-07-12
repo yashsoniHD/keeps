@@ -3,13 +3,14 @@ import { createPortal } from "react-dom";
 import { Check, FolderPlus, Loader2, Plus, X } from "lucide-react";
 import type { Collection, Note } from "@/lib/types";
 import { createCollection } from "@/lib/firestore";
-import { moveNoteToCollection } from "@/lib/api";
+import { pinNoteToCollection, excludeNoteFromCollection, rescoreCollection } from "@/lib/api";
 import { defaultPaletteFor, iconByName, paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
-// "Move to collection" sheet — shared by the feed card menu and the note detail header.
-// Membership is single-home (a note lives in at most one collection) and backend-written, so
-// picking a bucket PATCHes the note's collection_id; local state reflects the choice instantly.
+// "Add to collection" sheet — shared by the feed card menu and the note detail header.
+// Membership is multi-home now (a note can live in more than one collection) and
+// backend-written, so each toggle independently pins (add) or excludes (remove) — hard
+// overrides that survive a later rescore — rather than moving the note between buckets.
 export function CollectionPicker({
   note,
   collections,
@@ -23,18 +24,32 @@ export function CollectionPicker({
 }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [currentCid, setCurrentCid] = useState<string | null>(note.collection_id ?? null);
+  // Source of truth is collection_ids; fall back to the legacy scalar for a note that hasn't
+  // been touched since the migration lifted it onto the array.
+  const initialIds = note.collection_ids ?? (note.collection_id ? [note.collection_id] : []);
+  const [memberIds, setMemberIds] = useState<Set<string>>(() => new Set(initialIds));
 
-  const isIn = (c: Collection) => currentCid === c.id;
+  const isIn = (c: Collection) => memberIds.has(c.id);
 
   const toggle = async (c: Collection) => {
-    // Single-home: picking the current bucket clears it (→ Notes catch-all); else move it here.
-    const next = isIn(c) ? null : c.id;
-    setCurrentCid(next);
+    const wasIn = isIn(c);
+    setMemberIds((prev) => {
+      const next = new Set(prev);
+      if (wasIn) next.delete(c.id);
+      else next.add(c.id);
+      return next;
+    });
     try {
-      await moveNoteToCollection(note.id, next);
+      if (wasIn) await excludeNoteFromCollection(c.id, note.id);
+      else await pinNoteToCollection(c.id, note.id);
     } catch {
-      setCurrentCid(note.collection_id ?? null); // revert on failure
+      // revert on failure
+      setMemberIds((prev) => {
+        const next = new Set(prev);
+        if (wasIn) next.add(c.id);
+        else next.delete(c.id);
+        return next;
+      });
     }
   };
 
@@ -45,9 +60,13 @@ export function CollectionPicker({
     try {
       // Hash the name to a colour so even quick-created collections get a colored home tile.
       const cid = await createCollection(uid, n, { description: n, palette: defaultPaletteFor(n) });
-      await moveNoteToCollection(note.id, cid);
-      setCurrentCid(cid);
+      await pinNoteToCollection(cid, note.id);
+      setMemberIds((prev) => new Set(prev).add(cid));
       setName("");
+      // Best-effort: give the quick-created collection a topic_embedding so future notes can
+      // auto-match into it (the matcher skips collections without one). Fire-and-forget — the
+      // collection + pin already succeeded, so a rescore hiccup shouldn't block this sheet.
+      rescoreCollection(cid).catch(() => {});
     } catch {
       /* leave it; the user can retry */
     } finally {
@@ -67,7 +86,7 @@ export function CollectionPicker({
         className="relative z-[81] w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-2xl sm:rounded-3xl"
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-serif text-xl text-ink">Move to collection</h2>
+          <h2 className="font-serif text-xl text-ink">Add to collection</h2>
           <button
             type="button"
             onClick={onClose}
