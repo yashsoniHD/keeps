@@ -505,7 +505,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
         notes.length > 0 ? (
           <div className="space-y-5">
             {digest ? (
-              <CollectionDigest digest={digest} updating={digestBusy} />
+              <CollectionDigest digest={digest} updating={digestBusy} accent={accent} />
             ) : digestBusy ? (
               <DigestSkeleton />
             ) : null}

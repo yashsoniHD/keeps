@@ -121,8 +121,17 @@ class Settings:
     # token cost the same way ASK_EXHAUSTIVE_CAP does for asks.
     DIGEST_MAX_NOTES: int = int(os.getenv("DIGEST_MAX_NOTES", "30"))
     # Each note's `data` is truncated to this many characters in the digest prompt (mirrors the
-    # per-note data excerpt in the ask/synthesize prompts, just its own knob).
-    DIGEST_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("DIGEST_NOTE_DATA_EXCERPT_CHARS", "1500"))
+    # per-note data excerpt in the ask/synthesize prompts, just its own knob). The digest is
+    # built from the ITEMS inside `data` (listicle entries, tool names, etc), not just the note's
+    # title/summary, so this needs real headroom — 1500 chars was starving the model of the
+    # detail it needs to extract more than one entry per note.
+    DIGEST_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("DIGEST_NOTE_DATA_EXCERPT_CHARS", "3000"))
+    # Bumped whenever DIGEST_SYSTEM changes meaningfully (prompt behavior, not just wording) so
+    # digests cached under an older prompt are treated as stale and rebuilt automatically, even
+    # when membership (source_note_ids) hasn't changed. Stored on the digest map as
+    # `prompt_version`; routers/collections.py's staleness check treats a missing or lower value
+    # as stale.
+    DIGEST_PROMPT_VERSION: int = 2
     # A digest (re)build is a paid Gemini call over up to DIGEST_MAX_NOTES notes at once, so
     # repeats are capped like rescores — per collection, per user, and a global kill-switch.
     MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY: int = int(

@@ -174,12 +174,15 @@ async def _member_notes(db, user_id: str, collection_id: str) -> tuple[list[dict
 async def digest(collection_id: str, body: DigestRequest | None = None,
                  user_id: str = Depends(require_user)):
     """Return this collection's digest, rebuilding it when membership has changed since the
-    last build (or when `force` is set). Owner-checked.
+    last build, when the cached digest predates the current DIGEST_PROMPT_VERSION, or when
+    `force` is set. Owner-checked.
 
     Response contract: `{"digest": <CollectionDigest dict> | None, "stale": bool}`.
     - An empty collection (no member notes) returns `{"digest": None}` — no Gemini call.
-    - A signature match (same member note ids as the last build, not forced) returns the
-      cached digest with `"stale": False` — no reserve, no Gemini call.
+    - A signature match (same member note ids as the last build, same or newer
+      `prompt_version`, not forced) returns the cached digest with `"stale": False` — no
+      reserve, no Gemini call. A digest with a missing/older `prompt_version` is rebuilt even
+      when membership is unchanged, so prompt improvements reach existing digests automatically.
     - When today's rebuild budget is exhausted (MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY /
       _PER_USER_PER_DAY / DAILY_GLOBAL_DIGEST_CAP) or the model call fails, the existing cached
       digest (possibly None, if there never was one) is returned with `"stale": True` — a
@@ -198,7 +201,13 @@ async def digest(collection_id: str, body: DigestRequest | None = None,
 
     member_ids = sorted(n["id"] for n in notes)
     stored = d.get("digest") or {}
-    if not body.force and sorted(stored.get("source_note_ids") or []) == member_ids:
+    same_membership = sorted(stored.get("source_note_ids") or []) == member_ids
+    # A digest built under an older (or unversioned) prompt is treated as stale even when
+    # membership hasn't changed, so existing digests pick up prompt improvements automatically
+    # on their next view instead of staying stuck on the old output forever.
+    current_prompt = stored.get("prompt_version")
+    prompt_current = current_prompt is not None and current_prompt >= settings.DIGEST_PROMPT_VERSION
+    if not body.force and same_membership and prompt_current:
         return {"digest": stored, "stale": False}
 
     if not await reserve_collection_digest(user_id, collection_id):
@@ -225,6 +234,7 @@ async def digest(collection_id: str, body: DigestRequest | None = None,
         "source_note_ids": member_ids,
         "generated_at": datetime.now(timezone.utc),
         "model": settings.GEMINI_MODEL,
+        "prompt_version": settings.DIGEST_PROMPT_VERSION,
     }
     # merge=True writes only the `digest` key — sibling top-level fields (notably `updated_at`,
     # which the library grid orders by) are left untouched.

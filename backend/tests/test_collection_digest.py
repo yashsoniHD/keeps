@@ -102,11 +102,62 @@ async def test_signature_match_returns_stored_digest_zero_build_zero_reserve(fak
     stored = {
         "intro": "cached intro", "facts": [], "sections": [],
         "source_note_ids": ["n1", "n2"], "coverage": None,
+        "prompt_version": settings.DIGEST_PROMPT_VERSION,
     }
     fake_db.seed("collections", "c1", {"user_id": "u", "name": "Trip", "digest": stored})
 
     result = await col_router.digest("c1", user_id="u")
     assert result == {"digest": stored, "stale": False}
+
+
+# --- prompt version staleness --------------------------------------------------------------------
+
+async def test_stale_prompt_version_triggers_rebuild_even_on_unchanged_membership(
+        fake_db, monkeypatch):
+    """A digest built under an older (or unversioned) prompt must be rebuilt on next view even
+    when membership hasn't changed at all — this is how existing digests pick up prompt
+    improvements automatically instead of staying stuck on old output forever."""
+    calls = []
+
+    async def fake_build(name, description, notes):
+        calls.append(1)
+        return CollectionDigest(intro="rebuilt under new prompt")
+
+    _wire(monkeypatch, fake_db, build=fake_build)
+    _seed_note(fake_db, "n1", "c1", 1)
+    stored = {
+        "intro": "old digest", "facts": [], "sections": [],
+        "source_note_ids": ["n1"], "prompt_version": 1,
+    }
+    fake_db.seed("collections", "c1", {"user_id": "u", "name": "Trip", "digest": stored})
+
+    result = await col_router.digest("c1", user_id="u")
+
+    assert len(calls) == 1
+    assert result["stale"] is False
+    assert result["digest"]["intro"] == "rebuilt under new prompt"
+    assert result["digest"]["prompt_version"] == settings.DIGEST_PROMPT_VERSION
+
+
+async def test_missing_prompt_version_triggers_rebuild_even_on_unchanged_membership(
+        fake_db, monkeypatch):
+    """Same as above but for digests built before prompt_version existed at all (the field is
+    simply absent)."""
+    calls = []
+
+    async def fake_build(name, description, notes):
+        calls.append(1)
+        return CollectionDigest(intro="rebuilt")
+
+    _wire(monkeypatch, fake_db, build=fake_build)
+    _seed_note(fake_db, "n1", "c1", 1)
+    stored = {"intro": "old digest", "facts": [], "sections": [], "source_note_ids": ["n1"]}
+    fake_db.seed("collections", "c1", {"user_id": "u", "name": "Trip", "digest": stored})
+
+    result = await col_router.digest("c1", user_id="u")
+
+    assert len(calls) == 1
+    assert result["digest"]["prompt_version"] == settings.DIGEST_PROMPT_VERSION
 
 
 async def test_force_rebuilds_even_on_signature_match(fake_db, monkeypatch):
