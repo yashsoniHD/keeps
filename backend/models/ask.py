@@ -46,6 +46,42 @@ class ArtifactNote(BaseModel):
     origin: Literal["consolidated", "created"] = "consolidated"  # provenance for the saved note
 
 
+class FactItem(BaseModel):
+    """One key/value stat in a facts block — the same {label, value} shape used inline in the
+    COMPOSER/synthesize prompts (services/gemini.py), now a real model for the digest feature."""
+    label: str
+    value: str
+
+
+class DigestEntry(BaseModel):
+    """One line item in a collection digest section — always deep-links back to the note it
+    was drawn from."""
+    title: str
+    summary: str
+    note_id: str
+
+
+class DigestSection(BaseModel):
+    """A themed group of digest entries (e.g. "Places", "Food", "Tips" for a trip-like
+    collection; a topic/category for a topical one)."""
+    heading: str
+    items: list[DigestEntry] = Field(default_factory=list)
+
+
+class CollectionDigest(BaseModel):
+    """Cached, composed digest for a smart collection: a short intro, optional at-a-glance
+    facts, and categorized sections of entries that deep-link to their source notes. Built by
+    Gemini from member notes (services.gemini.build_digest) and cached on the collection doc
+    (`collections/{id}.digest`); regenerated lazily when membership has changed since the last
+    build (POST /collections/{id}/digest)."""
+    intro: str = ""
+    facts: list[FactItem] = Field(default_factory=list)
+    sections: list[DigestSection] = Field(default_factory=list)
+    # Human-readable coverage line ("Digest built from 30 of 45 notes."), set by the endpoint
+    # (not the model) when DIGEST_MAX_NOTES truncates the member set. None otherwise.
+    coverage: str | None = None
+
+
 class AskResponse(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)

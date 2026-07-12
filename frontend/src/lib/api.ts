@@ -5,6 +5,7 @@ import type {
   WatchItemDetails,
   PlaceSearchResult,
   PlaceItemDetails,
+  CollectionDigest,
 } from "@/lib/types";
 
 // The fallback must be environment-aware: a production build must NEVER point at localhost
@@ -205,6 +206,26 @@ export async function rescoreCollection(collectionId: string): Promise<RescoreRe
       await errorDetail(res, "Couldn't sort notes into the collection."),
       res.status,
     );
+  return res.json();
+}
+
+// Build (or refresh) a collection's "living view" digest: intro + at-a-glance facts +
+// categorized sections deep-linking to member notes. Free/instant when the member set hasn't
+// changed since the last build (`stale: false` with the stored digest); `force: true` bypasses
+// the signature check and rebuilds anyway. The fresh digest is also written onto
+// `collections/{id}.digest`, so callers can rely on the live `watchCollections` subscription to
+// pick it up rather than re-rendering straight from this response. 0 members → `digest: null`.
+export async function buildCollectionDigest(
+  collectionId: string,
+  force = false,
+): Promise<{ digest: CollectionDigest | null; stale?: boolean }> {
+  const res = await apiFetch(`/api/collections/${collectionId}/digest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't build the collection digest."), res.status);
   return res.json();
 }
 

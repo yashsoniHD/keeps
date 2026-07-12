@@ -58,17 +58,19 @@ service cloud.firestore {
     // directly by the client: name/description/icon/palette/updated_at are pure organisation
     // (style, no note content), so the client may set those freely. Everything else on the doc
     // — topic_embedding/topic_query (the match-scoring vector + the text it was built from),
-    // pinned_note_ids/excluded_note_ids (hard membership overrides), match_threshold — is
-    // written ONLY by the backend (services/collections.py rescore_collection / add_pin /
-    // add_exclusion), because a client that could set its own topic_embedding or pin/exclude
-    // list could forge membership without ever going through the embedding matcher.
+    // pinned_note_ids/excluded_note_ids (hard membership overrides), match_threshold, digest
+    // (the cached, Gemini-composed digest — services/gemini.py build_digest) — is written ONLY
+    // by the backend (services/collections.py rescore_collection / add_pin / add_exclusion;
+    // routers/collections.py POST .../digest), because a client that could set its own
+    // topic_embedding, pin/exclude list, or digest could forge membership or fabricate a
+    // digest without ever going through the embedding matcher / Gemini.
     // create checks the INCOMING doc's user_id (no resource yet); other ops check the stored one.
     match /collections/{cid} {
       allow read, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow create:       if request.auth != null && request.auth.uid == request.resource.data.user_id
                           && !request.resource.data.keys().hasAny([
                                'topic_embedding', 'topic_query', 'pinned_note_ids',
-                               'excluded_note_ids', 'match_threshold',
+                               'excluded_note_ids', 'match_threshold', 'digest',
                              ]);
       allow update:       if request.auth != null && request.auth.uid == resource.data.user_id
                           && request.resource.data.user_id == resource.data.user_id
@@ -77,7 +79,7 @@ service cloud.firestore {
                           // one of these keys for the first time either).
                           && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                                'topic_embedding', 'topic_query', 'pinned_note_ids',
-                               'excluded_note_ids', 'match_threshold',
+                               'excluded_note_ids', 'match_threshold', 'digest',
                              ]);
     }
     // Search index (one doc per note). Backend-write-only — the worker keeps it in sync

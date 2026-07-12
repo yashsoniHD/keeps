@@ -65,6 +65,39 @@ export interface PlaceAction {
   kind: "directions" | "reserve" | "order" | "website" | "instagram" | "call";
 }
 
+// One row in a digest's at-a-glance facts grid (rendered like GenericNote's facts block).
+export interface DigestFact {
+  label: string;
+  value: string;
+}
+
+// One entry in a digest section: deep-links to the source note.
+export interface DigestEntry {
+  title: string;
+  summary: string;
+  note_id: string;
+}
+
+export interface DigestSection {
+  heading: string;
+  items: DigestEntry[];
+}
+
+// A collection's "living view" — one composed read built from its member notes by
+// `POST /api/collections/{id}/digest`, and mirrored onto `collections/{id}.digest` so the
+// existing `watchCollections` subscription streams it live with no extra listener.
+// `source_note_ids` is the membership signature the digest was built against — compare it to
+// the collection's live member ids to detect staleness. `generated_at` is a Firestore Timestamp.
+export interface CollectionDigest {
+  intro: string;
+  facts: DigestFact[];
+  sections: DigestSection[];
+  coverage: string | null;
+  source_note_ids: string[];
+  generated_at?: Timestamp;
+  model?: string;
+}
+
 // A user-created smart bucket. Owner-writable directly from the client for its presentation
 // (name/icon/palette/description); membership is no longer stored here — notes carry
 // `collection_ids` (multi-home, backend-written: embedding match + rescore + pin/exclude
@@ -79,6 +112,7 @@ export interface Collection {
   icon: string | null;
   palette: number | null;
   note_ids?: string[]; // legacy membership (pre-collection_id); migrated onto notes, then unused
+  digest?: CollectionDigest | null; // the living-view composition; absent until first build
   created_at: Timestamp;
   updated_at: Timestamp;
 }

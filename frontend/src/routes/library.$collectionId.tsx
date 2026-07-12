@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -28,6 +28,7 @@ import {
   excludeNoteFromCollection,
   rescoreCollection,
   deleteCollectionApi,
+  buildCollectionDigest,
 } from "@/lib/api";
 import { iconByName, paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING, HIT_44_SM } from "@/lib/ui";
@@ -36,8 +37,28 @@ import { NoteMenuProvider } from "@/components/NoteContextMenu";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { AppShell } from "@/components/AppShell";
+import { PillButton } from "@/components/shared/PillButton";
+import { CollectionDigest } from "@/components/collection/CollectionDigest";
 import { reportClientError } from "@/lib/client-errors";
 import type { Collection, Note } from "@/lib/types";
+
+// Debounce before a lazy digest (re)build fires — gives a burst of membership changes
+// (e.g. a rescan that adds several notes) time to settle before spending an AI call.
+const DIGEST_BUILD_DEBOUNCE_MS = 1500;
+
+// Block-shaped placeholder for the digest area while the first build is in flight, matching
+// the app's existing pulse-bar skeleton idiom (NoteCard's loading state / notes.index grid).
+function DigestSkeleton() {
+  return (
+    <div className="animate-pulse space-y-6" aria-hidden="true">
+      <div className="space-y-2">
+        <div className="h-5 w-11/12 rounded bg-muted" />
+        <div className="h-5 w-2/3 rounded bg-muted" />
+      </div>
+      <div className="h-28 rounded-2xl border border-border bg-card/50" />
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/library/$collectionId")({ component: CollectionDetail });
 
@@ -63,6 +84,8 @@ function FolderShell({
   headerAction,
   noteAction,
   empty,
+  aboveGrid,
+  showGrid = true,
 }: {
   uid: string;
   categories: string[];
@@ -73,6 +96,8 @@ function FolderShell({
   headerAction?: ReactNode;
   noteAction?: (note: Note) => ReactNode;
   empty: ReactNode;
+  aboveGrid?: ReactNode; // digest + toggle row (RealCollection only); absent for virtual folders
+  showGrid?: boolean; // demote the note grid behind a toggle once a digest exists
 }) {
   return (
     <NoteMenuProvider categories={categories} collections={[]} uid={uid}>
@@ -103,9 +128,11 @@ function FolderShell({
             {notes.length} {notes.length === 1 ? "note" : "notes"}
           </p>
 
+          {aboveGrid}
+
           {notes.length === 0 ? (
             empty
-          ) : (
+          ) : showGrid ? (
             <section className={GRID_CLS}>
               {notes.map((n) => (
                 <div key={n.id} className="group relative">
@@ -116,7 +143,7 @@ function FolderShell({
                 </div>
               ))}
             </section>
-          )}
+          ) : null}
         </main>
       </AppShell>
     </NoteMenuProvider>
@@ -195,6 +222,7 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   const [collection, setCollection] = useState<Collection | null>(null);
   const [resolved, setResolved] = useState(false); // the collections subscription has reported
   const [notes, setNotes] = useState<Note[]>([]);
+  const [notesResolved, setNotesResolved] = useState(false); // the notes query has reported once
   const [notesError, setNotesError] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [editingName, setEditingName] = useState(false);
@@ -202,6 +230,17 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rescanning, setRescanning] = useState(false);
   const [rescanMsg, setRescanMsg] = useState<string | null>(null);
+
+  // --- Living-view digest ---------------------------------------------------------------
+  // `digestBusy` covers both the lazy auto-build and the manual "Refresh view" force-build —
+  // either way, only one build should be in flight at a time. `attemptedSignature` remembers
+  // the exact member-id signature the last build attempt was made against, so a capped/failed
+  // response (`stale: true`, digest unchanged) doesn't get retried in a loop on every render —
+  // it waits until the member set actually changes again. `gridOverride` is the user's explicit
+  // toggle choice; until they touch it, the grid defaults to hidden once a digest exists.
+  const [digestBusy, setDigestBusy] = useState(false);
+  const attemptedSignatureRef = useRef<string | null>(null);
+  const [gridOverride, setGridOverride] = useState<boolean | null>(null);
 
   // Live subscription so a removal/rename reflects immediately. Find this collection by id.
   useEffect(() => {
@@ -229,18 +268,63 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
   // as a false "Nothing filed here yet" — surface it as a real error state instead.
   useEffect(() => {
     setNotesError(false);
+    setNotesResolved(false);
     return watchNotesInCollection(uid, collectionId, (ns) => {
       setNotesError(false);
       setNotes(ns);
+      setNotesResolved(true);
     }, {
       onError: (err) => {
         console.error("watchNotesInCollection failed", err);
         reportClientError("collection-notes", err.message, err.stack);
         setNotesError(true);
         setNotes([]);
+        setNotesResolved(true);
       },
     });
   }, [uid, collectionId]);
+
+  // Membership signature (sorted note ids) — compares against the digest's own
+  // `source_note_ids` to detect staleness, and gates the lazy-build effect below.
+  const currentIds = useMemo(() => notes.map((n) => n.id).sort(), [notes]);
+  const signature = currentIds.join(",");
+  const digest = collection?.digest ?? null;
+  const digestStale = !!digest && signature !== [...digest.source_note_ids].sort().join(",");
+
+  // Lazily (re)build the digest when the member set is new or has drifted since the last
+  // build. Debounced so a burst of membership changes (e.g. a rescan) settles first. Guarded
+  // against loops: once a build has been attempted for a given signature, it won't be retried
+  // again until the signature itself changes (a capped/failed response leaves the old digest
+  // in place with no auto-retry). The fresh digest arrives via `watchCollections`, not this
+  // response — this effect only clears the busy flag.
+  useEffect(() => {
+    if (!notesResolved || notes.length === 0) return; // never call the endpoint with 0 notes
+    if (digestBusy) return;
+    if (!digest || digestStale) {
+      if (attemptedSignatureRef.current === signature) return; // already tried this exact set
+      const timer = setTimeout(() => {
+        attemptedSignatureRef.current = signature;
+        setDigestBusy(true);
+        buildCollectionDigest(collectionId)
+          .catch(() => {})
+          .finally(() => setDigestBusy(false));
+      }, DIGEST_BUILD_DEBOUNCE_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [notesResolved, notes.length, digest, digestStale, digestBusy, signature, collectionId]);
+
+  const refreshDigest = () => {
+    if (digestBusy) return;
+    attemptedSignatureRef.current = signature;
+    setDigestBusy(true);
+    buildCollectionDigest(collectionId, true)
+      .catch(() => {})
+      .finally(() => setDigestBusy(false));
+  };
+
+  // Default: grid hidden once a digest exists, visible otherwise — until the user explicitly
+  // flips the toggle, after which their choice sticks regardless of digest state.
+  const showGrid = gridOverride ?? !digest;
 
   useEffect(() => {
     if (collection && !editingName) setName(collection.name);
@@ -390,6 +474,16 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
           </button>
           <button
             type="button"
+            onClick={refreshDigest}
+            disabled={digestBusy || notes.length === 0}
+            aria-label="Refresh view"
+            title="Refresh view"
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink disabled:opacity-60 ${FOCUS_RING}`}
+          >
+            <Sparkles className={`h-4 w-4 ${digestBusy ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            type="button"
             onClick={del}
             aria-label="Delete collection"
             className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border text-sm transition-colors ${
@@ -406,6 +500,28 @@ function RealCollection({ uid, collectionId }: { uid: string; collectionId: stri
       noteAction={(n) => (
         <RemoveButton onClick={() => remove(n.id)} label="Remove from collection" />
       )}
+      showGrid={showGrid}
+      aboveGrid={
+        notes.length > 0 ? (
+          <div className="space-y-5">
+            {digest ? (
+              <CollectionDigest digest={digest} updating={digestBusy} />
+            ) : digestBusy ? (
+              <DigestSkeleton />
+            ) : null}
+            <div>
+              <PillButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setGridOverride(!showGrid)}
+              >
+                {showGrid ? "Hide notes" : `Show all ${notes.length} notes`}
+              </PillButton>
+            </div>
+          </div>
+        ) : undefined
+      }
       empty={
         <div className="rounded-2xl border border-dashed border-border bg-card/50 px-4 py-10 text-center">
           <span

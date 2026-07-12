@@ -22,7 +22,7 @@ from google import genai
 from google.genai import types
 
 from config import settings
-from models.ask import ArtifactNote, AskPlan, GroundedAnswer, SynthAnswer
+from models.ask import ArtifactNote, AskPlan, CollectionDigest, GroundedAnswer, SynthAnswer
 from models.note import ContentBundle, NoteExtraction
 from services.usage_meter import record_usage
 
@@ -576,6 +576,32 @@ Rules:
   "general", "misc", or "other"."""
 
 
+DIGEST_SYSTEM = """You are Clipnote's assistant. Build a DIGEST for one of the user's smart
+collections: a cached, composed index of its saved notes — a short intro, optional at-a-glance
+facts, and organized sections of entries that deep-link back to the notes they came from.
+
+Return ONLY valid JSON:
+{"intro": "1-2 sentences summarizing what this collection holds",
+ "facts": [{"label": str, "value": str}],
+ "sections": [{"heading": str,
+               "items": [{"title": str, "summary": str, "note_id": str}]}]}
+
+Rules:
+- Organize entries into whatever sections genuinely fit the collection's content — let the
+  content decide, don't force a rigid template. A trip-like collection: group by theme such as
+  Places, Food, Tips, Logistics. A topical collection: group by category or theme within it.
+- EVERY entry (each item in sections[].items) MUST carry the exact note_id it came from,
+  chosen ONLY from the NOTE ids given below. Never invent an id, and never cite one that isn't
+  in the notes provided.
+- facts is optional — include only genuinely useful at-a-glance stats (counts, date ranges,
+  price ranges, etc). Return an empty list when nothing meaningful applies.
+- Keep each entry's summary to one short line — the note itself has the detail; this is a
+  scannable index, not a rewrite of it.
+- No em-dashes anywhere in intro, facts, or summaries.
+- NEVER FABRICATE: ground every entry and fact in the notes provided; omit anything you can't
+  ground rather than inventing it."""
+
+
 def _history_lines(history: list[dict]) -> str:
     return "\n".join(f"{t['role']}: {t['text']}" for t in history)
 
@@ -1097,6 +1123,64 @@ class GeminiService:
                          existing_categories: list[str] | None = None) -> SynthAnswer:
         return await asyncio.to_thread(self._synthesize, question, history, notes, output,
                                        focal_title, existing_categories)
+
+    # ---------- Smart collections: cached digest ----------
+
+    def _build_digest(self, name: str, description: str,
+                      notes: list[dict]) -> CollectionDigest | None:
+        # Building is best-effort end to end: a failure anywhere in here — including note
+        # serialization while assembling the prompt, not just the model call — must never break
+        # the collection view. The caller keeps serving the last cached digest (marked stale)
+        # instead of a 500, so every exception path below resolves to `return None`.
+        try:
+            prompt_parts = [f"Collection name: {name}"]
+            if description:
+                prompt_parts.append(f"Collection description: {description}")
+            for n in notes:
+                prompt_parts.append(
+                    f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
+                    f" | {n.get('source_domain', '')}\n"
+                    f"summary: {n.get('ai_summary', '')}\n"
+                    f"data: {json.dumps(n.get('data', {}), ensure_ascii=False, default=str)[:settings.DIGEST_NOTE_DATA_EXCERPT_CHARS]}"
+                )
+            last_exc: Exception | None = None
+            for attempt in (1, 2):
+                try:
+                    response = self.client.models.generate_content(
+                        model=settings.GEMINI_MODEL,
+                        contents=["\n\n".join(prompt_parts)],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            system_instruction=DIGEST_SYSTEM,
+                            temperature=0.3,
+                        ),
+                    )
+                    record_usage(settings.GEMINI_MODEL, response)
+                    digest = CollectionDigest.model_validate_json(_strip_code_fences(response.text))
+                    # Drop any entry the model cited that isn't actually one of the fed notes (a
+                    # hallucinated/foreign id must never deep-link into someone else's note), then
+                    # drop any section left with no entries.
+                    valid_ids = {n.get("id") for n in notes}
+                    for section in digest.sections:
+                        section.items = [it for it in section.items if it.note_id in valid_ids]
+                    digest.sections = [s for s in digest.sections if s.items]
+                    return digest
+                except Exception as e:
+                    last_exc = e
+                    if attempt == 1:
+                        log.warning("build_digest attempt 1 failed, retrying: %s: %s",
+                                    type(e).__name__, e)
+                        time.sleep(2)
+            log.error("build_digest failed after retry: %s: %s",
+                      type(last_exc).__name__, last_exc)
+            return None
+        except Exception as e:
+            log.error("build_digest failed: %s: %s", type(e).__name__, e)
+            return None
+
+    async def build_digest(self, name: str, description: str,
+                           notes: list[dict]) -> CollectionDigest | None:
+        return await asyncio.to_thread(self._build_digest, name, description, notes)
 
     def _create_note(self, question: str, history: list[dict],
                      existing_categories: list[str]) -> ArtifactNote:

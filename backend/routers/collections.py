@@ -13,8 +13,17 @@ The backend owns everything that touches NOTE membership, because notes are back
   before deleting the collection doc. The client's own `deleteCollection()` (a bare Firestore
   `deleteDoc`) does NOT do this sweep — the frontend calls this endpoint first and only falls
   back to the bare client delete if the request fails, so the folder still goes away either way.
+- `POST .../digest`: return (rebuilding when stale/forced) the collection's cached, composed
+  digest — an intro + optional facts + categorized sections of entries deep-linking to their
+  source notes, built by Gemini from the member notes (services/gemini.py `build_digest`).
+  Cached on the collection doc (`digest`), keyed by a signature of the member note ids so an
+  unchanged collection never re-triggers a paid rebuild. Rate-capped like rescore
+  (MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY / _PER_USER_PER_DAY / DAILY_GLOBAL_DIGEST_CAP).
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from config import settings
 from services.auth_dep import require_user
@@ -24,9 +33,21 @@ from services.collections import (
     rescore_collection,
     strip_collection_from_notes,
 )
-from services.firebase import get_db, get_user_collections, reserve_collection_rescore
+from services.firebase import (
+    flush_usage,
+    get_db,
+    get_user_collections,
+    reserve_collection_digest,
+    reserve_collection_rescore,
+)
+from services.gemini import gemini_service
+from services.usage_meter import start_metering
 
 router = APIRouter(tags=["collections"])
+
+
+class DigestRequest(BaseModel):
+    force: bool = False
 
 
 async def _owned_collection(db, collection_id: str, user_id: str) -> dict:
@@ -105,3 +126,108 @@ async def delete_collection(collection_id: str, user_id: str = Depends(require_u
     stripped = await strip_collection_from_notes(db, user_id, collection_id)
     await db.collection("collections").document(collection_id).delete()
     return {"ok": True, "stripped": stripped}
+
+
+# ──────────────────────────── digest ────────────────────────────
+
+async def _member_notes(db, user_id: str, collection_id: str) -> tuple[list[dict], int]:
+    """This collection's member notes (newest first, capped at DIGEST_MAX_NOTES — the fed set
+    the digest is built from) plus the TOTAL member count (so the endpoint can report coverage
+    when the cap truncates).
+
+    Membership is the union of the `collection_ids` array_contains query and the legacy scalar
+    `collection_id ==` query — unmigrated notes carry only the scalar field and are invisible to
+    array_contains (mirrors the reconciliation pattern in services/collections.py rescore_collection,
+    see its "3b." comment). We dedupe by id, then apply newest-first ordering and the cap to the
+    merged set so the fed set (and its signature) reflect true membership, not just one tagging path.
+    """
+    array_query = (
+        db.collection("notes").where("user_id", "==", user_id)
+        .where("collection_ids", "array_contains", collection_id)
+    )
+    legacy_query = (
+        db.collection("notes").where("user_id", "==", user_id)
+        .where("collection_id", "==", collection_id)
+    )
+    by_id: dict[str, dict] = {}
+    for query in (array_query, legacy_query):
+        async for doc in query.stream():
+            if doc.id in by_id:
+                continue
+            d = doc.to_dict() or {}
+            d["id"] = doc.id
+            by_id[doc.id] = d
+
+    total = len(by_id)
+
+    def _created_at_key(note: dict):
+        created_at = note.get("created_at")
+        # Sort missing timestamps last instead of erroring on a None/other comparison.
+        return created_at is not None, created_at
+
+    ordered = sorted(by_id.values(), key=_created_at_key, reverse=True)
+    notes = ordered[: settings.DIGEST_MAX_NOTES]
+    return notes, total
+
+
+@router.post("/collections/{collection_id}/digest")
+async def digest(collection_id: str, body: DigestRequest | None = None,
+                 user_id: str = Depends(require_user)):
+    """Return this collection's digest, rebuilding it when membership has changed since the
+    last build (or when `force` is set). Owner-checked.
+
+    Response contract: `{"digest": <CollectionDigest dict> | None, "stale": bool}`.
+    - An empty collection (no member notes) returns `{"digest": None}` — no Gemini call.
+    - A signature match (same member note ids as the last build, not forced) returns the
+      cached digest with `"stale": False` — no reserve, no Gemini call.
+    - When today's rebuild budget is exhausted (MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY /
+      _PER_USER_PER_DAY / DAILY_GLOBAL_DIGEST_CAP) or the model call fails, the existing cached
+      digest (possibly None, if there never was one) is returned with `"stale": True` — a
+      digest miss never 500s and never blocks the collection view.
+    - Otherwise a fresh digest is built, cached onto `collections/{id}.digest` (merge — does
+      NOT touch `updated_at`, which the library grid orders by), and returned with
+      `"stale": False`.
+    """
+    body = body or DigestRequest()
+    db = get_db()
+    d = await _owned_collection(db, collection_id, user_id)
+
+    notes, total = await _member_notes(db, user_id, collection_id)
+    if not notes:
+        return {"digest": None}
+
+    member_ids = sorted(n["id"] for n in notes)
+    stored = d.get("digest") or {}
+    if not body.force and sorted(stored.get("source_note_ids") or []) == member_ids:
+        return {"digest": stored, "stale": False}
+
+    if not await reserve_collection_digest(user_id, collection_id):
+        return {"digest": stored or None, "stale": True}
+
+    meter = start_metering()
+    try:
+        built = await gemini_service.build_digest(
+            d.get("name", ""), d.get("description") or "", notes)
+    finally:
+        await flush_usage(user_id, meter)
+
+    if built is None:
+        return {"digest": stored or None, "stale": True}
+
+    coverage = (
+        f"Digest built from {len(notes)} of {total} notes." if total > len(notes) else None
+    )
+    digest_map = {
+        "intro": built.intro,
+        "facts": [f.model_dump() for f in built.facts],
+        "sections": [s.model_dump() for s in built.sections],
+        "coverage": coverage,
+        "source_note_ids": member_ids,
+        "generated_at": datetime.now(timezone.utc),
+        "model": settings.GEMINI_MODEL,
+    }
+    # merge=True writes only the `digest` key — sibling top-level fields (notably `updated_at`,
+    # which the library grid orders by) are left untouched.
+    await db.collection("collections").document(collection_id).set(
+        {"digest": digest_map}, merge=True)
+    return {"digest": digest_map, "stale": False}

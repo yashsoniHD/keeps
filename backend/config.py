@@ -116,6 +116,21 @@ class Settings:
     MAX_RESCORES_PER_COLLECTION_PER_DAY: int = int(
         os.getenv("MAX_RESCORES_PER_COLLECTION_PER_DAY", "5"))
 
+    # --- Collection digests (cached, composed "digest" per smart collection) ---
+    # How many of a collection's most-recent member notes get fed to the digest builder — bounds
+    # token cost the same way ASK_EXHAUSTIVE_CAP does for asks.
+    DIGEST_MAX_NOTES: int = int(os.getenv("DIGEST_MAX_NOTES", "30"))
+    # Each note's `data` is truncated to this many characters in the digest prompt (mirrors the
+    # per-note data excerpt in the ask/synthesize prompts, just its own knob).
+    DIGEST_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("DIGEST_NOTE_DATA_EXCERPT_CHARS", "1500"))
+    # A digest (re)build is a paid Gemini call over up to DIGEST_MAX_NOTES notes at once, so
+    # repeats are capped like rescores — per collection, per user, and a global kill-switch.
+    MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY: int = int(
+        os.getenv("MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY", "3"))
+    MAX_DIGEST_REGENS_PER_USER_PER_DAY: int = int(
+        os.getenv("MAX_DIGEST_REGENS_PER_USER_PER_DAY", "15"))
+    DAILY_GLOBAL_DIGEST_CAP: int = int(os.getenv("DAILY_GLOBAL_DIGEST_CAP", "50"))
+
     # --- Agent (orchestrator + subagents + tools) ---
     # Master kill switch: when false, /api/ask/stream answers with no tools (falls back to
     # plain grounded RAG) so the agent path can be disabled without a redeploy.

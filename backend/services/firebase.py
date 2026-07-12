@@ -401,6 +401,47 @@ async def reserve_collection_rescore(user_id: str, collection_id: str) -> bool:
     return await _claim(db.transaction())
 
 
+async def reserve_collection_digest(user_id: str, collection_id: str) -> bool:
+    """Transactionally claim one collection-digest (re)build for today — same pattern as
+    reserve_collection_rescore, but with three tiers instead of one: a digest build is a paid
+    Gemini call over up to DIGEST_MAX_NOTES notes at once, so it's capped per collection, per
+    user, AND against a global daily kill-switch (MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY /
+    MAX_DIGEST_REGENS_PER_USER_PER_DAY / DAILY_GLOBAL_DIGEST_CAP). Returns False when any of
+    today's budgets is used up — the router falls back to the existing cached digest (marked
+    stale) rather than a 429, since a digest miss must never break the collection view."""
+    from google.cloud import firestore as fs
+
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    coll_field = f"digest_{collection_id}_count"
+
+    @fs.async_transactional
+    async def _claim(tx) -> bool:
+        user_ref = db.collection("usage").document(f"{user_id}-{today}")
+        global_ref = db.collection("system").document(f"usage-{today}")
+        user_snap = await user_ref.get(transaction=tx)
+        global_snap = await global_ref.get(transaction=tx)
+        user_data = user_snap.to_dict() or {}
+        global_data = global_snap.to_dict() or {}
+        coll_n = user_data.get(coll_field, 0)
+        user_n = user_data.get("digest_count", 0)
+        global_n = global_data.get("digest_count", 0)
+        if coll_n >= settings.MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY:
+            return False
+        if user_n >= settings.MAX_DIGEST_REGENS_PER_USER_PER_DAY:
+            return False
+        if global_n >= settings.DAILY_GLOBAL_DIGEST_CAP:
+            return False
+        tx.set(user_ref, {
+            "user_id": user_id, "date": today,
+            coll_field: coll_n + 1, "digest_count": user_n + 1,
+        }, merge=True)
+        tx.set(global_ref, {"date": today, "digest_count": global_n + 1}, merge=True)
+        return True
+
+    return await _claim(db.transaction())
+
+
 async def reserve_apify_slot() -> bool:
     """Transactionally claim one paid-scrape (Apify) slot for today against the global
     daily cap. Returns True if claimed (caller may call Apify), False if the cap is hit
