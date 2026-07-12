@@ -15,8 +15,8 @@ import { AppShell } from "@/components/AppShell";
 import { NewCollectionSheet } from "@/components/library/NewCollectionSheet";
 import type { Collection } from "@/lib/types";
 
-// The Collections page: the five mini-apps (Watchlist, Wishlist, Places, Recipes, Trips) as
-// color-coded tiles with live item counts, plus the user's own smart collections below.
+// The Collections page: the two mini-apps (Watchlist, Places) as color-coded tiles with live
+// item counts, plus the user's own smart collections below.
 // Promoted from the old full-screen overlay in CategoryFilter so it's a real, linkable route
 // that mini-app back buttons can return to.
 export const Route = createFileRoute("/collections")({ component: CollectionsPage });
@@ -78,10 +78,7 @@ function CollectionsPage() {
         if (!cancelled)
           setAppCounts({
             watchlist: null,
-            wishlist: null,
             places: null,
-            recipes: null,
-            trips: null,
           });
       });
     return () => {

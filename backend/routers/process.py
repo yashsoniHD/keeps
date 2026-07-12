@@ -476,7 +476,7 @@ async def _process_job(job_id: str) -> dict:
         await add_user_category(user_id, extracted.content_type)
         if source_domain:
             await add_user_source(user_id, source_domain)
-        # Fan the note out into its mini-app family (watch/wish/place/recipe/trip_items) so it
+        # Fan the note out into its mini-app family (watch/place_items) so it
         # shows on the walls and the poster deep-links resolve. `note_doc.data` already carries
         # the enriched payload from enrich_note_data above, so this re-runs no Gemini extraction
         # and no fresh TMDB/Places spend. Idempotent (stable item ids) and best-effort — the

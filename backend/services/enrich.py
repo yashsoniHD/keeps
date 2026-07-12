@@ -1,7 +1,8 @@
 """Note enrichment: external data merged onto the note's own `data` map.
 
-The mini-apps used to fan a capture out into per-item docs (watch/wish/place/recipe/trip_items)
-and the note was never written. Notes-first inverts that: every capture is a note, and the
+The mini-apps used to fan a capture out into per-item docs (watch/wish/place/recipe/trip_items,
+of which only watch/place_items remain as of 2026-07-12 — see CLAUDE.md) and the note was never
+written. Notes-first inverts that: every capture is a note, and the
 enrichment the apps performed — TMDB posters + "where to watch" providers, Google Places
 photos/ratings/coords + action links, itinerary stop geocoding, price parsing — lands *inside*
 `note.data`, where the note templates render it.

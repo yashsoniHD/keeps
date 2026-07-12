@@ -1,13 +1,13 @@
 """Places mini-app: owner edits to per-venue place_items.
 
 Items live at users/{uid}/place_items/{id}. Firestore rules make the subcollection
-client-readable but not client-writable (like watch_items / wish_items), so every state change —
-promoting to to-visit, marking visited, rating, personal notes — goes through these backend
-endpoints, keeping the worker-written Google-Places enrichment (photo, rating, coords, hours) safe
-from client tampering.
+client-readable but not client-writable (like watch_items), so every state change — promoting to
+to-visit, marking visited, rating, personal notes — goes through these backend endpoints, keeping
+the worker-written Google-Places enrichment (photo, rating, coords, hours) safe from client
+tampering.
 
-Like the watchlist (and unlike the wishlist) there IS a catalog: Google Places search powers a
-manual-add picker. A venue can also be added by ingesting its Maps/venue URL through /api/ingest.
+Like the watchlist, there IS a catalog: Google Places search powers a manual-add picker. A venue
+can also be added by ingesting its Maps/venue URL through /api/ingest.
 """
 from datetime import datetime, timezone
 

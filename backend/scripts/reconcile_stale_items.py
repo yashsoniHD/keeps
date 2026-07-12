@@ -6,15 +6,16 @@ landed — e.g. a note wrongly saved as `product` whose wish_item survived the u
 to `software` — still sit on the walls (the frontend reads the subcollections directly, so they
 never age out). This script sweeps them.
 
-For every item in the five family subcollections (watch/wish/place/recipe/trip_items) it
-re-validates each entry of `source_note_ids`: the note must still EXIST and its CURRENT
-content_type must still match the family's predicate. Stale note ids are dropped; an item left
-with no valid source is deleted along with its search_index doc — exactly the semantics of the
-PATCH-time reconcile. The family table (predicate → subcollection → search kind) is imported from
-services/item_reconcile.py and the predicates from services/gemini.py — never duplicated. Items
-with an empty source_note_ids (e.g. manual adds) are deliberately untouched. No Gemini / TMDB /
-Places calls — pure Firestore, so it's free and safe to re-run (idempotent: a healthy item is a
-no-op).
+For every item in the family subcollections registered in services/item_reconcile.py's FAMILIES
+table (watch/place_items — the wishlist/recipes/trips families were removed 2026-07-12; see
+CLAUDE.md) it re-validates each entry of `source_note_ids`: the note must still EXIST and its
+CURRENT content_type must still match the family's predicate. Stale note ids are dropped; an item
+left with no valid source is deleted along with its search_index doc — exactly the semantics of
+the PATCH-time reconcile. The family table (predicate → subcollection → search kind) is imported
+from services/item_reconcile.py and the predicates from services/gemini.py — never duplicated.
+Items with an empty source_note_ids (e.g. manual adds) are deliberately untouched. No Gemini /
+TMDB / Places calls — pure Firestore, so it's free and safe to re-run (idempotent: a healthy item
+is a no-op).
 
 Usage (from backend/, with ADC pointing at the project):
     python -m scripts.reconcile_stale_items --uid UID            # dry-run (default)

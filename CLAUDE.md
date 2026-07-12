@@ -204,6 +204,11 @@ passed the gate.
       `scripts/migrate_items_to_notes.py` (merge/regroup/idempotent + `--heal-refs`). Dropped
       on purpose: status buckets, item ratings, TMDB/Places add-by-search. 336 backend tests.
       Plan: `~/.claude/plans/i-feel-like-the-swirling-bentley.md`.
+- [x] Wishlist/Recipes/Trips fan-out removed for real (2026-07-12): despite the 2026-07-10 bullet
+      above, the backend had kept fanning every product/recipe/itinerary note into
+      `wish_items`/`recipe_items`/`trip_items` with zero remaining callers; that fan-out, their
+      routers, and their now-dead services (`wishlist.py`/`recipes.py`/`itineraries.py`) are
+      deleted. Watchlist and Places walls, and their fan-out/enrichment, are untouched.
 - [ ] Phase 3: paywall + weekly digest — **required before public launch**
 - [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
 

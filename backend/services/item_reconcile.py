@@ -1,11 +1,15 @@
 """Reconcile mini-app item docs when a note's content_type changes.
 
-A note fans out into per-family item docs (watch/wish/place/recipe/trip_items) gated on the
-content-family predicates in services.gemini (is_entertainment / is_shopping / is_places /
-is_recipe / is_itinerary). Those item docs carry `source_note_ids` (which notes contributed them)
-but NOT the note's content_type, and the frontend walls read the subcollections directly. So when
-the owner recategorizes a note, nothing reconciles the items: a note wrongly saved as `product`
-then fixed to `software` leaves its wish_item visible in the Wishlist forever.
+A note fans out into per-family item docs (watch/place_items) gated on the content-family
+predicates in services.gemini (is_entertainment / is_places). Those item docs carry
+`source_note_ids` (which notes contributed them) but NOT the note's content_type, and the
+frontend walls read the subcollections directly. So when the owner recategorizes a note, nothing
+reconciles the items: a note wrongly saved as `movie` then fixed to `article` leaves its
+watch_item visible in the Watchlist forever.
+
+(The wishlist/recipes/trips mini-apps and their `wish_items`/`recipe_items`/`trip_items` families
+were removed 2026-07-12 — the frontend dropped those walls, so fanning notes out into them was
+pure wasted write cost. See CLAUDE.md "Current State" for the removal note.)
 
 `reconcile_note_items` fixes that on PATCH /notes/{id}. It compares the family membership of the
 OLD vs NEW content_type and, per family:
@@ -22,15 +26,14 @@ the category change is the user's explicit intent; item sync is secondary. A sam
 written: it runs the same forward fan-out for every family the note's content_type matches, so a
 fresh capture appears in its mini-app immediately (and the WatchNote poster deep-links resolve).
 At ingest the note's `data` already carries the structured, enriched payload (titles[] with TMDB
-fields, venues[], geocoded days[]), so the forward paths use it directly — no second Gemini
-extraction, no fresh TMDB/Places API spend.
+fields, venues[]), so the forward paths use it directly — no second Gemini extraction, no fresh
+TMDB/Places API spend.
 """
 import logging
 
 from services import search_index
 from services.firebase import get_db
-from services.gemini import (is_entertainment, is_itinerary, is_places,
-                             is_recipe, is_shopping)
+from services.gemini import is_entertainment, is_places
 
 log = logging.getLogger("clipnote.item_reconcile")
 
@@ -54,15 +57,6 @@ async def _forward_watch(uid: str, note_id: str, note: dict) -> None:
             source_domain=note.get("source_domain"))
 
 
-async def _forward_wish(uid: str, note_id: str, note: dict) -> None:
-    from services import wishlist
-    await wishlist.enrich_wish_item(
-        uid, note_id, title=note.get("title", ""),
-        cover_image_url=note.get("cover_image_url"),
-        source_domain=note.get("source_domain"),
-        data=note.get("data"), ai_summary=note.get("ai_summary", ""))
-
-
 async def _forward_place(uid: str, note_id: str, note: dict) -> None:
     from services import places
     from services.gemini import gemini_service
@@ -75,44 +69,13 @@ async def _forward_place(uid: str, note_id: str, note: dict) -> None:
         await places.enrich_places(uid, note_id, venues)
 
 
-async def _forward_recipe(uid: str, note_id: str, note: dict) -> None:
-    from services import recipes
-    await recipes.enrich_recipe_item(
-        uid, note_id, title=note.get("title", ""),
-        cover_image_url=note.get("cover_image_url"),
-        source_url=note.get("source_url"),
-        source_domain=note.get("source_domain"),
-        data=note.get("data"), ai_summary=note.get("ai_summary", ""))
-
-
-async def _forward_trip(uid: str, note_id: str, note: dict) -> None:
-    from services import itineraries
-    from services.gemini import gemini_service
-    data = note.get("data") or {}
-    if not data.get("days"):
-        derived = await gemini_service.extract_days_from_note(
-            note.get("title", ""), note.get("ai_summary", ""), data)
-        if not derived.get("days"):
-            return  # not actually a trip (single spot / roundup / tips)
-        data = {**data, **derived}
-    await itineraries.enrich_trip_item(
-        uid, note_id, title=note.get("title", ""),
-        cover_image_url=note.get("cover_image_url"),
-        source_url=note.get("source_url"),
-        source_domain=note.get("source_domain"),
-        data=data)
-
-
 # One row per content family: (predicate, item subcollection, search_index kind, forward fan-out).
 # The predicate and forward enricher are the SAME ones ingest/backfill use, so reconciliation stays
 # in lockstep with how items are created in the first place. Also imported by
 # scripts/reconcile_stale_items.py (the one-off healer for items orphaned before this fix landed).
 FAMILIES = (
     (is_entertainment, "watch_items", "watch", _forward_watch),
-    (is_shopping, "wish_items", "wish", _forward_wish),
     (is_places, "place_items", "place", _forward_place),
-    (is_recipe, "recipe_items", "recipe", _forward_recipe),
-    (is_itinerary, "trip_items", "trip", _forward_trip),
 )
 
 

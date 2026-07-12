@@ -11,15 +11,7 @@ import { FOCUS_RING, PRESS } from "@/lib/ui";
 const HIDDEN_PREFIXES = ["/login", "/share", "/p/"];
 
 // The mini-app walls all live under the Collections slot (they're facets of the same library).
-const COLLECTIONS_PREFIXES = [
-  "/collections",
-  "/watchlist",
-  "/wishlist",
-  "/places",
-  "/recipes",
-  "/trips",
-  "/library",
-];
+const COLLECTIONS_PREFIXES = ["/collections", "/watchlist", "/places", "/library"];
 
 const itemBase = `flex flex-1 flex-col items-center justify-center gap-1 ${PRESS} ${FOCUS_RING}`;
 

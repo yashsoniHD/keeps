@@ -120,8 +120,10 @@ export interface SearchHit {
 }
 
 // ─── Mini-app item types (restored) ───────────────────────────────────────
-// The watchlist/wishlist/recipes/places/trips apps read per-item docs from
-// users/{uid}/<app>_items. Backend-write-only; client reads live via onSnapshot.
+// The watchlist/places apps read per-item docs from users/{uid}/<app>_items.
+// Backend-write-only; client reads live via onSnapshot. Wishlist/Recipes/Trips item types were
+// removed with those tiles; the itinerary note's TripStop/TripDay shapes below stay — they're
+// note data, not a mini-app.
 
 // One tracked movie/show in the Watchlist mini-app. Lives at users/{uid}/watch_items/{id},
 // auto-populated by the worker from entertainment notes (one note → N items) and TMDB-enriched.
@@ -148,93 +150,6 @@ export interface WatchItem {
   rating?: number | null; // 1–5, set on watched items
   favorite?: boolean; // cross-cutting ⭐ flag, independent of bucket
   added_manually?: boolean; // added via TMDB search rather than a note
-  created_at: Timestamp;
-  updated_at: Timestamp;
-}
-
-// One spec row on a product.
-export interface ProductSpec {
-  label: string;
-  value: string;
-}
-
-// One tracked product in the Wishlist mini-app. Lives at users/{uid}/wish_items/{id},
-// auto-populated by the worker from product notes (one product note → one item). Read-only on
-// the client; promote / mark-bought / target-price changes go through the backend.
-export interface WishItem {
-  id: string;
-  user_id: string;
-  source_note_ids: string[]; // the note(s) this product came from
-  title: string;
-  brand?: string | null;
-  image_url?: string | null;
-  buy_url?: string | null;
-  domain?: string | null;
-  price_raw?: string | null; // as shown, e.g. "₹2,499"
-  price_amount?: number | null; // parsed numeric, for sorting / drop-detection
-  currency?: string | null;
-  rating?: number | null; // the product's own review rating (0–5), display-only
-  specs?: ProductSpec[];
-  pros?: string[];
-  cons?: string[];
-  verdict?: string | null;
-  wish_status: "saved" | "to_buy" | "purchased"; // mutually-exclusive bucket
-  favorite?: boolean; // cross-cutting ⭐ flag, independent of bucket
-  target_price?: number | null; // user's price-alert target (Phase B)
-  price_when_added?: number | null; // anchor for "cheaper than when you saved it"
-  purchased_at?: Timestamp | null;
-  created_at: Timestamp;
-  updated_at: Timestamp;
-}
-
-// One tracked recipe in the Recipes mini-app. Lives at users/{uid}/recipe_items/{id},
-// auto-populated by the worker from recipe notes (one note → one recipe) as a pure copy of the
-// note's already-extracted fields — no external API. Read-only on the client; the favorite toggle
-// goes through the backend. Recipes have no status workflow (no buckets), so `favorite` is the only
-// owner-editable field — the cookbook is organised by filters + favorites instead.
-export interface RecipeItem {
-  id: string;
-  user_id: string;
-  source_note_ids: string[]; // the note(s) this recipe came from
-  title: string;
-  cuisine?: string | null;
-  image_url?: string | null;
-  source_url?: string | null;
-  domain?: string | null;
-  total_time?: string | null; // e.g. "35 min"
-  prep_time?: string | null;
-  cook_time?: string | null;
-  servings?: string | null;
-  difficulty?: string | null; // Easy | Medium | Hard
-  calories?: string | null;
-  ingredients?: { group?: string; items: string[] }[];
-  steps?: string[];
-  tips?: string[];
-  favorite?: boolean; // cross-cutting ⭐ flag
-  created_at: Timestamp;
-  updated_at: Timestamp;
-}
-
-// One tracked trip in the Trips mini-app. Lives at users/{uid}/trip_items/{id}, auto-populated by
-// the worker from itinerary notes (one note → one trip) — a near-pure copy of the note's extracted
-// fields, with each stop geocoded for the map. Read-only on the client; the favorite toggle goes
-// through the backend. Trips have no status workflow (no buckets), so `favorite` is the only
-// owner-editable field — the wall is organised by filters + favorites instead.
-export interface TripItem {
-  id: string;
-  user_id: string;
-  source_note_ids: string[]; // the note(s) this trip came from
-  title: string;
-  destination?: string | null;
-  duration?: string | null; // e.g. "3 days"
-  budget?: string | null;
-  best_season?: string | null;
-  image_url?: string | null;
-  source_url?: string | null;
-  domain?: string | null;
-  days?: TripDay[];
-  tips?: string[];
-  favorite?: boolean; // cross-cutting ⭐ flag
   created_at: Timestamp;
   updated_at: Timestamp;
 }

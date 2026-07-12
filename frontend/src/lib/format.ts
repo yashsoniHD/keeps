@@ -1,5 +1,5 @@
 // Consistent price display wherever a note/item carries a parsed `price_amount` + `currency`
-// alongside the raw scraped string (wishlist products today; any future template that adopts the
+// alongside the raw scraped string (product notes today; any future template that adopts the
 // same shape should use this too, instead of showing whatever punctuation the source page used).
 export function formatPrice(
   amount?: number | null,

@@ -1,6 +1,14 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-// Pathless layout for /wishlist and /wishlist/$itemId. With both a list and a detail route under
-// "wishlist", this parent must render an <Outlet/> (mirrors watchlist.tsx) — the list lives in
-// wishlist.index.tsx and the product detail in wishlist.$itemId.tsx.
-export const Route = createFileRoute("/wishlist")({ component: () => <Outlet /> });
+// Wishlist was one of the mini-apps folded back into notes (see CLAUDE.md "notes-first
+// collapse"). Its list/detail children are gone; this bare layout route stays only to redirect
+// old bookmarks/deep links to Collections rather than 404 (mirrors routes/ask.tsx,
+// routes/library.index.tsx). Child paths like /wishlist/abc no longer have a matching route
+// (wishlist.index.tsx / wishlist.$itemId.tsx were deleted), so they fall through to the root
+// notFoundComponent instead of hitting this redirect — acceptable since it's a dead deep link
+// either way.
+export const Route = createFileRoute("/wishlist")({
+  beforeLoad: () => {
+    throw redirect({ to: "/collections" });
+  },
+});

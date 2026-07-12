@@ -1,7 +1,7 @@
-// Shared sticky header for the five mini-app walls. Each app announces its identity on entry:
-// the header band wears the tool's domain wash and the icon chip its saturated fill, so walking
-// into Recipes *feels* terracotta and Trips sky — while back/search/settings stay in the same
-// place on every wall. Identity comes straight from TOOLS (collections-meta) so it can't drift.
+// Shared sticky header for the mini-app walls (watchlist / places). Each app announces its
+// identity on entry: the header band wears the tool's domain wash and the icon chip its
+// saturated fill — while back/search/settings stay in the same place on every wall. Identity
+// comes straight from TOOLS (collections-meta) so it can't drift.
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Search, Settings } from "lucide-react";
 import type { ToolMeta } from "@/lib/collections-meta";

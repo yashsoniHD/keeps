@@ -76,10 +76,7 @@ from routers.conversations import router as conversations_router  # noqa: E402
 from routers.digest import router as digest_router              # noqa: E402
 from routers.collections import router as collections_router    # noqa: E402
 from routers.watch_items import router as watch_items_router  # noqa: E402
-from routers.wish_items import router as wish_items_router    # noqa: E402
 from routers.place_items import router as place_items_router  # noqa: E402
-from routers.recipe_items import router as recipe_items_router  # noqa: E402
-from routers.trip_items import router as trip_items_router      # noqa: E402
 
 app.include_router(ingest_router, prefix="/api")
 app.include_router(process_router, prefix="/api")
@@ -94,7 +91,4 @@ app.include_router(conversations_router, prefix="/api")
 app.include_router(digest_router, prefix="/api")
 app.include_router(collections_router, prefix="/api")
 app.include_router(watch_items_router, prefix="/api")
-app.include_router(wish_items_router, prefix="/api")
 app.include_router(place_items_router, prefix="/api")
-app.include_router(recipe_items_router, prefix="/api")
-app.include_router(trip_items_router, prefix="/api")

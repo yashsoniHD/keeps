@@ -1,7 +1,7 @@
-// Shared plumbing for the five mini-app walls (watchlist / wishlist / places / recipes /
-// trips). Each wall used to hand-roll the same listener wiring, icon-filter control, and
-// loading state — this module is the single copy, parameterized only by the app's accent
-// classes (passed as full literal class strings so the Tailwind JIT sees them).
+// Shared plumbing for the mini-app walls (watchlist / places). Wishlist, Recipes, and Trips
+// were removed in the notes-first collapse; this module is the single copy for what remains,
+// parameterized only by the app's accent classes (passed as full literal class strings so the
+// Tailwind JIT sees them).
 import { useCallback, useEffect, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { AlertCircle } from "lucide-react";
@@ -14,7 +14,7 @@ import { getCached, setCached } from "@/lib/swr-cache";
 // see older items; useWallItems raises the limit in steps when the user asks for more.
 export const WALL_PAGE_SIZE = 200;
 
-// The five item grids share one responsive column ramp.
+// The item grids (watchlist / places) share one responsive column ramp.
 export const WALL_GRID =
   "grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
 
