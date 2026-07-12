@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { House, LayoutGrid, Plus, Sparkles, Search, type LucideIcon } from "lucide-react";
+import { House, LayoutGrid, Plus, Sparkles, Settings, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { useCapture } from "@/components/CaptureProvider";
@@ -53,7 +53,7 @@ export function BottomNav() {
 
   const homeActive = pathname === "/";
   const collectionsActive = COLLECTIONS_PREFIXES.some((p) => pathname.startsWith(p));
-  const searchActive = pathname.startsWith("/search");
+  const settingsActive = pathname.startsWith("/settings");
   const askActive = isOpen;
 
   return (
@@ -80,13 +80,13 @@ export function BottomNav() {
           <TabInner icon={LayoutGrid} label="Collections" active={collectionsActive} />
         </Link>
 
-        {/* Raised center primary: capture a new note (replaces the FAB on mobile). */}
-        <div className="flex flex-1 items-start justify-center">
+        {/* Inline center primary: capture a new note (replaces the FAB on mobile). */}
+        <div className="flex flex-1 items-center justify-center">
           <button
             type="button"
             onClick={openCapture}
             aria-label="New note"
-            className={`-mt-6 flex h-[52px] w-[52px] items-center justify-center rounded-full bg-ink text-paper shadow-lg ${PRESS} ${FOCUS_RING}`}
+            className={`flex h-11 w-11 items-center justify-center rounded-full bg-ink text-paper ${PRESS} ${FOCUS_RING}`}
           >
             <Plus className="h-6 w-6" aria-hidden />
           </button>
@@ -102,12 +102,12 @@ export function BottomNav() {
         </button>
 
         <Link
-          to="/search"
-          aria-label="Search"
-          aria-current={searchActive ? "page" : undefined}
-          className={`${itemBase} ${searchActive ? "text-ink" : "text-ink-soft"}`}
+          to="/settings"
+          aria-label="Settings"
+          aria-current={settingsActive ? "page" : undefined}
+          className={`${itemBase} ${settingsActive ? "text-ink" : "text-ink-soft"}`}
         >
-          <TabInner icon={Search} label="Search" active={searchActive} />
+          <TabInner icon={Settings} label="Settings" active={settingsActive} />
         </Link>
       </div>
     </nav>

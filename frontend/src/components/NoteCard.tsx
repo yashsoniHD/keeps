@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Trash2,
@@ -225,9 +225,10 @@ export function NoteCard({ note }: { note: Note }) {
 // The image-forward tile for the Pinterest-style "Board" feed view. Unlike NoteCard (a
 // uniform text card with no cover preview), this celebrates the cover: it fills the top at
 // its natural aspect, so tall images stay tall and the masonry reads organic. A coverless
-// note falls back to a pastel placeholder with its title watermarked (uppercase, letterspaced
-// monospace) instead of a dead box. It only ever renders finished notes — the feed keeps
-// rendering in-flight/failed captures as standard cards.
+// note falls back to an accent-tinted gradient with its title set large in the app's serif
+// display face — a tile designed to hold its own between real photos, not read as a miss.
+// It only ever renders finished notes — the feed keeps rendering in-flight/failed captures
+// as standard cards.
 
 // Stable seed for per-note variety (placeholder aspect) without a stored field.
 function seedFromId(id: string): number {
@@ -251,10 +252,15 @@ function isVideoNote(note: Note): boolean {
 
 // Duration string carried by the note (summary notes stash it as data.videoLength). Absent for
 // most notes — the pill then shows just the play glyph, never a fabricated time.
+// data.duration is only trusted when it reads like a timestamp: itineraries captured from a
+// video host also carry data.duration ("8 days"), which is a trip length, not a video length.
 function videoDuration(note: Note): string | null {
   const d = note.data ?? {};
-  const raw = d.videoLength ?? d.duration;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  let raw = typeof d.videoLength === "string" ? d.videoLength : null;
+  if (!raw && typeof d.duration === "string" && /^\d{1,2}(:\d{2}){1,2}$/.test(d.duration.trim())) {
+    raw = d.duration;
+  }
+  return raw && raw.trim() ? raw.trim() : null;
 }
 
 // Board covers keep their natural shape only within this band; extremes get cropped by
@@ -270,23 +276,47 @@ export function BoardCard({ note }: { note: Note }) {
   // Natural cover ratio, measured on load; null until then (pre-load tiles use the band's
   // portrait end, since video thumbnails dominate saved content).
   const [coverRatio, setCoverRatio] = useState<number | null>(null);
+  // Drives the image's fade-in — covers pop in as they finish loading instead of snapping in,
+  // which reads calmer on a fast-scrolling feed. Placeholders (no network image) skip this.
+  const [coverLoaded, setCoverLoaded] = useState(false);
   const video = isVideoNote(note);
   const duration = videoDuration(note);
-  // Sub-line: the category chip (icon + label) plus the short date. The source is only
-  // indicated by the chip on the cover — repeating it down here read as a duplicate.
+  // Sub-line: a quiet accent dot (the same color-coding as the category chip elsewhere,
+  // without the loud pill background) plus the short date. The source is only indicated by
+  // the chip on the cover — repeating it down here read as a duplicate.
   const date = formatDateShort(note.created_at);
   const placeholderAspect = PLACEHOLDER_ASPECTS[seedFromId(note.id) % PLACEHOLDER_ASPECTS.length];
+  // The accent's underlying token name ("recipe" from "bg-recipe"), so the placeholder can
+  // build a `var(--{token}-soft)` gradient. Tailwind can't discover a dynamically-assembled
+  // utility class like `from-${token}-soft` at build time, but a raw CSS custom-property
+  // reference works at runtime and still tracks light/dark mode automatically — both are
+  // defined on :root and .dark for every accent.
+  const accentToken = accent.dot.replace(/^bg-/, "");
+  // Placeholder text sits on the `-soft` gradient, not the `-chip` pill background, but the
+  // WCAG-audited pairing for `-soft` is the `-chip` foreground (see PALETTES above) — reuse
+  // the chip's text-* class rather than accent.text (contrast-audited for the plain card bg).
+  const placeholderTextClass = accent.chip.split(" ").find((cls) => cls.startsWith("text-")) ?? accent.text;
+  // Cached/back-forward-cache images never fire `onLoad` (and Safari's lazy-load can skip it
+  // too), which would leave the tile permanently at opacity-0. A callback ref checks the
+  // already-loaded state synchronously on mount so those covers still show up.
+  const coverRef = useCallback((el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth > 0) {
+      setCoverRatio(el.naturalWidth / el.naturalHeight);
+      setCoverLoaded(true);
+    }
+  }, []);
 
   return (
     <WithNoteMenu note={note}>
       <Link
         to="/notes/$noteId"
         params={{ noteId: note.id }}
-        className={`group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card ring-2 ring-transparent transition-all [-webkit-touch-callout:none] select-none hover:-translate-y-0.5 hover:shadow-lg ${FOCUS_RING} ${accent.ring}`}
+        className={`group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card ring-2 ring-transparent transition-all duration-200 ease-out [-webkit-touch-callout:none] select-none md:hover:-translate-y-1 md:hover:shadow-xl ${FOCUS_RING} ${accent.ring}`}
       >
         <div className="relative">
           {hasCover ? (
             <img
+              ref={coverRef}
               src={note.cover_image_url!}
               alt=""
               loading="lazy"
@@ -295,8 +325,11 @@ export function BoardCard({ note }: { note: Note }) {
                 const el = e.currentTarget;
                 if (el.naturalWidth && el.naturalHeight)
                   setCoverRatio(el.naturalWidth / el.naturalHeight);
+                setCoverLoaded(true);
               }}
-              className="w-full object-cover"
+              className={`w-full object-cover transition-[transform,opacity] duration-300 ease-out md:group-hover:scale-[1.03] ${
+                coverLoaded ? "opacity-100" : "opacity-0"
+              }`}
               style={{
                 aspectRatio: Math.min(
                   BOARD_RATIO_MAX,
@@ -305,10 +338,24 @@ export function BoardCard({ note }: { note: Note }) {
               }}
             />
           ) : (
+            // Coverless tile: a soft gradient in the note's own accent color (top) settling
+            // into the card surface (bottom), with the title set large in the serif display
+            // face and a faint oversized type-icon watermark — designed to sit between real
+            // photos, not read as an empty box.
             <div
-              className={`flex ${placeholderAspect} items-center justify-center ${accent.soft} p-4`}
+              className={`relative flex ${placeholderAspect} flex-col justify-between overflow-hidden p-5`}
+              style={{
+                backgroundImage: `linear-gradient(155deg, var(--${accentToken}-soft), var(--card))`,
+              }}
             >
-              <span className="line-clamp-4 text-center font-mono text-sm font-medium uppercase leading-snug tracking-[0.12em] break-words [overflow-wrap:anywhere] text-ink-soft/60">
+              <TypeIcon aria-hidden className={`h-5 w-5 shrink-0 opacity-50 ${placeholderTextClass}`} />
+              <TypeIcon
+                aria-hidden
+                className={`pointer-events-none absolute -bottom-8 -right-8 h-32 w-32 opacity-[0.07] ${accent.text}`}
+              />
+              <span
+                className={`relative line-clamp-5 break-words font-serif text-2xl leading-[1.15] [overflow-wrap:anywhere] ${placeholderTextClass}`}
+              >
                 {note.title}
               </span>
             </div>
@@ -316,7 +363,7 @@ export function BoardCard({ note }: { note: Note }) {
 
           {/* Source chip (video sources only), top-left. */}
           {video && note.source_domain && (
-            <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+            <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
               <img
                 src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
                 onError={(e) => {
@@ -331,24 +378,21 @@ export function BoardCard({ note }: { note: Note }) {
 
           {/* Play pill (video notes), bottom-left. Duration only when the note carries one. */}
           {video && (
-            <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
+            <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
               <Play className="h-3 w-3 fill-white" />
               {duration}
             </span>
           )}
         </div>
 
-        <div className="flex min-w-0 flex-col p-3">
-          <h3 className="text-[15px] font-medium leading-snug text-ink line-clamp-2">
+        <div className="flex min-w-0 flex-col px-3.5 pb-3.5 pt-3">
+          {/* The only loud element on the tile — everything else below is deliberately quiet. */}
+          <h3 className="text-[15px] font-semibold leading-snug tracking-tight text-ink line-clamp-2">
             {note.title}
           </h3>
-          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft">
-            <span
-              className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${accent.chip}`}
-            >
-              <TypeIcon className="h-3 w-3 shrink-0" />
-              <span className="truncate">{noteLabel(note.content_type)}</span>
-            </span>
+          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft/80">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${accent.dot}`} aria-hidden />
+            <span className="truncate">{noteLabel(note.content_type)}</span>
             {date && <span className="shrink-0 whitespace-nowrap">· {date}</span>}
           </p>
         </div>

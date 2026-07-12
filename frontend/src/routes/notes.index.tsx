@@ -18,6 +18,9 @@ import {
   ArrowLeft,
   Pin,
   Settings as SettingsIcon,
+  LayoutGrid,
+  LayoutDashboard,
+  Rows3,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -154,9 +157,10 @@ export function Feed({
   const [userSources, setUserSources] = useState<string[]>([]);
   const [active, setActive] = useState<string>(typeParam ?? "all");
   const [source, setSource] = useState<string>("all");
-  // Read-only here — the view toggle (Cards / Board / Compact) lives in Settings (Appearance).
-  // The hook keeps this in sync via localStorage, so changing it there reflects immediately.
-  const [layout] = useLayout();
+  // The view toggle (Cards / Board / Compact) lives both in the header (LayoutToggle, below)
+  // and in Settings (Appearance) — the hook syncs both via localStorage + a custom event, so
+  // switching one updates the other live.
+  const [layout, setLayout] = useLayout();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
     try {
@@ -573,10 +577,16 @@ export function Feed({
                 <Link to="/search" aria-label="Search notes" title="Search" className={ICON_BTN}>
                   <Search className="h-4 w-4" />
                 </Link>
-                <CollectionsMenu />
-                <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
-                  <SettingsIcon className="h-4 w-4" />
-                </Link>
+                <LayoutToggle layout={layout} setLayout={setLayout} />
+                {/* Collections and Settings move to the mobile bottom tab bar on small screens
+                    (BottomNav, md:hidden) — hide the header buttons there so they aren't
+                    duplicated, but keep them here for desktop, which has no bottom nav. */}
+                <div className="hidden items-center gap-1 md:flex">
+                  <CollectionsMenu />
+                  <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
+                    <SettingsIcon className="h-4 w-4" />
+                  </Link>
+                </div>
               </div>
             </div>
 
@@ -868,6 +878,91 @@ function SourceFilter({
   );
 }
 
+const LAYOUT_OPTIONS = [
+  { value: "standard" as const, label: "Cards", icon: LayoutGrid },
+  { value: "board" as const, label: "Board", icon: LayoutDashboard },
+  { value: "condensed" as const, label: "Compact", icon: Rows3 },
+];
+
+// Header view toggle: a round icon button (same visual language as the other header icons)
+// whose glyph reflects the active layout; opens a small dropdown with all three options. Mirrors
+// the segmented control in Settings > Appearance — both read/write the same `useLayout` state,
+// so picking one here updates that control (and vice versa) without a page reload.
+function LayoutToggle({ layout, setLayout }: { layout: Layout; setLayout: (v: Layout) => void }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    // Right-anchored: on mobile this is the rightmost header icon, so a
+    // left-anchored w-44 menu would overflow the viewport edge.
+    setPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+  }, [open]);
+
+  const current = LAYOUT_OPTIONS.find((o) => o.value === layout) ?? LAYOUT_OPTIONS[0];
+  const CurrentIcon = current.icon;
+
+  return (
+    <div className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Change layout"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Layout"
+        className={ICON_BTN}
+      >
+        <CurrentIcon className="h-4 w-4" />
+      </button>
+
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            {/* Same outside-tap catcher pattern as SourceFilter, for the same reason: the
+                portaled menu escapes the header's backdrop-filter stacking context. */}
+            <div className="fixed inset-0 z-[60]" aria-hidden onClick={() => setOpen(false)} />
+            <div
+              role="listbox"
+              style={{ top: pos.top, right: pos.right }}
+              className="fixed z-[61] w-44 rounded-2xl border border-border bg-popover p-1.5 shadow-2xl"
+            >
+              {LAYOUT_OPTIONS.map((o) => {
+                const isSelected = layout === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => {
+                      setLayout(o.value);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-colors ${
+                      isSelected
+                        ? "bg-ink/5 text-ink"
+                        : "text-ink-soft hover:bg-ink/5 hover:text-ink"
+                    }`}
+                  >
+                    <o.icon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1">{o.label}</span>
+                    {isSelected && <Check className="h-4 w-4 shrink-0 text-ink" />}
+                  </button>
+                );
+              })}
+            </div>
+          </>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 // Picks the card layout for a slice of notes. Cards (grid) / Compact (ledger rows) / Board
 // (masonry) — one switch so every render site (pinned, each date group, search) stays in step.
 function NotesView({ notes, layout }: { notes: Note[]; layout: Layout }) {
@@ -891,14 +986,16 @@ function NoteGrid({ notes }: { notes: Note[] }) {
 }
 
 // Pinterest-style masonry: CSS multi-column (2 on mobile → 3/4 on wider screens) with
-// break-inside-avoid so each image-forward tile stays whole. Column-gap comes from `gap-4`;
-// row spacing from the matching item margin — a touch more air than the tiles' own p-3 so
-// the phone grid doesn't read as cramped. Same error-boundary isolation as the grid.
+// break-inside-avoid so each image-forward tile stays whole. Column-gap/row-margin start at
+// 16px (gap-4) — already comfortable at 2 columns — and open up to 20px (gap-5) once the
+// grid reaches 4 columns, since more simultaneous columns read denser and want a touch more
+// air to keep the scroll calm rather than tightening the gutter for a busier mosaic. Same
+// error-boundary isolation as the grid.
 function BoardMasonry({ notes }: { notes: Note[] }) {
   return (
-    <section className="columns-2 gap-4 sm:columns-3 lg:columns-4 [column-fill:_balance]">
+    <section className="columns-2 gap-4 sm:columns-3 lg:columns-4 lg:gap-5 [column-fill:_balance]">
       {notes.map((n) => (
-        <div key={n.id} className="mb-4 break-inside-avoid">
+        <div key={n.id} className="mb-4 break-inside-avoid lg:mb-5">
           <ErrorBoundary label="feed-board-card" fallback={<FallbackNoteCard note={n} />}>
             <BoardCard note={n} />
           </ErrorBoundary>

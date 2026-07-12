@@ -71,7 +71,7 @@ function usePullToRefresh() {
 }
 
 // The app frame: shell layout + pull-to-refresh. Primary navigation lives in the global bottom
-// tab bar (components/BottomNav.tsx: Home · Collections · + · Ask · Search); the app-wide capture
+// tab bar (components/BottomNav.tsx: Home · Collections · + · Ask · Settings); the app-wide capture
 // flow lives in CaptureProvider (__root.tsx), which the bottom bar's + button drives.
 export function AppShell({ children }: { children: ReactNode }) {
   const { pull, refreshing } = usePullToRefresh();
