@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { RotateCcw, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
+import { RotateCcw, ArrowRight, BookmarkPlus, Loader2, Sparkles } from "lucide-react";
 import type { Note, Collection } from "@/lib/types";
 import { ingest } from "@/lib/api";
+import { useAsk } from "@/contexts/ask-context";
+import { FOCUS_RING, PRESS } from "@/lib/ui";
 import { ClipMark } from "@/components/ClipMark";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteHeader } from "./note/NoteHeader";
@@ -292,6 +294,24 @@ function CoverFallback({ note, className = "" }: { note: Note; className?: strin
   );
 }
 
+// "Ask about this note" — the per-note launcher for Clip AI. The note-detail route registers
+// this note as the Ask focal scope (setFocalNote), so opening the chat here lands scoped to it
+// ("this note first, then all") and the chat shows its focal-context UI. Owner view only.
+function AskAboutNote() {
+  const { openChat } = useAsk();
+  return (
+    <button
+      type="button"
+      onClick={() => openChat()}
+      aria-label="Ask Clip AI about this note"
+      className={`mt-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent ${PRESS} ${FOCUS_RING}`}
+    >
+      <Sparkles className="h-4 w-4 text-summary" aria-hidden />
+      Ask about this note
+    </button>
+  );
+}
+
 export function NoteContent({
   note,
   collections = [],
@@ -362,6 +382,8 @@ export function NoteContent({
         ) : (
           <CoverFallback note={note} className="mb-8 h-56 w-full md:h-72" />
         ))}
+      {/* Per-note Clip AI launcher — owner view only (public viewers can't chat over the corpus). */}
+      {!isPublic && <AskAboutNote />}
       <div className="mt-8">
         {/* onPatch is owner-only (undefined on the public view), so the editable body block
             inside GenericNote stays read-only for shared notes. */}

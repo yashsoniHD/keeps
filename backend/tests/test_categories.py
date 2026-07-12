@@ -3,6 +3,7 @@ a non-destructive fallback. The Firestore-touching helpers (retag_notes / counts
 mutations) are mocked here — these tests pin the router's orchestration logic: which slug
 wins, what the fallback target is, and the order of array mutations."""
 import pytest
+from fastapi import HTTPException
 
 import routers.categories as cat
 
@@ -13,6 +14,7 @@ def spy(monkeypatch):
     calls: dict[str, list] = {
         "retag": [], "add": [], "remove": [],
         "set_meta": [], "move_meta": [], "remove_meta": [],
+        "merge": [],
     }
     cats = {"value": ["recipe", "summary"]}
     counts = {"recipe": 3, "summary": 1}
@@ -54,6 +56,12 @@ def spy(monkeypatch):
         calls["remove_meta"].append((uid, slug))
         meta.pop(slug, None)
 
+    async def fake_apply_merge(uid, slug, into):
+        # The Firestore batch pass is mocked; these tests pin the router's orchestration.
+        calls["merge"].append((uid, slug, into))
+        return counts.get(slug, 0)
+
+    monkeypatch.setattr(cat, "_apply_merge", fake_apply_merge)
     monkeypatch.setattr(cat, "get_user_categories", fake_get_cats)
     monkeypatch.setattr(cat, "count_notes_by_type", fake_counts)
     monkeypatch.setattr(cat, "retag_notes", fake_retag)
@@ -184,3 +192,47 @@ async def test_delete_honours_explicit_move_to(spy):
     res = await cat.delete_category("recipe", move_to="Recipe Box", user_id="u")
     assert res["moved_to"] == "recipe-box"
     assert calls["retag"] == [("u", "recipe", "recipe-box")]
+
+
+# ---------------- merge: fold one category into another (consolidation, audit #9) ----------------
+
+async def test_merge_moves_notes_and_drops_slug(spy):
+    calls, _, _ = spy
+    res = await cat.merge_category("recipe", cat.CategoryMerge(into="Summary"), user_id="u")
+    assert res == {"merged_into": "summary", "count": 3}
+    assert calls["merge"] == [("u", "recipe", "summary")]   # notes + index re-tagged
+    assert calls["add"] == [("u", "summary")]               # target kept present
+    assert calls["remove"] == [("u", "recipe")]             # source slug dropped
+    assert calls["remove_meta"] == [("u", "recipe")]        # its override cleaned up
+
+
+async def test_merge_unknown_slug_404(spy):
+    """Merging a slug that isn't in the taxonomy (e.g. a retried request after it was already
+    merged away) is a 404 — the idempotent no-op path, no writes."""
+    calls, _, _ = spy
+    with pytest.raises(HTTPException) as exc:
+        await cat.merge_category("ghost", cat.CategoryMerge(into="summary"), user_id="u")
+    assert exc.value.status_code == 404
+    assert calls["merge"] == []
+    assert calls["remove"] == []
+
+
+async def test_merge_into_self_rejected(spy):
+    """The target resolves through the same plural/case folding as rename; a target that
+    collapses back onto the source ("recipe" ← "Recipes") is a 400, not a self-erasing merge."""
+    calls, _, _ = spy
+    with pytest.raises(HTTPException) as exc:
+        await cat.merge_category("recipe", cat.CategoryMerge(into="Recipes"), user_id="u")
+    assert exc.value.status_code == 400
+    assert calls["merge"] == []
+
+
+async def test_merge_idempotent_after_source_gone(spy):
+    """Second merge of an already-consolidated category: the source is no longer present, so
+    it 404s cleanly rather than re-running or erroring."""
+    calls, cats, _ = spy
+    cats["value"] = ["summary"]        # "recipe" already merged away
+    with pytest.raises(HTTPException) as exc:
+        await cat.merge_category("recipe", cat.CategoryMerge(into="summary"), user_id="u")
+    assert exc.value.status_code == 404
+    assert calls["merge"] == []

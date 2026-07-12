@@ -70,6 +70,17 @@ def test_cost_usd_uses_per_tier_prices(monkeypatch):
     assert cost == pytest.approx(1.0 + 2.0 + 0.1 + 0.2)
 
 
+def test_cost_usd_prices_audio_input_at_audio_rate(monkeypatch):
+    monkeypatch.setattr(settings, "GEMINI_PRICE_IN", 1.0)
+    monkeypatch.setattr(settings, "GEMINI_PRICE_IN_AUDIO", 3.0)
+    monkeypatch.setattr(settings, "GEMINI_PRICE_OUT", 0.0)
+    # 1M main-in of which 400k is audio: 600k text @ $1 + 400k audio @ $3, no double-count.
+    cost = admin_mod._cost_usd(1_000_000, 0, 0, 0, ti_audio_main=400_000)
+    assert cost == pytest.approx(0.6 * 1.0 + 0.4 * 3.0)
+    # ti_audio_main defaults to 0 → all main-in priced at the text rate (back-compat).
+    assert admin_mod._cost_usd(1_000_000, 0, 0, 0) == pytest.approx(1.0)
+
+
 # ---------------- stats aggregation ----------------
 
 class FakeAggResult:

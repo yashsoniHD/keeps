@@ -51,31 +51,37 @@ def patch_digest(fake_db, monkeypatch):
     return sent
 
 
-async def test_run_digest_sends_only_to_opted_in_users_with_recent_notes(
+async def test_run_digest_sends_to_eligible_users_with_recent_notes(
     fake_db, patch_digest, monkeypatch
 ):
+    """Digest is opt-OUT: absent digest_opt_in means eligible; only explicit False is skipped."""
     now = datetime.now(timezone.utc)
     recent, old = now - timedelta(days=1), now - timedelta(days=30)
 
     async def fake_auth_users():
         return [
             {"uid": "u1", "email": "a@x.com", "display_name": "Alice"},  # opted-in, recent note
-            {"uid": "u2", "email": "b@x.com", "display_name": "Bob"},    # opted OUT
-            {"uid": "u3", "email": "c@x.com", "display_name": "Cara"},   # opted-in, only old note
+            {"uid": "u2", "email": "b@x.com", "display_name": "Bob"},    # opted OUT (explicit False)
+            {"uid": "u3", "email": "c@x.com", "display_name": "Cara"},   # absent flag, only old note
             {"uid": "u4", "email": None, "display_name": "NoEmail"},     # no address
+            {"uid": "u5", "email": "e@x.com", "display_name": "Eve"},    # absent flag, recent note
         ]
 
     monkeypatch.setattr(digest_mod, "list_auth_users", fake_auth_users)
     fake_db.seed("users", "u1", {"digest_opt_in": True})
     fake_db.seed("users", "u2", {"digest_opt_in": False})
     fake_db.seed("users", "u3", {})
+    # u5 has no user doc at all — absent field must still count as opted in (the default).
     fake_db.seed("notes", "n1", {"user_id": "u1", "created_at": recent, "title": "Fresh"})
     fake_db.seed("notes", "n3", {"user_id": "u3", "created_at": old, "title": "Stale"})
+    fake_db.seed("notes", "n5", {"user_id": "u5", "created_at": recent, "title": "Also fresh"})
 
     out = await digest_mod.run_digest(FakeReq())
 
-    assert out["sent"] == 1
-    assert [to for to, _ in patch_digest] == ["a@x.com"]
+    # u1 (opted-in) + u5 (absent flag = eligible), both with a recent note. u2 opted out; u3
+    # has only an old note; u4 has no email.
+    assert out["sent"] == 2
+    assert sorted(to for to, _ in patch_digest) == ["a@x.com", "e@x.com"]
     # Recorded the send time so we don't double-send.
     assert ("users", "u1") in fake_db.docs and "last_digest_at" in fake_db.docs[("users", "u1")]
 

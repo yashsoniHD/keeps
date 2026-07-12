@@ -36,12 +36,18 @@ async def require_admin(authorization: str | None = Header(default=None)) -> str
 
 def _cost_usd(
     ti_main: int, to_main: int, ti_lite: int, to_lite: int,
-    images: int = 0, ti_embed: int = 0,
+    images: int = 0, ti_embed: int = 0, ti_audio_main: int = 0,
 ) -> float:
     """Per-tier token totals (+ generated images) → USD, using config prices
-    (tokens priced per 1M; images per-image)."""
+    (tokens priced per 1M; images per-image).
+
+    `ti_audio_main` is the audio-modality SUBSET of `ti_main`: it's priced at the higher
+    GEMINI_PRICE_IN_AUDIO and the remaining (text) main input at GEMINI_PRICE_IN, so audio
+    and text never double-count regardless of how the counter is stored. 0 until the voice
+    metering wiring lands (see config.GEMINI_PRICE_IN_AUDIO)."""
     token_cost = (
-        ti_main * settings.GEMINI_PRICE_IN
+        (ti_main - ti_audio_main) * settings.GEMINI_PRICE_IN
+        + ti_audio_main * settings.GEMINI_PRICE_IN_AUDIO
         + to_main * settings.GEMINI_PRICE_OUT
         + ti_lite * settings.GEMINI_LITE_PRICE_IN
         + to_lite * settings.GEMINI_LITE_PRICE_OUT

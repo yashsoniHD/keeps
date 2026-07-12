@@ -11,12 +11,12 @@ const ICON: Record<PlaceAction["kind"], typeof MapPin> = {
   instagram: Instagram,
 };
 
-// The region-aware action row on a place (Directions / Call / Website / Instagram). The backend
-// builds the links; this just renders them. `compact` shows icons only (used on cards); otherwise
-// icon + label (used on the detail page). Clicks don't bubble so the row works inside a card
-// that's also a link.
-// Order / Reserve are intentionally not surfaced — places render Directions / Call / Website /
-// Instagram only. Filtered here so existing places drop them without a data migration.
+// The region-aware action row on an enriched venue (Directions / Call / Website / Instagram). The
+// backend builds the links into `action_links`; this just renders them. `compact` shows icons only
+// (map info windows / cards); otherwise icon + label (detail pages). Clicks don't bubble so the row
+// works inside a card that's also a link.
+// Order / Reserve are intentionally not surfaced. Filtered here so existing enriched notes drop
+// them without a data migration.
 const HIDDEN_KINDS = new Set<PlaceAction["kind"]>(["order", "reserve"]);
 
 export function ActionRow({

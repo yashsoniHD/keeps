@@ -61,6 +61,12 @@ class Settings:
     MAX_NOTES_PER_USER: int = int(os.getenv("MAX_NOTES_PER_USER", "500"))
     MAX_INGESTS_PER_USER_PER_DAY: int = int(os.getenv("MAX_INGESTS_PER_USER_PER_DAY", "50"))
     DAILY_GLOBAL_NOTE_CAP: int = int(os.getenv("DAILY_GLOBAL_NOTE_CAP", "1000"))
+    # Ceiling on a user's content_type taxonomy. Categories are AI-invented and append-only,
+    # so without a cap the classifier keeps minting near-duplicates ("idli-dosa" beside
+    # "recipe") until the feed's filter chips are unusable. At/over the cap the classifier MUST
+    # reuse an existing slug (enforced in prompt AND in code — a net-new slug is snapped to the
+    # closest existing category, never appended). Users can still prune/merge below the cap.
+    MAX_USER_CATEGORIES: int = int(os.getenv("MAX_USER_CATEGORIES", "15"))
     MAX_ASKS_PER_USER_PER_DAY: int = int(os.getenv("MAX_ASKS_PER_USER_PER_DAY", "30"))
     DAILY_GLOBAL_ASK_CAP: int = int(os.getenv("DAILY_GLOBAL_ASK_CAP", "300"))
     # Per-user, per-app cap on mini-app backfill runs/day. Backfill writes are idempotent but
@@ -230,11 +236,17 @@ class Settings:
     # change re-prices history correctly. Paid-tier Standard rates (confirmed against
     # the live pricing page, 2026-06-12); output includes thinking tokens. Lite input
     # uses the text/image/video rate ($0.25).
-    # TODO(voice): voice notes now DO send audio to Gemini, which bills at the higher audio
-    # input rate (~2× text). The usage meter still prices all input at the text rate, so
-    # voice-note cost is under-reported — split the input rate by modality when metering.
     GEMINI_PRICE_IN: float = float(os.getenv("GEMINI_PRICE_IN", "1.50"))
     GEMINI_PRICE_OUT: float = float(os.getenv("GEMINI_PRICE_OUT", "9.00"))
+    # Audio input bills ~2× text on the 3.x flash tier. The usage meter can now track an
+    # audio-input subtotal separately (record_usage's `modality="audio"` hint) and
+    # admin._cost_usd prices that subtotal at this rate instead of GEMINI_PRICE_IN.
+    # DEFERRED: gemini.py's voice/media call sites don't yet pass modality="audio", and
+    # flush_usage doesn't yet persist the audio subtotal (lifetime_tokens_in_audio_main),
+    # so today ALL main input still meters at the text rate — voice cost is still slightly
+    # under-reported. This constant + the meter API are the forward-compatible scaffolding
+    # so finishing that wiring needs no further price/schema change.
+    GEMINI_PRICE_IN_AUDIO: float = float(os.getenv("GEMINI_PRICE_IN_AUDIO", "3.00"))
     GEMINI_LITE_PRICE_IN: float = float(os.getenv("GEMINI_LITE_PRICE_IN", "0.25"))
     GEMINI_LITE_PRICE_OUT: float = float(os.getenv("GEMINI_LITE_PRICE_OUT", "1.50"))
     # text-embedding-005 on Vertex AI: ~$0.025/1M tokens (input only; no output).

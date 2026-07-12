@@ -1,7 +1,7 @@
 import { MapPin, Star, Clock, Wallet, Sparkles, Lightbulb, Utensils, ChevronDown } from "lucide-react";
 import type { Note, PlaceAction } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
-import { ActionRow } from "../ActionRow";
+import { ActionRow } from "@/components/shared/ActionRow";
 import { VenuesMap } from "../VenuesMap";
 import { useImageAspect, orientationOf } from "../useImageAspect";
 

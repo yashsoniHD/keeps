@@ -5,38 +5,36 @@ import { FOCUS_RING } from "@/lib/ui";
 
 const TRIP = paletteAccent(8);
 
-// localStorage key for an itinerary note's packing items — so a half-built list survives a
-// reload without any backend write. Note ids are globally unique, so no uid in the key.
-const storeKey = (noteId: string) => `note-packing:${noteId}`;
-
 interface PackItem {
   text: string;
   checked: boolean;
 }
 
-function load(noteId: string): PackItem[] {
+function load(storageKey: string): PackItem[] {
   try {
-    const raw = localStorage.getItem(storeKey(noteId));
+    const raw = localStorage.getItem(storageKey);
     return raw ? (JSON.parse(raw) as PackItem[]) : [];
   } catch {
     return [];
   }
 }
 
-// A per-trip packing checklist on an itinerary note. Fully client-side: items live in
-// localStorage (no backend), so this is the user's own scratch list for what to bring.
-// Add, tick off, remove, clear, and share what's still to pack.
-export function PackingList({ noteId }: { noteId: string }) {
-  const [items, setItems] = useState<PackItem[]>(() => load(noteId));
+// A per-trip packing checklist. Fully client-side: items live in localStorage under the caller's
+// `storageKey` (no backend), so this is the user's own scratch list for what to bring. Add, tick
+// off, remove, clear, and share what's still to pack. Callers pass a stable key so a half-built
+// list survives a reload — itinerary notes use `note-packing:{noteId}`, trips
+// `trip-packing:{uid}:{itemId}`.
+export function PackingList({ storageKey }: { storageKey: string }) {
+  const [items, setItems] = useState<PackItem[]>(() => load(storageKey));
   const [draft, setDraft] = useState("");
 
-  // Reload when navigating between notes (the component may be reused across detail pages).
-  useEffect(() => setItems(load(noteId)), [noteId]);
+  // Reload when navigating between detail pages (the component may be reused across them).
+  useEffect(() => setItems(load(storageKey)), [storageKey]);
 
   const persist = (next: PackItem[]) => {
     setItems(next);
     try {
-      localStorage.setItem(storeKey(noteId), JSON.stringify(next));
+      localStorage.setItem(storageKey, JSON.stringify(next));
     } catch {
       /* private mode / quota — the list still works for this session */
     }

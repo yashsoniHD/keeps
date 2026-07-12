@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { AppShell } from "@/components/AppShell";
 import { feedNeighbors } from "@/lib/note-nav";
 import { FOCUS_RING } from "@/lib/ui";
@@ -49,7 +50,13 @@ function NoteDetail() {
           setNote({ ...n, user_note: userNote });
           analytics.noteViewed(n.content_type);
         })
-        .catch(() => setLoadError(true));
+        .catch((err) => {
+          // A deleted note or one the user can't read comes back as permission-denied (Firestore
+          // rules), not a network error — treat it as not-found rather than blaming the connection.
+          const code = (err as { code?: string })?.code;
+          if (code === "permission-denied" || code === "not-found") setNotFound(true);
+          else setLoadError(true);
+        });
     }
   }, [user, noteId]);
 
@@ -112,16 +119,11 @@ function NoteDetail() {
 
   if (loadError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-ink-soft">
-        <span>Couldn't load this note. Check your connection.</span>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="rounded-full border border-border bg-card px-5 py-2.5 text-sm font-medium text-ink"
-        >
-          Retry
-        </button>
-      </div>
+      <ErrorState
+        title="Couldn't load this note"
+        body="Something went wrong reaching your notes. Give it another try."
+        onRetry={() => window.location.reload()}
+      />
     );
   }
   if (loading || (!note && !notFound)) {
@@ -133,9 +135,10 @@ function NoteDetail() {
   }
   if (notFound || !note) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-ink-soft">
-        Note not found.
-      </div>
+      <ErrorState
+        title="Note not found"
+        body="This note doesn't exist or was deleted."
+      />
     );
   }
 

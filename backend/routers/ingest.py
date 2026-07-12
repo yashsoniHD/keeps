@@ -31,9 +31,16 @@ async def _enforce_cost_caps(db, user_id: str) -> bool:
     transactionally; a deferred capture bumps nothing because it consumes no budget today."""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
 
+    # Lifetime note cap excludes is_fallback bookmarks — a capture we couldn't fully process
+    # (SSRF block, extraction failure) is salvaged as a thin bookmark the user didn't really
+    # ask for, so it must not eat into their real-note budget. is_fallback lives only on those
+    # salvage docs (absent on normal notes), and Firestore can't express "!= True OR missing"
+    # in one aggregate, so we count all notes minus the fallback ones (both cheap count()s, no
+    # doc reads billed).
     notes_q = db.collection("notes").where("user_id", "==", user_id)
-    agg = await notes_q.count().get()
-    note_count = agg[0][0].value
+    total_agg = await notes_q.count().get()
+    fallback_agg = await notes_q.where("is_fallback", "==", True).count().get()
+    note_count = total_agg[0][0].value - fallback_agg[0][0].value
     if note_count >= settings.MAX_NOTES_PER_USER:
         raise HTTPException(429, "Note limit reached for this account.")
 

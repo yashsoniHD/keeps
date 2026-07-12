@@ -83,6 +83,17 @@ async def test_per_user_note_cap_raises_429(fake_db):
     assert exc.value.status_code == 429
 
 
+async def test_fallback_notes_dont_count_against_note_cap(fake_db):
+    # One under the cap in *real* notes, then pile on fallback bookmarks: the salvage docs
+    # must not push the user over MAX_NOTES_PER_USER, so the capture still proceeds.
+    for i in range(settings.MAX_NOTES_PER_USER - 1):
+        fake_db.seed("notes", f"n{i}", {"user_id": "u"})
+    for i in range(5):
+        fake_db.seed("notes", f"fb{i}", {"user_id": "u", "is_fallback": True})
+    deferred = await ingest_mod._enforce_cost_caps(fake_db, "u")
+    assert deferred is False  # 499 real notes < 500 cap; the 5 fallbacks don't count
+
+
 async def test_global_cap_defers_not_rejects(fake_db):
     # A fresh user with the global kill-switch tripped: deferred, not 429, and no budget burned.
     fake_db.seed("system", f"usage-{TODAY}", {"note_count": settings.DAILY_GLOBAL_NOTE_CAP})

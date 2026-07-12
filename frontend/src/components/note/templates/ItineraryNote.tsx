@@ -1,8 +1,8 @@
 import { MapPin, Calendar, Wallet, Sun, Lightbulb, type LucideIcon } from "lucide-react";
 import type { Note, TripDay } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
-import { TripMap } from "../TripMap";
-import { PackingList } from "../PackingList";
+import { TripMap } from "@/components/shared/TripMap";
+import { PackingList } from "@/components/shared/PackingList";
 import { StatGrid, type Stat } from "../StatGrid";
 
 interface ItineraryData {
@@ -88,7 +88,7 @@ export function ItineraryNote({ note }: { note: Note }) {
       )}
 
       {/* Client-side scratch list (localStorage) — what to bring on this trip. */}
-      <PackingList noteId={note.id} />
+      <PackingList storageKey={`note-packing:${note.id}`} />
     </div>
   );
 }

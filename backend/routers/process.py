@@ -375,6 +375,14 @@ async def _process_job(job_id: str) -> dict:
             if not extracted.data or len(str(extracted.data)) < 40:
                 raise ValueError("Extraction produced empty or suspiciously short data")
 
+            # The extractor is told to ECHO the classified slug; if it drifted to a brand-new
+            # category, snap it back to the classifier's choice (which already honours the
+            # MAX_USER_CATEGORIES cap). Keeps content_type/template/search-index/add_user_category
+            # all consistent and guarantees the taxonomy never grows past the cap here.
+            if (extracted.content_type != content_type
+                    and match_existing(extracted.content_type, existing) not in existing):
+                extracted.content_type = content_type
+
             cover_image_url = bundle.images[0] if bundle.images else None
             # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
             # Skip frames we already extracted (those are covers-bucket URLs).

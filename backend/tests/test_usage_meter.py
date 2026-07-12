@@ -38,6 +38,18 @@ def test_record_usage_tolerates_missing_metadata():
     record_usage("gemini-3.5-flash", object())
 
 
+def test_record_usage_tracks_audio_modality_as_input_subset():
+    meter = start_metering()
+    # A text call and an audio call on the same model: by_model input is the SUM of both,
+    # while audio_input_tokens() is just the audio call's input (a subset of that total).
+    record_usage(settings.GEMINI_MODEL, FakeResponse(FakeUsageMeta(100, 40)))
+    record_usage(settings.GEMINI_MODEL, FakeResponse(FakeUsageMeta(200, 30)), modality="audio")
+    assert meter.by_model[settings.GEMINI_MODEL] == [300, 70]  # 100+200 in, 40+30 out
+    assert meter.audio_input_tokens() == 200  # only the audio call's input
+    # Default modality records no audio subtotal.
+    assert meter.audio_in_by_model == {settings.GEMINI_MODEL: 200}
+
+
 def test_meter_accumulates_across_models():
     meter = start_metering()
     record_usage(settings.GEMINI_MODEL, FakeResponse(FakeUsageMeta(100, 50)))

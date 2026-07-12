@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, ChevronRight, Compass, MonitorDown, Share, Smartphone, X } from "lucide-react";
-import { listTokens } from "@/lib/api";
+import { listTokensCached } from "@/lib/api";
 import { getInstallPrompt, isIOS, isStandalone } from "@/lib/platform";
+import { useAuth } from "@/contexts/auth-context";
 
 // New-user checklist: install → connect the phone → first capture. Steps self-mark
 // complete where the browser can tell (standalone mode, token count, note count);
@@ -18,14 +19,16 @@ export function GettingStarted({
   onTrySample?: () => void;
   onDismiss: () => void;
 }) {
+  const { user } = useAuth();
   const [hasToken, setHasToken] = useState(false);
   const [installed, setInstalled] = useState(isStandalone);
 
   useEffect(() => {
-    listTokens()
+    if (!user) return;
+    listTokensCached(user.uid)
       .then((t) => setHasToken(t.length > 0))
       .catch(() => {});
-  }, []);
+  }, [user]);
 
   const ios = isIOS();
   const installPrompt = getInstallPrompt();

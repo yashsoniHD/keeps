@@ -32,7 +32,7 @@ import {
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
-import { ingest, ingestMedia, ingestText, ingestVoice, searchNotes } from "@/lib/api";
+import { ingest, ingestMedia, ingestText, ingestVoice } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
@@ -153,8 +153,6 @@ export function Feed({
   const [userSources, setUserSources] = useState<string[]>([]);
   const [active, setActive] = useState<string>(typeParam ?? "all");
   const [source, setSource] = useState<string>("all");
-  const [query, setQuery] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
   // Read-only here — the view toggle (Cards / Board / Compact) lives in Settings (Appearance).
   // The hook keeps this in sync via localStorage, so changing it there reflects immediately.
   const [layout] = useLayout();
@@ -455,9 +453,9 @@ export function Feed({
     ];
   }, [domainSources, notes]);
 
-  // Browse view: the live feed filtered only by the type/source chips. Text queries no
-  // longer filter this slice — they run server-side semantic search (below) over the
-  // whole corpus, not just the loaded window.
+  // Browse view: the live feed filtered only by the type/source chips. Free-text search now
+  // lives on its own route (/search) over the whole corpus, so the feed no longer filters by
+  // a query — it's purely the chip-filtered stream.
   const filtered = useMemo(() => {
     return notes.filter((n) => {
       // Home is THE feed — every note streams here regardless of collection. The /notes
@@ -471,83 +469,35 @@ export function Feed({
     });
   }, [notes, activeSlugs, source, home]);
 
-  // Semantic search: debounced server call over all the user's notes (Firestore Vector
-  // Search). Empty/short queries fall back to the browse feed. Results are projected
-  // (no created_at/data), which NoteCard renders fine.
-  const trimmedQuery = query.trim();
-  const searchActive = trimmedQuery.length >= 3;
-  const [searchResults, setSearchResults] = useState<Note[] | null>(null);
-  const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    if (!searchActive) {
-      setSearchResults(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const handle = setTimeout(async () => {
-      try {
-        const results = await searchNotes(trimmedQuery);
-        setSearchResults(
-          results.map(
-            (r) => ({ ...r, source_url: "", source: "web", data: {} }) as unknown as Note,
-          ),
-        );
-      } catch {
-        setSearchResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 350);
-    return () => clearTimeout(handle);
-  }, [trimmedQuery, searchActive]);
-
-  // What the feed actually renders: search results (re-filtered by the chips) when a
-  // query is active, otherwise the browse feed.
-  const displayNotes = useMemo(() => {
-    if (!searchActive) return filtered;
-    return (searchResults ?? []).filter((n) => {
-      if (activeSlugs && !activeSlugs.includes(n.content_type)) return false;
-      if (!noteMatchesSource(n, source)) return false;
-      return true;
-    });
-  }, [searchActive, searchResults, filtered, activeSlugs, source]);
-
   // Pinned notes float into their own section above the dated groups (newest-pinned first),
   // so a note the user marked "come back to this" stays at the top of the feed instead of
-  // sinking with age. Search results aren't pinned-grouped (relevance order wins there).
+  // sinking with age.
   const pinnedNotes = useMemo(() => {
-    if (searchActive) return [];
-    return displayNotes
+    return filtered
       .filter((n) => n.pinned_at)
       .sort((a, b) => (b.pinned_at?.toMillis() ?? 0) - (a.pinned_at?.toMillis() ?? 0));
-  }, [searchActive, displayNotes]);
+  }, [filtered]);
 
-  // Date-bucketed feed (Today / Yesterday / This Week / …), excluding pinned notes (shown
-  // above). Search results stay flat — grouping a relevance-ranked list by recency misleads.
+  // Date-bucketed feed (Today / Yesterday / This Week / …), excluding pinned notes (shown above).
   const dateGroups = useMemo(
-    () => (searchActive ? null : groupNotesByDate(displayNotes.filter((n) => !n.pinned_at))),
-    [searchActive, displayNotes],
+    () => groupNotesByDate(filtered.filter((n) => !n.pinned_at)),
+    [filtered],
   );
 
   // Persist the visible order (pinned first, then the date-grouped stream — matching what's on
   // screen) so the note view can swipe/arrow to the next note in the same filtered context.
   useEffect(() => {
-    const ids = searchActive
-      ? displayNotes.map((n) => n.id)
-      : [
-          ...pinnedNotes.map((n) => n.id),
-          ...displayNotes.filter((n) => !n.pinned_at).map((n) => n.id),
-        ];
-    setFeedOrder(ids);
-  }, [displayNotes, pinnedNotes, searchActive]);
+    setFeedOrder([
+      ...pinnedNotes.map((n) => n.id),
+      ...filtered.filter((n) => !n.pinned_at).map((n) => n.id),
+    ]);
+  }, [filtered, pinnedNotes]);
 
   // Processing cards show only on the default view — an in-flight job has no type/title
   // yet to match a filter or search. Merge server jobs with not-yet-acknowledged local
   // placeholders, drop any whose note already landed (the brief completion overlap).
   const pendingJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all" || query.trim()) return [];
+    if (active !== "all" || source !== "all") return [];
     const inflight = jobs.filter((j) => j.status === "pending" || j.status === "processing");
     const noteUrls = new Set(notes.map((n) => n.source_url));
     const jobUrls = new Set(jobs.map((j) => j.url));
@@ -555,33 +505,33 @@ export function Feed({
       .filter((o) => !jobUrls.has(o.url) && !noteUrls.has(o.url))
       .map((o) => ({ id: o.id, url: o.url, status: "pending" }) as Job);
     return [...placeholders, ...inflight.filter((j) => !noteUrls.has(j.url))];
-  }, [jobs, optimistic, notes, active, source, query]);
+  }, [jobs, optimistic, notes, active, source]);
 
   // Offline-held captures render as "waiting" cards so they're visibly parked. Hidden
   // once a real job/note for the same URL exists (replay succeeded elsewhere).
   const queuedJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all" || query.trim()) return [];
+    if (active !== "all" || source !== "all") return [];
     const jobUrls = new Set(jobs.map((j) => j.url));
     const noteUrls = new Set(notes.map((n) => n.source_url));
     return queued
       .filter((q) => !jobUrls.has(q.url) && !noteUrls.has(q.url))
       .map((q) => ({ id: `queued-${q.url}`, url: q.url, status: "pending" }) as Job);
-  }, [queued, jobs, notes, active, source, query]);
+  }, [queued, jobs, notes, active, source]);
 
   // Captures parked by the global daily cap (launch-spike protection). They render as a calm
   // "Queued — high demand" card instead of an error, and drain automatically when budget frees.
   const deferredJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all" || query.trim()) return [];
+    if (active !== "all" || source !== "all") return [];
     const noteUrls = new Set(notes.map((n) => n.source_url));
     return jobs.filter((j) => j.status === "deferred" && !noteUrls.has(j.url));
-  }, [jobs, notes, active, source, query]);
+  }, [jobs, notes, active, source]);
 
   // Failed captures stay visible (with the error) until dismissed or retried — a card
   // that silently disappears reads as data loss.
   const failedJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all" || query.trim()) return [];
+    if (active !== "all" || source !== "all") return [];
     return jobs.filter((j) => j.status === "failed" && !dismissedJobs.includes(j.id));
-  }, [jobs, dismissedJobs, active, source, query]);
+  }, [jobs, dismissedJobs, active, source]);
 
   const dismissJob = (jobId: string) => {
     setDismissedJobs((prev) => {
@@ -609,90 +559,25 @@ export function Feed({
       <AppShell>
         <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
           <div className="mx-auto max-w-7xl px-4 pt-4 pb-3 md:px-8">
-            {searchOpen ? (
-              <div className="mb-3 flex items-center gap-2">
-                <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-card py-2.5 pl-4 pr-1.5">
-                  <Search className="h-4 w-4 shrink-0 text-ink-soft" />
-                  <input
-                    autoFocus
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setQuery("");
-                        setSearchOpen(false);
-                      }
-                    }}
-                    onBlur={() => {
-                      // Dismissing the keyboard blurs the input — collapse the bar so an
-                      // empty search doesn't linger. A typed query stays open, since
-                      // scrolling results on mobile also blurs and shouldn't wipe them.
-                      if (!query.trim()) setSearchOpen(false);
-                    }}
-                    placeholder="Search your notes"
-                    className="w-full bg-transparent text-base outline-none placeholder:text-ink-soft md:text-sm"
-                  />
-                  {/* Only reveal the Clip AI button after the user has typed at least one
-                    character — an empty search bar shouldn't suggest AI immediately.
-                    onMouseDown.preventDefault keeps the input from blurring (which would
-                    collapse the bar) before the click navigates. */}
-                  {query.trim().length > 0 && (
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        // Hand the typed query to the global Ask-AI overlay (seeds + auto-sends).
-                        openChat(query.trim());
-                        setQuery("");
-                        setSearchOpen(false);
-                      }}
-                      aria-label="Clip AI"
-                      title="Clip AI"
-                      className={`-my-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-paper transition-transform active:scale-95 ${FOCUS_RING}`}
-                    >
-                      <Sparkle className="h-4 w-4" />
-                      Clip AI
-                    </button>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuery("");
-                    setSearchOpen(false);
-                  }}
-                  aria-label="Close search"
-                  className={`shrink-0 ${ICON_BTN}`}
-                >
-                  <X className="h-4 w-4" />
-                </button>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              {/* The Clipnote paper-clip mark + wordmark. */}
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
+                  <ClipMark className="h-5 w-5" />
+                </span>
+                <span className="truncate font-serif text-2xl text-ink">Clipnote</span>
               </div>
-            ) : (
-              <div className="mb-3 flex items-center justify-between gap-3">
-                {/* The Clipnote paper-clip mark + wordmark. */}
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-ink text-paper">
-                    <ClipMark className="h-5 w-5" />
-                  </span>
-                  <span className="truncate font-serif text-2xl text-ink">Clipnote</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setSearchOpen(true)}
-                    aria-label="Search notes"
-                    title="Search"
-                    className={ICON_BTN}
-                  >
-                    <Search className="h-4 w-4" />
-                  </button>
-                  <CollectionsMenu />
-                  <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
-                    <SettingsIcon className="h-4 w-4" />
-                  </Link>
-                </div>
+              <div className="flex items-center gap-1">
+                {/* Free-text search lives on its own route (one search surface, whole corpus). */}
+                <Link to="/search" aria-label="Search notes" title="Search" className={ICON_BTN}>
+                  <Search className="h-4 w-4" />
+                </Link>
+                <CollectionsMenu />
+                <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
+                  <SettingsIcon className="h-4 w-4" />
+                </Link>
               </div>
-            )}
+            </div>
 
             {(categories.length > 0 || sourceOptions.length > 1) && (
               <div className="flex items-center gap-2">
@@ -742,7 +627,7 @@ export function Feed({
             />
           )}
 
-          {(!notesReady && !feedError) || (searchActive && searching && searchResults === null) ? (
+          {!notesReady && !feedError ? (
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 8 }, (_, i) => (
                 <div
@@ -751,14 +636,14 @@ export function Feed({
                 />
               ))}
             </section>
-          ) : displayNotes.length === 0 &&
+          ) : filtered.length === 0 &&
             pendingJobs.length === 0 &&
             failedJobs.length === 0 &&
             deferredJobs.length === 0 &&
             queuedJobs.length === 0 ? (
-            showGuide && !searchActive ? null : (
+            showGuide ? null : (
               <EmptyState
-                hasNotes={notes.length > 0 || active !== "all" || source !== "all" || searchActive}
+                hasNotes={notes.length > 0 || active !== "all" || source !== "all"}
                 onTrySample={() => handleCapture(SAMPLE_LINK)}
               />
             )
@@ -806,22 +691,16 @@ export function Feed({
                 </div>
               )}
 
-              {dateGroups ? (
-                dateGroups.map((g) => (
-                  <div key={g.key}>
-                    <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
-                      {g.label}
-                    </h2>
-                    <NotesView notes={g.notes} layout={layout} />
-                  </div>
-                ))
-              ) : (
-                <NotesView notes={displayNotes} layout={layout} />
-              )}
+              {dateGroups.map((g) => (
+                <div key={g.key}>
+                  <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">{g.label}</h2>
+                  <NotesView notes={g.notes} layout={layout} />
+                </div>
+              ))}
             </div>
           )}
 
-          {notesReady && !searchActive && notes.length >= max && (
+          {notesReady && notes.length >= max && (
             <div className="mt-6 flex justify-center">
               <button
                 type="button"
@@ -835,7 +714,8 @@ export function Feed({
         </main>
 
         {/* Primary action FAB: capture a new note. Desktop only — on mobile the bottom tab bar's
-            center + button owns capture (BottomNav). (Clip AI is reached from the search bar.) */}
+            center + button owns capture (BottomNav). Sits above the global Ask launcher pill
+            (AskFab, bottom-right) so the two right-corner controls stack instead of overlapping. */}
         <button
           type="button"
           onClick={() => {
@@ -844,7 +724,7 @@ export function Feed({
           }}
           aria-label="New note"
           title="New note"
-          className="fixed bottom-8 right-5 z-40 hidden h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 md:flex"
+          className="fixed bottom-24 right-6 z-40 hidden h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 md:flex"
         >
           <Plus className="h-6 w-6" />
         </button>

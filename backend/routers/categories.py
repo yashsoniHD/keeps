@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from services.auth_dep import require_user
@@ -6,6 +8,7 @@ from services.firebase import (
     add_user_category,
     count_notes_by_type,
     get_category_meta,
+    get_db,
     get_user_categories,
     move_category_meta,
     remove_category_meta,
@@ -127,6 +130,71 @@ async def update_category(slug: str, body: CategoryUpdate, user_id: str = Depend
         "icon": meta.get("icon"),
         "palette": meta.get("palette"),
     }
+
+
+class CategoryMerge(BaseModel):
+    """POST body: the destination category to fold this one into."""
+
+    into: str
+
+
+async def _apply_merge(user_id: str, slug: str, into: str) -> int:
+    """Re-tag every note (and its search_index row) from content_type `slug` to `into`, in
+    Firestore-batch-sized pages, and return how many notes moved.
+
+    The notes query is backed by the (user_id, content_type, created_at) composite index.
+    search_index has NO content_type index, but each note's index doc has the deterministic id
+    `note-{note_id}`, so it's patched in the SAME batch off the note id — no second query. Two
+    writes per note, so the batch is flushed at 450 ops (under Firestore's 500 cap). Uses
+    set(merge=True) on the index doc so a note that somehow lacks its index row can't abort the
+    whole merge."""
+    db = get_db()
+    query = (
+        db.collection("notes")
+        .where("user_id", "==", user_id)
+        .where("content_type", "==", slug)
+    )
+    now = datetime.now(timezone.utc)
+    batch = db.batch()
+    pending = 0
+    total = 0
+    async for doc in query.stream():
+        batch.update(doc.reference, {"content_type": into, "updated_at": now})
+        batch.set(
+            db.collection("search_index").document(f"note-{doc.id}"),
+            {"content_type": into, "updated_at": now},
+            merge=True,
+        )
+        pending += 2
+        total += 1
+        if pending >= 450:
+            await batch.commit()
+            batch = db.batch()
+            pending = 0
+    if pending:
+        await batch.commit()
+    return total
+
+
+@router.post("/categories/{slug}/merge")
+async def merge_category(slug: str, body: CategoryMerge, user_id: str = Depends(require_user)):
+    """Merge one category into another: move every note tagged `slug` to `into`, then drop
+    `slug` (and its icon/colour override) from the taxonomy. Non-destructive — notes are
+    re-tagged, never deleted — and the way to shrink an over-grown taxonomy back under the cap.
+    404 when `slug` isn't one of the user's categories (already merged away → the retry no-ops).
+    The target resolves through the same case/plural folding as create/rename and is kept present
+    even if it had no notes; merging a category into itself is rejected (400)."""
+    existing = await get_user_categories(user_id)
+    if slug not in existing:
+        raise HTTPException(status_code=404, detail="Category not found.")
+    into = match_existing(normalize_slug(body.into), existing)
+    if into == slug:
+        raise HTTPException(status_code=400, detail="Pick a different category to merge into.")
+    count = await _apply_merge(user_id, slug, into)
+    await add_user_category(user_id, into)      # keep the target even if it was empty
+    await remove_user_category(user_id, slug)
+    await remove_category_meta(user_id, slug)
+    return {"merged_into": into, "count": count}
 
 
 @router.delete("/categories/{slug}")

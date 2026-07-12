@@ -1,8 +1,10 @@
 """Weekly digest email.
 
 POST /digest/run  — OIDC-authed batch (Cloud Scheduler triggers it weekly). For each
-opted-in user with at least one note in the last 7 days, renders and sends a digest via
-Resend. Best-effort: one bad user never aborts the batch.
+eligible user with at least one note in the last 7 days, renders and sends a digest via
+Resend. Digest is opt-OUT: everyone is eligible unless they've explicitly set
+digest_opt_in=False (via the unsubscribe link or the Settings toggle). Best-effort: one
+bad user never aborts the batch.
 
 GET /digest/unsubscribe?u=&t=  — login-free unsubscribe (HMAC-signed so it can't be forged);
 flips users/{uid}.digest_opt_in to False.
@@ -117,7 +119,9 @@ async def run_digest(request: Request):
     for u in auth_users:
         uid, email = u["uid"], u.get("email")
         prof = user_docs.get(uid, {})
-        if not email or prof.get("digest_opt_in") is not True:
+        # Default = opted in: an absent digest_opt_in field means the user is eligible. Only an
+        # explicit False (they unsubscribed) opts them out — so `is not False` skips only those.
+        if not email or prof.get("digest_opt_in") is False:
             skipped += 1
             continue
         notes = await _recent_notes(db, uid, cutoff)

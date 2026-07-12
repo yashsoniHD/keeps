@@ -41,10 +41,13 @@ export async function recordSignup(uid: string, ref: string | null): Promise<voi
   );
 }
 
-// Weekly-digest opt-in lives on the user's own doc. Absent field = opted in (the default).
+// Weekly-digest opt-in lives on the user's own doc. The digest is opt-OUT: an absent field
+// (or no user doc yet) means opted in — only an explicit `false` is opted out. Mirrors the
+// backend gate in routers/digest.py (`digest_opt_in is not False`).
 export async function getDigestOptIn(uid: string): Promise<boolean> {
   const snap = await getDoc(doc(db, "users", uid));
-  return snap.exists() ? snap.data().digest_opt_in === true : false;
+  if (!snap.exists()) return true;
+  return snap.data().digest_opt_in !== false;
 }
 
 export async function setDigestOptIn(uid: string, on: boolean): Promise<void> {

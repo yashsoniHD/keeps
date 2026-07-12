@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronRight, Loader2, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Combine, Loader2, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
 import {
   listCategories,
   createCategory,
@@ -7,6 +7,7 @@ import {
   deleteCategory,
   type CategoryInfo,
 } from "@/lib/api";
+import { mergeCategory } from "@/lib/categories-api";
 import {
   noteLabel,
   noteIcon,
@@ -264,7 +265,12 @@ function CategoryManager({
           ) : (
             <ul className="divide-y divide-border">
               {categories.map((c) => (
-                <CategoryRow key={c.slug} category={c} onChanged={onChanged} />
+                <CategoryRow
+                  key={c.slug}
+                  category={c}
+                  others={categories.filter((o) => o.slug !== c.slug)}
+                  onChanged={onChanged}
+                />
               ))}
             </ul>
           )}
@@ -277,13 +283,42 @@ function CategoryManager({
 // One category. Three states it can be in: resting (label + count + edit/delete actions),
 // renaming (inline input), or confirming-delete (destructive inline prompt). Keeping all
 // three inside the row avoids nested modals and keeps the action right where the eye is.
-function CategoryRow({ category: c, onChanged }: { category: Category; onChanged: () => void }) {
-  const [mode, setMode] = useState<"rest" | "edit" | "delete">("rest");
+function CategoryRow({
+  category: c,
+  others,
+  onChanged,
+}: {
+  category: Category;
+  others: Category[];
+  onChanged: () => void;
+}) {
+  const [mode, setMode] = useState<"rest" | "edit" | "delete" | "merge">("rest");
   const [draft, setDraft] = useState("");
   const [icon, setIcon] = useState<string | null>(null);
   const [palette, setPalette] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [mergeTarget, setMergeTarget] = useState<string | null>(null);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+
+  const startMerge = () => {
+    setMergeTarget(null);
+    setMergeError(null);
+    setMode("merge");
+  };
+
+  const submitMerge = async (into: string) => {
+    if (busy) return;
+    setBusy(true);
+    setMergeError(null);
+    try {
+      await mergeCategory(c.slug, into);
+      onChanged(); // row disappears on refresh
+    } catch {
+      setMergeError("Couldn't merge those categories. Please try again.");
+      setBusy(false); // stay in merge mode so the user can retry
+    }
+  };
 
   const startEdit = () => {
     setDraft(noteLabel(c.slug));
@@ -417,6 +452,75 @@ function CategoryRow({ category: c, onChanged }: { category: Category; onChanged
     );
   }
 
+  if (mode === "merge") {
+    return (
+      <li className="py-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-ink">
+              Merge “{noteLabel(c.slug)}” into…
+            </div>
+            <div className="text-xs text-ink-soft">
+              {mergeTarget
+                ? `Moves ${c.count} ${c.count === 1 ? "note" : "notes"}. This can't be undone.`
+                : "Its notes move to the category you pick."}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMode("rest")}
+            aria-label="Cancel"
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {others.length === 0 ? (
+          <p className="mt-2 text-xs text-ink-soft">No other category to merge into.</p>
+        ) : mergeTarget ? (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMergeTarget(null)}
+              disabled={busy}
+              className={`rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent disabled:opacity-50 ${FOCUS_RING}`}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={() => submitMerge(mergeTarget)}
+              disabled={busy}
+              className={`inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50 ${FOCUS_RING}`}
+            >
+              {busy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Combine className="h-3.5 w-3.5" />
+              )}
+              Merge into “{noteLabel(mergeTarget)}”
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {others.map((o) => (
+              <button
+                key={o.slug}
+                type="button"
+                onClick={() => setMergeTarget(o.slug)}
+                className={`rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent ${FOCUS_RING}`}
+              >
+                {noteLabel(o.slug)}
+              </button>
+            ))}
+          </div>
+        )}
+        {mergeError && <p className="mt-2 text-sm text-destructive">{mergeError}</p>}
+      </li>
+    );
+  }
+
   // Use this row's own fetched override (authoritative) rather than the global registry,
   // so the list is self-consistent the instant a refetch lands — no snapshot-timing race.
   const accent = c.palette != null ? paletteAccent(c.palette) : noteAccent(c.slug);
@@ -445,6 +549,16 @@ function CategoryRow({ category: c, onChanged }: { category: Category; onChanged
         >
           <Pencil className="h-3.5 w-3.5" />
         </button>
+        {others.length > 0 && (
+          <button
+            type="button"
+            onClick={startMerge}
+            aria-label={`Merge ${noteLabel(c.slug)} into another category`}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-ink-soft transition-colors hover:text-ink"
+          >
+            <Combine className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setMode("delete")}

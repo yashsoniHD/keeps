@@ -19,7 +19,7 @@ import { getPlaceItemDetails, updatePlaceItem, deletePlaceItem } from "@/lib/api
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import type { PlaceItem, PlaceItemDetails } from "@/lib/types";
-import { ActionRow } from "./ActionRow";
+import { ActionRow } from "@/components/shared/ActionRow";
 import { PlacesMap } from "./PlacesMap";
 
 const PLACE = paletteAccent(1);

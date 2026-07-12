@@ -137,6 +137,33 @@ def match_existing(slug: str, existing: list[str]) -> str:
     return norm
 
 
+def closest_existing(slug: str, existing: list[str]) -> str:
+    """Map a net-new slug onto the most similar EXISTING category — the code-side enforcement
+    of the category cap (config.MAX_USER_CATEGORIES). When the taxonomy is full the classifier
+    is told to reuse a slug, but if the model still returns something new we snap it here rather
+    than append a duplicate. Cheap heuristic: the existing category sharing the most whole
+    hyphen-tokens (with singular/plural folding) wins. If nothing overlaps, fall back to a
+    generic bucket already in the taxonomy, else the first existing slug. `existing` must be
+    non-empty (the cap only bites once the user has categories)."""
+    def _fold(tokens: set[str]) -> set[str]:
+        return {t.rstrip("s") for t in tokens if t}
+
+    want = _fold(set(normalize_slug(slug).split("-")))
+    best: str | None = None
+    best_score = 0
+    for cand in existing:
+        score = len(want & _fold(set(normalize_slug(cand).split("-"))))
+        if score > best_score:
+            best_score, best = score, cand
+    if best is not None:
+        return best
+    by_norm = {normalize_slug(c): c for c in existing}
+    for generic in ("summary", "bookmark", "note"):
+        if generic in by_norm:
+            return by_norm[generic]
+    return existing[0]
+
+
 CATEGORY_SYSTEM = """You assign a content category to saved content.
 Return ONLY valid JSON: {"content_type": "slug"} — lowercase-kebab-case.
 
@@ -172,6 +199,17 @@ Rules, in priority order:
 7. Discussion threads, Q&A, comment collections, and anecdote threads are NOT plans.
    A forum thread about workouts is "fitness-discussion", not "workout". Only classify as
    recipe/workout/itinerary when the source actually CONTAINS that artifact."""
+
+
+# Appended to CATEGORY_SYSTEM only when the user's taxonomy is already at the cap
+# (config.MAX_USER_CATEGORIES). It overrides rule 2's "invent a new slug" licence: a full
+# taxonomy must NOT grow, so the model is required to reuse the best-fitting existing slug.
+# Code-side enforcement (closest_existing) is the backstop if the model ignores this.
+CATEGORY_CAP_RULE = """
+
+IMPORTANT: the user's category list is FULL. You MUST return one of their existing
+categories exactly as written — do NOT invent a new slug, even if none is a perfect fit.
+Pick the closest existing category."""
 
 
 # Appended to CATEGORY_SYSTEM only when the user has smart collections, so the same lite call
@@ -610,7 +648,12 @@ class GeminiService:
             + "Choose the content_type"
             + (" and collection_id." if collections else ".")
         )
-        system = CATEGORY_SYSTEM + (COLLECTION_RULE if collections else "")
+        at_cap = len(existing_categories) >= settings.MAX_USER_CATEGORIES
+        system = (
+            CATEGORY_SYSTEM
+            + (CATEGORY_CAP_RULE if at_cap else "")
+            + (COLLECTION_RULE if collections else "")
+        )
         # An uploaded image/PDF often has no useful preview text — classify from the file
         # itself (the lite model is multimodal). Video is left out: it's the expensive path
         # and its title/description text is enough for categorization.
@@ -648,7 +691,12 @@ class GeminiService:
                 collection_id = raw_cid
         except (json.JSONDecodeError, AttributeError):
             slug = "summary"
-        return match_existing(slug, existing_categories), collection_id
+        resolved = match_existing(slug, existing_categories)
+        # Enforce the taxonomy cap in code (the prompt rule is best-effort): at/over the cap a
+        # net-new slug is snapped onto the closest existing category, never appended.
+        if at_cap and resolved not in existing_categories:
+            resolved = closest_existing(resolved, existing_categories)
+        return resolved, collection_id
 
     async def assign_category(self, url: str, bundle: ContentBundle,
                               existing_categories: list[str],

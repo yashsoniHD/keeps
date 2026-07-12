@@ -19,8 +19,8 @@ import { updateTripItem, deleteTripItem } from "@/lib/api";
 import { paletteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import type { TripItem } from "@/lib/types";
-import { TripMap } from "./TripMap";
-import { PackingList } from "./PackingList";
+import { TripMap } from "@/components/shared/TripMap";
+import { PackingList } from "@/components/shared/PackingList";
 
 const TRIP = paletteAccent(8);
 
@@ -224,7 +224,7 @@ export function TripDetail({
       )}
 
       {/* Packing checklist (client-side, per trip) */}
-      <PackingList uid={uid} itemId={item.id} />
+      <PackingList storageKey={`trip-packing:${uid}:${item.id}`} />
 
       {/* From your notes */}
       {sources.length > 0 && (

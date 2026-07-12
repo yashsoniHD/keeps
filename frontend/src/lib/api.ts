@@ -1,5 +1,5 @@
 import { getAuthHeader } from "@/integrations/firebase/auth-middleware";
-import { invalidateCache } from "@/lib/swr-cache";
+import { getOrFetch, invalidateCache } from "@/lib/swr-cache";
 import type {
   TmdbSearchResult,
   WatchItemDetails,
@@ -575,6 +575,7 @@ export async function createToken(label: string): Promise<{ token: string; id: s
     body: JSON.stringify({ label }),
   });
   if (!res.ok) throw new Error(await errorDetail(res, "Couldn't create token."));
+  invalidateCache("tokens:"); // the cached PAT list is now stale
   return res.json();
 }
 
@@ -584,9 +585,16 @@ export async function listTokens(): Promise<ShortcutToken[]> {
   return res.json();
 }
 
+// Cached PAT list (no live listener): dedupes the concurrent GettingStarted + Settings mounts
+// onto one GET and serves it from cache for a few minutes. Mutators above invalidate "tokens:".
+export function listTokensCached(uid: string): Promise<ShortcutToken[]> {
+  return getOrFetch(`tokens:${uid}`, listTokens);
+}
+
 export async function revokeToken(id: string): Promise<void> {
   const res = await apiFetch(`/api/tokens/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Couldn't revoke token.");
+  invalidateCache("tokens:"); // the cached PAT list is now stale
 }
 
 // --- Admin dashboard ---

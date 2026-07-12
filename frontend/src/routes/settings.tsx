@@ -11,6 +11,7 @@ import {
   Share2,
   Moon,
   Sun,
+  Mail,
   LayoutGrid,
   LayoutDashboard,
   Rows3,
@@ -19,7 +20,8 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { useLayout } from "@/lib/layout";
 import { checkAdminAccess } from "@/routes/admin";
-import { createToken, listTokens, revokeToken, type ShortcutToken } from "@/lib/api";
+import { createToken, listTokensCached, revokeToken, type ShortcutToken } from "@/lib/api";
+import { getDigestOptIn, setDigestOptIn } from "@/lib/firestore";
 import { AppShell } from "@/components/AppShell";
 import { CategoriesSection } from "@/components/CategoriesSection";
 import { Switch } from "@/components/ui/switch";
@@ -141,6 +143,8 @@ function Settings() {
 
         <ConnectPhone />
 
+        <NotificationsSection />
+
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
           <button
@@ -260,7 +264,62 @@ function AppearanceSection() {
   );
 }
 
+function NotificationsSection() {
+  const { user } = useAuth();
+  // Digest is opt-out (absent field = opted in), so default the toggle on until the read lands.
+  const [optIn, setOptIn] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getDigestOptIn(user.uid)
+      .then((v) => {
+        if (!cancelled) {
+          setOptIn(v);
+          setLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const handleToggle = (on: boolean) => {
+    if (!user) return;
+    setOptIn(on); // optimistic
+    setDigestOptIn(user.uid, on).catch(() => setOptIn(!on)); // revert on failure
+  };
+
+  return (
+    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
+      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
+        <Mail className="h-3.5 w-3.5" />
+        Email
+      </h2>
+      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3">
+        <span>
+          <span className="block text-sm font-medium text-ink">Weekly digest</span>
+          <span className="block text-xs text-ink-soft">
+            A short email of your best saves, once a week.
+          </span>
+        </span>
+        <Switch
+          checked={optIn}
+          onCheckedChange={handleToggle}
+          disabled={!loaded}
+          aria-label="Toggle weekly digest email"
+        />
+      </label>
+    </section>
+  );
+}
+
 function ConnectPhone() {
+  const { user } = useAuth();
   const [tokens, setTokens] = useState<ShortcutToken[]>([]);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -280,11 +339,14 @@ function ConnectPhone() {
     await installPrompt.prompt();
   };
 
+  // Cached read (dedupes with GettingStarted's identical fetch). create/revoke invalidate the
+  // "tokens:" cache key, so calling refresh() after a mutation refetches fresh, not stale.
   const refresh = useCallback(() => {
-    listTokens()
+    if (!user) return;
+    listTokensCached(user.uid)
       .then(setTokens)
       .catch(() => setError("Couldn't load your connected devices. Refresh to retry."));
-  }, []);
+  }, [user]);
   useEffect(refresh, [refresh]);
 
   // A failed revoke must not become an unhandled rejection (it ships to the client-error
