@@ -577,49 +577,93 @@ Rules:
 
 
 DIGEST_SYSTEM = """You are Clipnote's assistant. Build a DIGEST for one of the user's smart
-collections: a curated index of the individual ITEMS worth knowing across its saved notes — not
-a list of the notes themselves.
+collections: a piece of writing that TEACHES what's actually in its saved notes, the way a
+well-read colleague would brief you on a folder of links they'd actually read — not an index,
+not a list of links, not the notes' own titles and summaries restated.
 
-The unit of the digest is the ITEM, never the note. A note's `data` holds the structure (titles,
-venues, sections, steps, facts, a table, a checklist, etc) that IS the content — read it, don't
-just restate the note's title and summary:
-- A listicle note (e.g. "Five niche websites for vibe coders") must yield roughly one entry per
-  item inside it — one entry per website, each named for the specific thing ("Uizard"), with a
-  summary saying concretely what it is/does and why it's worth knowing, drawn from that item's
-  own detail in `data`.
-- A single-topic note (one tool, one technique, one place) still yields one entry, but the entry
-  IS the core takeaway or the thing itself, phrased as the thing.
-- An entry's title must NEVER restate or rephrase the source note's title. Write "Claude-mem:
-  persistent memory across sessions", never "The top 3 most GOATED skills for Claude" (that's
-  the note's title, not a thing worth knowing).
+Each note's `data` field (marked CONTENT below) holds the real substance — named tools,
+techniques, steps, places, prompts, numbers — and that is what you are reading and reporting on.
+The note's title/summary (marked metadata below) exist only to identify which note is which; they
+are NEVER something you may copy into your output. If your section body could have been written
+from the title and summary alone, without opening `data`, you have failed at this task.
+
+INTERNAL STEP (do this before writing anything): scan every note's CONTENT and build a mental
+list of every specific named thing across ALL of them — every tool, skill, technique, step,
+prompt, place, or number. Notice which ones repeat or relate across different notes. Only then
+group them into sections and write each section's body from that list.
 
 Return ONLY valid JSON:
 {"intro": "1-2 sentences characterizing what this collection has become",
  "facts": [{"label": str, "value": str}],
  "sections": [{"heading": str,
-               "items": [{"title": str, "summary": str, "note_id": str}]}]}
+               "body": "1-3 short paragraphs of prose, \\n\\n between paragraphs",
+               "items": [{"title": str, "summary": str, "note_id": str}],
+               "source_note_ids": [str]}]}
+
+WORKED EXAMPLE — given two notes: one titled "The top 3 most GOATED skills for Claude" whose
+CONTENT lists three Claude Code skills (a discovery tool, a persistent-memory tool, a security
+scanner, each with what it does), and another titled "How to de-slop every AI output forever"
+whose CONTENT describes a custom skill that runs sub-agents to audit and rewrite AI-generated
+text — a GOOD section looks like this (note the body names the actual tools and draws the
+connection between notes; it does not mention either note's title):
+
+{"heading": "Claude Code skills worth installing",
+ "body": "Three skills close the gaps vibe coders hit most often. Find Skills automatically
+   discovers and installs whichever skill fits a given prompt, so you stop hunting through skill
+   directories by hand. Claude-mem gives Claude persistent memory across sessions by compressing
+   project context, past decisions, and preferences, so you're not re-explaining the codebase
+   every time you open a new chat. VibeSec-Skill acts as an AI penetration tester, scanning
+   generated code for hardcoded API keys and weak admin passwords before it ships.\\n\\nA fourth
+   pattern shows up in a separate note: a skill built specifically to de-slop AI writing, using
+   specialized sub-agents to audit and rewrite output rather than a single pass. Paired with the
+   three skills above, the shape of a solid Claude Code setup becomes discovery, memory, security,
+   and output quality, each handled by a dedicated skill instead of one prompt trying to do
+   everything.",
+ "items": [
+   {"title": "Find Skills", "summary": "Auto-discovers and installs the right skill for a prompt", "note_id": "<id of that note>"},
+   {"title": "Claude-mem", "summary": "Persistent memory across sessions via context compression", "note_id": "<id of that note>"},
+   {"title": "VibeSec-Skill", "summary": "AI penetration tester for hardcoded secrets and weak auth", "note_id": "<id of that note>"}
+ ],
+ "source_note_ids": ["<id of first note>", "<id of second note>"]}
+
+A BAD section (do NOT do this — this is v2's failure mode, restating the note instead of reading it):
+{"heading": "AI Tools", "body": "", "items": [
+   {"title": "The top 3 most GOATED skills for Claude", "summary": "Enhance Claude Code with Find Skills, Claude-mem for persistent memory, and VibeSec-Skill for security scanning.", "note_id": "..."}
+ ]}
+(That entry just copied the note's title into "title" and its summary into "summary" — it never
+opened CONTENT. Every entry above is a REAL example.)
 
 Rules:
-- Extract atomic items FROM WITHIN each note (tools, websites, apps, skills, prompts,
-  techniques, places, dishes, tips) rather than emitting one entry per note. Look at `data`
-  first — the note's title/summary are context for grounding, not the source of entries.
-- Merge duplicates across notes: the same tool/place/technique mentioned more than once becomes
-  ONE entry, citing the note_id of whichever source covers it in the most detail.
-- Group entries into 3-6 sections that are specific and content-derived, never generic buckets
-  like "Articles" or "Notes" — name each section for what's actually in it (e.g. "AI coding
-  tools", "Memory & context systems", "Prompting techniques"). Order sections by usefulness,
-  most useful/most populated first.
-- EVERY entry (each item in sections[].items) MUST carry the exact note_id it came from,
-  chosen ONLY from the NOTE ids given below. Never invent an id, and never cite one that isn't
-  in the notes provided.
+- `body` is mandatory and is the primary output — write it first, for every section, even ones
+  with items. It must read as synthesis: name the specific things, explain what each does or
+  means, and connect them across notes when more than one note contributes ("this pairs with...",
+  "the same pattern shows up in...", "unlike the note above,..."). 1-3 short paragraphs, plain
+  text, "\\n\\n" between paragraphs, no headings or bullets inside it.
+- `items` is OPTIONAL and reserved for genuinely atomic listables worth their own row (a specific
+  tool, site, or place someone would want to click through to) — many good sections have body
+  prose and an empty items list, because not everything worth explaining is a discrete link-out.
+  Never pad items with vague or duplicate entries just to have some; an empty list is correct
+  when nothing in the section is atomic enough to deserve one.
+  - An item's title must NEVER restate or rephrase the source note's title (see the BAD example).
+    Name the actual thing: "Claude-mem: persistent memory across sessions", never "The top 3 most
+    GOATED skills for Claude".
+  - Merge duplicates across notes into ONE item, citing whichever note covers it in most detail.
+  - Every item MUST carry the exact note_id it came from, chosen ONLY from the NOTE ids given
+    below. Never invent an id, never cite one not in the notes provided.
+- `source_note_ids`: every note id (from the ones provided) that the section's body actually
+  draws on, so the section itself can deep-link and cite even when it has no items.
+- Group into 3-6 sections that are specific and content-derived, never generic buckets like
+  "Articles" or "Notes" — name each section for what's actually in it (e.g. "AI coding tools",
+  "Memory & context systems", "Prompting techniques"). Order sections by usefulness, most
+  useful/most populated first.
 - facts: 2-4 genuinely informative at-a-glance stats (e.g. "Tools catalogued: 14", "Newest
-  save: <title>"). Omit any that would be filler; return an empty list when nothing meaningful
-  applies.
-- Keep each entry's summary to one short, concrete line — what it is/does and why it matters,
-  not a rewrite of the note.
-- No em-dashes anywhere in intro, facts, or summaries.
-- NEVER FABRICATE: ground every entry and fact in the notes provided; omit anything you can't
-  ground rather than inventing it."""
+  save: <title>"). Any number in a fact (a count of tools, notes, items, etc) MUST be one you can
+  literally verify by counting things you actually named in this response or notes actually
+  provided — never estimate or guess a total. When you're not sure a stat is exactly right, drop
+  it; omit any fact that would be filler; return an empty list when nothing meaningful applies.
+- No em-dashes anywhere in intro, facts, body, or item summaries.
+- NEVER FABRICATE: ground every claim, item, and fact in the CONTENT provided; omit anything you
+  can't ground rather than inventing it."""
 
 
 def _history_lines(history: list[dict]) -> str:
@@ -1157,11 +1201,20 @@ class GeminiService:
             if description:
                 prompt_parts.append(f"Collection description: {description}")
             for n in notes:
+                # CONTENT (data) comes FIRST and is what the model must read; title/summary are
+                # pushed below and labeled as metadata only, so the model can't take the lazy
+                # path of paraphrasing them instead of opening data (that was v2's failure mode —
+                # the prompt banned title-restatement but data was still an afterthought after
+                # title/summary in the note's own serialization).
+                data_excerpt = json.dumps(
+                    n.get("data", {}), ensure_ascii=False, default=str,
+                )[:settings.DIGEST_NOTE_DATA_EXCERPT_CHARS]
                 prompt_parts.append(
-                    f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
-                    f" | {n.get('source_domain', '')}\n"
-                    f"summary: {n.get('ai_summary', '')}\n"
-                    f"data: {json.dumps(n.get('data', {}), ensure_ascii=False, default=str)[:settings.DIGEST_NOTE_DATA_EXCERPT_CHARS]}"
+                    f"NOTE id={n.get('id')}\n"
+                    f"CONTENT (read this): {data_excerpt}\n"
+                    f"metadata (identification only, never copy into output): "
+                    f"type={n.get('content_type', '')} | title={n.get('title', '')} | "
+                    f"source={n.get('source_domain', '')} | summary={n.get('ai_summary', '')}"
                 )
             last_exc: Exception | None = None
             for attempt in (1, 2):
@@ -1172,18 +1225,21 @@ class GeminiService:
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
                             system_instruction=DIGEST_SYSTEM,
-                            temperature=0.3,
+                            temperature=0.5,
                         ),
                     )
                     record_usage(settings.GEMINI_MODEL, response)
                     digest = CollectionDigest.model_validate_json(_strip_code_fences(response.text))
                     # Drop any entry the model cited that isn't actually one of the fed notes (a
                     # hallucinated/foreign id must never deep-link into someone else's note), then
-                    # drop any section left with no entries.
+                    # drop any section left with nothing at all — but a v3 section can be
+                    # body-only (no items), so only drop sections with neither.
                     valid_ids = {n.get("id") for n in notes}
                     for section in digest.sections:
                         section.items = [it for it in section.items if it.note_id in valid_ids]
-                    digest.sections = [s for s in digest.sections if s.items]
+                    digest.sections = [
+                        s for s in digest.sections if s.items or s.body.strip()
+                    ]
                     return digest
                 except Exception as e:
                     last_exc = e

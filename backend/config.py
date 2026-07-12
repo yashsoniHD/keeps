@@ -122,16 +122,22 @@ class Settings:
     DIGEST_MAX_NOTES: int = int(os.getenv("DIGEST_MAX_NOTES", "30"))
     # Each note's `data` is truncated to this many characters in the digest prompt (mirrors the
     # per-note data excerpt in the ask/synthesize prompts, just its own knob). The digest is
-    # built from the ITEMS inside `data` (listicle entries, tool names, etc), not just the note's
-    # title/summary, so this needs real headroom — 1500 chars was starving the model of the
-    # detail it needs to extract more than one entry per note.
-    DIGEST_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("DIGEST_NOTE_DATA_EXCERPT_CHARS", "3000"))
+    # built by READING `data` (listicle entries, tool names, step breakdowns, etc), not just the
+    # note's title/summary, so this needs real headroom — verified against live production notes
+    # (2026-07-12): a 17-step agency-stack breakdown and a 4-prompt PM playbook both serialize
+    # past 3000 chars, which was silently truncating exactly the content the digest needs to
+    # synthesize. 6000 covers every note observed in that pass with headroom to spare.
+    DIGEST_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("DIGEST_NOTE_DATA_EXCERPT_CHARS", "6000"))
     # Bumped whenever DIGEST_SYSTEM changes meaningfully (prompt behavior, not just wording) so
     # digests cached under an older prompt are treated as stale and rebuilt automatically, even
     # when membership (source_note_ids) hasn't changed. Stored on the digest map as
     # `prompt_version`; routers/collections.py's staleness check treats a missing or lower value
     # as stale.
-    DIGEST_PROMPT_VERSION: int = 2
+    # v3 (2026-07-12): v1 listed note titles, v2 still echoed title+summary as entries instead of
+    # reading `data` — replaced the items-only schema with heading+body synthesis prose per
+    # section (DigestSection.body) so a section reads like someone who read the notes wrote it,
+    # not like an index into them. See services/gemini.py DIGEST_SYSTEM.
+    DIGEST_PROMPT_VERSION: int = 3
     # A digest (re)build is a paid Gemini call over up to DIGEST_MAX_NOTES notes at once, so
     # repeats are capped like rescores — per collection, per user, and a global kill-switch.
     MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY: int = int(

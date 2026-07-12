@@ -14,11 +14,12 @@ The backend owns everything that touches NOTE membership, because notes are back
   `deleteDoc`) does NOT do this sweep — the frontend calls this endpoint first and only falls
   back to the bare client delete if the request fails, so the folder still goes away either way.
 - `POST .../digest`: return (rebuilding when stale/forced) the collection's cached, composed
-  digest — an intro + optional facts + categorized sections of entries deep-linking to their
-  source notes, built by Gemini from the member notes (services/gemini.py `build_digest`).
-  Cached on the collection doc (`digest`), keyed by a signature of the member note ids so an
-  unchanged collection never re-triggers a paid rebuild. Rate-capped like rescore
-  (MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY / _PER_USER_PER_DAY / DAILY_GLOBAL_DIGEST_CAP).
+  digest — an intro + optional facts + sections that each synthesize their member notes into
+  read prose (`body`) plus optional atomic `items`, all deep-linking back to source notes, built
+  by Gemini from the member notes (services/gemini.py `build_digest`). Cached on the collection
+  doc (`digest`), keyed by a signature of the member note ids so an unchanged collection never
+  re-triggers a paid rebuild. Rate-capped like rescore (MAX_DIGEST_REGENS_PER_COLLECTION_PER_DAY /
+  _PER_USER_PER_DAY / DAILY_GLOBAL_DIGEST_CAP).
 """
 from datetime import datetime, timezone
 
@@ -222,6 +223,16 @@ async def digest(collection_id: str, body: DigestRequest | None = None,
 
     if built is None:
         return {"digest": stored or None, "stale": True}
+
+    # Each section's source_note_ids grounds it for a citation link the same way items already
+    # are: an id the model cited that isn't actually one of the fed notes must never deep-link
+    # into a note the caller doesn't own (or that doesn't exist). GeminiService._build_digest
+    # already drops out-of-set ids from `items`; this is the same guard for the section-level
+    # `source_note_ids` field (v3), applied here since the router is what already holds the
+    # authoritative fed-set (`member_ids`), separate from the per-entry check.
+    fed_ids = set(member_ids)
+    for section in built.sections:
+        section.source_note_ids = [nid for nid in section.source_note_ids if nid in fed_ids]
 
     coverage = (
         f"Digest built from {len(notes)} of {total} notes." if total > len(notes) else None

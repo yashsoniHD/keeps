@@ -78,9 +78,17 @@ export interface DigestEntry {
   note_id: string;
 }
 
+// `body` is the synthesized prose that actually teaches the section's content (1-3
+// paragraphs, \n\n separated) — the reason the digest exists. `items` is now an optional
+// atomic list rendered *after* the body, for scanning back to specific notes. Both `body`
+// and `items` are optional so a digest stored under the previous shape (items-only, no
+// body, pre-rebuild) still renders without crashing. `source_note_ids` grounds the section
+// for the "From:" citation row; absent/empty renders no citations.
 export interface DigestSection {
   heading: string;
-  items: DigestEntry[];
+  body?: string;
+  items?: DigestEntry[];
+  source_note_ids?: string[];
 }
 
 // A collection's "living view" — one composed read built from its member notes by

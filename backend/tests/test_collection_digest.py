@@ -1,11 +1,18 @@
 """Tests for the collection digest feature: a cached, composed digest per smart collection
-(intro + optional facts + categorized sections of entries deep-linking to source notes),
-built by Gemini from member notes and regenerated lazily when membership changes.
+(intro + optional facts + sections that synthesize their member notes into prose `body` plus
+optional atomic `items`, all deep-linking to source notes), built by Gemini from member notes
+and regenerated lazily when membership changes.
+
+v3 (see config.DIGEST_PROMPT_VERSION / services.gemini.DIGEST_SYSTEM): a section's synthesis
+lives in `body` — `items` is optional, so a section is only dropped when it has neither. Both
+`items[].note_id` and `section.source_note_ids` must be drawn from the fed note set; the
+former is validated in `GeminiService._build_digest`, the latter in the router (which already
+holds the authoritative fed set as `member_ids`).
 
 Router-level tests (`POST /collections/{id}/digest`) are called directly, bypassing FastAPI's
 Depends — same pattern as test_collections_router.py. The "drop entries citing ids outside the
-fed set" behavior lives in `GeminiService._build_digest` itself (not the router), so it's
-tested directly against a faked Gemini client response, mirroring test_category_cap.py.
+fed set" behavior for `items` lives in `GeminiService._build_digest` itself (not the router), so
+it's tested directly against a faked Gemini client response, mirroring test_category_cap.py.
 """
 import json as _json
 
@@ -212,6 +219,33 @@ async def test_changed_membership_triggers_one_build_and_stores_sorted_ids(fake_
     assert stored["updated_at"] == "unchanged-sentinel"
 
 
+# --- v3: section-level source_note_ids validated against fed set (router) ---------------------
+
+async def test_router_drops_section_source_note_ids_outside_fed_set(fake_db, monkeypatch):
+    """`source_note_ids` grounds a whole section (independent of `items`) for citation links, so
+    an id the model cited that isn't actually a fed member note must be dropped the same way an
+    out-of-set item note_id already is (that check lives in GeminiService._build_digest; this is
+    the router's equivalent guard for the section-level field, since the router already holds
+    the authoritative fed set as `member_ids`)."""
+
+    async def fake_build(name, description, notes):
+        return CollectionDigest(
+            intro="digest",
+            sections=[DigestSection(
+                heading="Places", body="A synthesis paragraph.",
+                source_note_ids=["n1", "not-fed", "also-not-fed"],
+            )],
+        )
+
+    _wire(monkeypatch, fake_db, build=fake_build)
+    _seed_note(fake_db, "n1", "c1", 1)
+    fake_db.seed("collections", "c1", {"user_id": "u", "name": "Trip"})
+
+    result = await col_router.digest("c1", user_id="u")
+
+    assert result["digest"]["sections"][0]["source_note_ids"] == ["n1"]
+
+
 # --- cap exhausted --------------------------------------------------------------------------------
 
 async def test_cap_exhausted_returns_stale_existing_digest(fake_db, monkeypatch):
@@ -338,6 +372,51 @@ def test_build_digest_drops_entries_citing_ids_outside_fed_set(monkeypatch):
     assert len(digest.sections) == 1
     assert digest.sections[0].heading == "Places"
     assert [i.note_id for i in digest.sections[0].items] == ["n1"]
+
+
+def test_build_digest_keeps_body_only_section_with_no_items(monkeypatch):
+    """v3: a section's synthesis lives in `body`, not `items` — `items` is optional and many
+    genuinely good sections have none (nothing in them is atomic enough for its own row). A
+    section must only be dropped when it has NEITHER body nor items, not merely because items
+    is empty (that was the old v2-era behavior, back when a section's only reason to exist was
+    an items list)."""
+    from services.gemini import gemini_service
+
+    payload = {
+        "intro": "digest",
+        "facts": [],
+        "sections": [
+            {"heading": "PM prompts", "body": "A real synthesis paragraph about the prompts.",
+             "items": [], "source_note_ids": ["n1"]},
+            {"heading": "Nothing at all", "body": "", "items": []},
+        ],
+    }
+
+    def fake_generate(*args, **kwargs):
+        return _FakeResp(_json.dumps(payload))
+
+    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+
+    digest = gemini_service._build_digest("Trip", "", [
+        {"id": "n1", "content_type": "business-advice", "title": "Prompts", "source_domain": "x.com",
+         "ai_summary": "", "data": {}},
+    ])
+
+    assert digest is not None
+    assert len(digest.sections) == 1
+    assert digest.sections[0].heading == "PM prompts"
+    assert digest.sections[0].body == "A real synthesis paragraph about the prompts."
+    assert digest.sections[0].items == []
+
+
+def test_digest_section_defaults_body_empty_and_no_source_note_ids():
+    """Schema-level: a DigestSection built with only `heading` (e.g. a pre-v3 cached digest, or
+    minimal test fixtures elsewhere in this file) must still validate, with `body`/
+    `source_note_ids` defaulting to empty rather than requiring every caller to pass them."""
+    section = DigestSection(heading="X")
+    assert section.body == ""
+    assert section.items == []
+    assert section.source_note_ids == []
 
 
 def test_build_digest_returns_none_after_retry_exhausted(monkeypatch):

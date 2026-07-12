@@ -62,10 +62,20 @@ class DigestEntry(BaseModel):
 
 
 class DigestSection(BaseModel):
-    """A themed group of digest entries (e.g. "Places", "Food", "Tips" for a trip-like
-    collection; a topic/category for a topical one)."""
+    """A themed group within a collection digest (e.g. "Places", "Food", "Tips" for a
+    trip-like collection; a topic/category for a topical one).
+
+    v3: the section is a READ of its member notes, not an index into them. `body` is the
+    synthesis — 1-3 short paragraphs (plain text, "\\n\\n" between paragraphs) that names the
+    specific tools/techniques/steps found in the notes' `data` and connects them across notes,
+    the way a person who actually read the notes would explain the section back to you. `items`
+    is optional and reserved for genuinely atomic listables (a tool worth its own row) — many
+    sections will have body-only prose and an empty items list. `source_note_ids` grounds the
+    section as a whole for citation links, independent of which (if any) items it carries."""
     heading: str
+    body: str = ""
     items: list[DigestEntry] = Field(default_factory=list)
+    source_note_ids: list[str] = Field(default_factory=list)
 
 
 class CollectionDigest(BaseModel):
