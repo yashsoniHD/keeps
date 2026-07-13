@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ClipLoader } from "@/components/ClipMark";
-import { getNote, getAnnotation, watchCollections } from "@/lib/firestore";
+import { getNote, getAnnotation } from "@/lib/firestore";
 import { deleteNote } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
@@ -12,7 +12,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { AppShell } from "@/components/AppShell";
 import { feedNeighbors } from "@/lib/note-nav";
 import { FOCUS_RING } from "@/lib/ui";
-import type { Note, Collection } from "@/lib/types";
+import type { Note } from "@/lib/types";
 import { analytics } from "@/lib/analytics";
 
 export const Route = createFileRoute("/notes/$noteId")({ component: NoteDetail });
@@ -24,7 +24,6 @@ function NoteDetail() {
   const navigate = useNavigate();
   const { setFocalNote } = useAsk();
   const [note, setNote] = useState<Note | null>(null);
-  const [collections, setCollections] = useState<Collection[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
@@ -59,12 +58,6 @@ function NoteDetail() {
         });
     }
   }, [user, noteId]);
-
-  // The user's folders, live, so the header's "Add to collection" sheet stays current.
-  useEffect(() => {
-    if (!user) return;
-    return watchCollections(user.uid, setCollections, { onError: () => {} });
-  }, [user]);
 
   // Scope the global Ask-AI FAB to this note while it's open ("this note first, then all").
   useEffect(() => {
@@ -134,12 +127,7 @@ function NoteDetail() {
     );
   }
   if (notFound || !note) {
-    return (
-      <ErrorState
-        title="Note not found"
-        body="This note doesn't exist or was deleted."
-      />
-    );
+    return <ErrorState title="Note not found" body="This note doesn't exist or was deleted." />;
   }
 
   return (
@@ -147,8 +135,6 @@ function NoteDetail() {
       <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <NoteContent
           note={note}
-          collections={collections}
-          uid={user?.uid ?? null}
           onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
           onDelete={async () => {
             await deleteNote(note.id);

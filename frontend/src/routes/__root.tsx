@@ -69,7 +69,11 @@ function RootComponent() {
           <QueryClientProvider client={queryClient}>
             <AskProvider>
               <CaptureProvider>
-                <Outlet />
+                {/* Bottom padding clears the fixed capture FAB (bottom-right) on every route
+                    and breakpoint, so a page's last content never hides behind it. */}
+                <div className="pb-[calc(6rem+env(safe-area-inset-bottom))]">
+                  <Outlet />
+                </div>
                 {/* Global Ask-AI chat overlay (opened from search + per-note affordances);
                     hides itself on signed-out routes. */}
                 <AskFab />

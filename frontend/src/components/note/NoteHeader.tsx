@@ -1,20 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useCanGoBack, useRouter } from "@tanstack/react-router";
-import { Timestamp } from "firebase/firestore";
-import { ArrowLeft, FolderPlus, Pencil, Pin, Star } from "lucide-react";
-import type { Collection, Note } from "@/lib/types";
+import { useCanGoBack, useRouter } from "@tanstack/react-router";
+import { ArrowLeft, Pencil } from "lucide-react";
+import type { Note } from "@/lib/types";
 import { formatDate } from "@/lib/note-meta";
-import { FOCUS_RING } from "@/lib/ui";
 import { updateNote } from "@/lib/api";
 import { CategoryEditor } from "./CategoryEditor";
 import { SourcePill } from "./SourcePill";
 import { ShareButton } from "./ShareButton";
 import { DeleteButton } from "@/components/NoteCard";
-import { CollectionPicker } from "@/components/library/CollectionPicker";
-
-// Round 36px action button matching DeleteButton's resting style, with an active (on) state.
-const HEADER_BTN =
-  "inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card transition-colors";
 
 // Grow a textarea to fit its content so a long title doesn't scroll inside a fixed box.
 function autosize(el: HTMLTextAreaElement) {
@@ -110,18 +103,13 @@ function EditableTitle({
 
 export function NoteHeader({
   note,
-  collections = [],
-  uid = null,
   onDelete,
   onPatch,
 }: {
   note: Note;
-  collections?: Collection[];
-  uid?: string | null;
   onDelete?: () => void;
   onPatch?: (patch: Partial<Note>) => void;
 }) {
-  const [picker, setPicker] = useState(false);
   const router = useRouter();
   const canGoBack = useCanGoBack();
   // Back returns to wherever the note was opened from (home feed, search, …). Falls back to
@@ -130,34 +118,6 @@ export function NoteHeader({
     if (canGoBack) router.history.back();
     else router.navigate({ to: "/" });
   };
-
-  // Favorite / pin write through the backend (notes are server-write-only); onPatch updates
-  // the local note optimistically and reverts on failure so the toggle feels instant.
-  const toggleFavorite = async () => {
-    const next = !note.is_favorite;
-    onPatch?.({ is_favorite: next });
-    try {
-      await updateNote(note.id, { is_favorite: next });
-    } catch {
-      onPatch?.({ is_favorite: !next });
-    }
-  };
-  const togglePin = async () => {
-    const next = !note.pinned_at;
-    const prev = note.pinned_at ?? null;
-    onPatch?.({ pinned_at: next ? Timestamp.now() : null }); // backend stamps the real time
-    try {
-      await updateNote(note.id, { pinned: next });
-    } catch {
-      onPatch?.({ pinned_at: prev });
-    }
-  };
-
-  // Multi-home membership drives the folder button's "on" look (in any bucket or not). Falls
-  // back to the legacy scalar for a note that hasn't been touched since the migration lifted
-  // it onto collection_ids.
-  const memberIds = note.collection_ids ?? (note.collection_id ? [note.collection_id] : []);
-  const inCollections = memberIds.some((id) => collections.some((c) => c.id === id)) ? 1 : 0;
 
   return (
     <header className="mb-8 flex flex-col gap-5">
@@ -171,51 +131,10 @@ export function NoteHeader({
           Back
         </button>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggleFavorite}
-            aria-label={note.is_favorite ? "Remove favorite" : "Favorite"}
-            title={note.is_favorite ? "Favorited" : "Favorite"}
-            className={`${HEADER_BTN} ${FOCUS_RING} ${
-              note.is_favorite ? "text-favorite" : "text-ink-soft hover:text-ink"
-            }`}
-          >
-            <Star className={`h-4 w-4 ${note.is_favorite ? "fill-favorite" : ""}`} />
-          </button>
-          <button
-            type="button"
-            onClick={togglePin}
-            aria-label={note.pinned_at ? "Unpin" : "Pin to top"}
-            title={note.pinned_at ? "Pinned to top" : "Pin to top"}
-            className={`${HEADER_BTN} ${FOCUS_RING} ${
-              note.pinned_at ? "text-ink" : "text-ink-soft hover:text-ink"
-            }`}
-          >
-            <Pin className={`h-4 w-4 ${note.pinned_at ? "fill-ink" : ""}`} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setPicker(true)}
-            aria-label="Add to collection"
-            title="Add to collection"
-            className={`${HEADER_BTN} ${FOCUS_RING} ${
-              inCollections > 0 ? "text-ink" : "text-ink-soft hover:text-ink"
-            }`}
-          >
-            <FolderPlus className="h-4 w-4" />
-          </button>
           <ShareButton note={note} />
           {onDelete && <DeleteButton onDelete={onDelete} />}
         </div>
       </div>
-      {picker && (
-        <CollectionPicker
-          note={note}
-          collections={collections}
-          uid={uid}
-          onClose={() => setPicker(false)}
-        />
-      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <CategoryEditor type={note.content_type} noteId={note.id} onPatch={onPatch} />

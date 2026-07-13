@@ -537,8 +537,8 @@ export function Feed({
           </div>
         </header>
 
-        {/* Bottom padding clears the capture FAB (bottom-right) on every screen size. */}
-        <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8">
+        {/* FAB clearance is handled by the global wrapper padding in __root.tsx. */}
+        <main className="mx-auto max-w-7xl px-4 pb-6 pt-5 md:px-8">
           {ingestError && (
             <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -876,7 +876,7 @@ function ShelfRow({ notes }: { notes: Note[] }) {
   return (
     <div className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:-mx-8 md:px-8">
       {notes.map((n) => (
-        <div key={n.id} className="w-60 shrink-0 snap-start sm:w-64">
+        <div key={n.id} className="w-40 shrink-0 snap-start sm:w-56">
           <ErrorBoundary label="feed-shelf-card" fallback={<FallbackNoteCard note={n} />}>
             <BoardCard note={n} ratio={4 / 5} hideCategory />
           </ErrorBoundary>

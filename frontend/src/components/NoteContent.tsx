@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { RotateCcw, ArrowRight, BookmarkPlus, Loader2, Sparkles } from "lucide-react";
-import type { Note, Collection } from "@/lib/types";
+import type { Note } from "@/lib/types";
 import { ingest } from "@/lib/api";
 import { useAsk } from "@/contexts/ask-context";
 import { PillButton, PillLink } from "@/components/shared/PillButton";
@@ -294,7 +294,7 @@ function AskAboutNote() {
       variant="secondary"
       onClick={() => openChat()}
       aria-label="Ask Clip AI about this note"
-      className="mt-6"
+      className="mb-8"
     >
       <Sparkles className="h-4 w-4 text-summary" aria-hidden />
       Ask about this note
@@ -304,8 +304,6 @@ function AskAboutNote() {
 
 export function NoteContent({
   note,
-  collections = [],
-  uid = null,
   onDelete,
   onPatch,
   variant = "owner",
@@ -314,8 +312,6 @@ export function NoteContent({
   isAuthed,
 }: {
   note: Note;
-  collections?: Collection[];
-  uid?: string | null;
   onDelete?: () => void;
   onPatch?: (patch: Partial<Note>) => void;
   variant?: "owner" | "public";
@@ -337,17 +333,14 @@ export function NoteContent({
       {isPublic ? (
         <PublicNoteHeader note={note} />
       ) : (
-        <NoteHeader
-          note={note}
-          collections={collections}
-          uid={uid}
-          onDelete={onDelete}
-          onPatch={onPatch}
-        />
+        <NoteHeader note={note} onDelete={onDelete} onPatch={onPatch} />
       )}
       {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
       {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
+      {/* Per-note Clip AI launcher, right under the header — owner view only (public viewers
+          can't chat over the corpus). */}
+      {!isPublic && <AskAboutNote />}
       {showHero &&
         (coverKind === "compact" && url ? (
           // Portrait/small cover (reel thumbnail, creator face): a centered, contained card
@@ -372,8 +365,6 @@ export function NoteContent({
         ) : (
           <CoverFallback note={note} className="mb-8 h-56 w-full md:h-72" />
         ))}
-      {/* Per-note Clip AI launcher — owner view only (public viewers can't chat over the corpus). */}
-      {!isPublic && <AskAboutNote />}
       <div className="mt-8">
         {/* onPatch is owner-only (undefined on the public view), so the editable body block
             inside GenericNote stays read-only for shared notes. */}

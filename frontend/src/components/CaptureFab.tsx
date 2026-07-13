@@ -12,24 +12,42 @@ import { FOCUS_RING, PRESS } from "@/lib/ui";
 // search screen (that surface's focus belongs to the query, not a floating +).
 const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/search"];
 
-// Ignore scroll jitter below this many px so a stray 1px wobble doesn't toggle the button.
-const SCROLL_DELTA = 6;
+// Only react once a scroll gesture accumulates past this many px, so momentum wobble and
+// sub-pixel jitter don't flip the button back and forth mid-scroll.
+const SCROLL_DELTA = 12;
+// Near the top there's nothing to read past, so the FAB always shows there (its resting state).
+const TOP_ZONE = 80;
 
-// Tracks vertical scroll *direction*: the FAB tucks away as the user scrolls up toward the
-// top and slides back in as they scroll down into the feed. Starts visible (no scroll yet).
+// Tracks vertical scroll *direction*: the FAB tucks away as the user scrolls down into the
+// feed (reading) and slides back in as they scroll up. Always visible near the top. Direction
+// is measured against the last point where it flipped, not the last scroll event, so a long
+// steady drag doesn't keep re-triggering on every pixel. Starts visible.
 function useScrollDirectionVisible(active: boolean): boolean {
   const [visible, setVisible] = useState(true);
-  const lastY = useRef(0);
+  const anchorY = useRef(0);
+  const visRef = useRef(true);
 
   useEffect(() => {
     if (!active) return;
-    lastY.current = window.scrollY;
+    anchorY.current = window.scrollY;
     const onScroll = () => {
-      const y = window.scrollY;
-      const dy = y - lastY.current;
+      const y = Math.max(0, window.scrollY);
+      if (y < TOP_ZONE) {
+        anchorY.current = y;
+        if (!visRef.current) {
+          visRef.current = true;
+          setVisible(true);
+        }
+        return;
+      }
+      const dy = y - anchorY.current;
       if (Math.abs(dy) < SCROLL_DELTA) return;
-      setVisible(dy > 0); // scrolling down → show; scrolling up → hide
-      lastY.current = y;
+      const next = dy < 0; // scrolling up → show; scrolling down → hide
+      anchorY.current = y;
+      if (next !== visRef.current) {
+        visRef.current = next;
+        setVisible(next);
+      }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
