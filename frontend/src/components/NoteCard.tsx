@@ -10,7 +10,6 @@ import {
   X,
   Star,
   Pin,
-  Play,
 } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
@@ -240,36 +239,26 @@ function seedFromId(id: string): number {
 // Coverless placeholders vary in height so the masonry doesn't render a wall of identical tiles.
 const PLACEHOLDER_ASPECTS = ["aspect-square", "aspect-[4/5]", "aspect-[3/4]"];
 
-// A video/reel note — drives the play pill + source chip on the cover. We only have the domain
-// and the capture input_type to go on (no explicit media flag), so match the known video hosts.
-function isVideoNote(note: Note): boolean {
-  if (note.input_type === "video") return true;
-  const d = note.source_domain ?? "";
-  return /(?:^|\.)(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|vimeo\.com|facebook\.com|fb\.watch)/.test(
-    d,
-  );
-}
-
-// Duration string carried by the note (summary notes stash it as data.videoLength). Absent for
-// most notes — the pill then shows just the play glyph, never a fabricated time.
-// data.duration is only trusted when it reads like a timestamp: itineraries captured from a
-// video host also carry data.duration ("8 days"), which is a trip length, not a video length.
-function videoDuration(note: Note): string | null {
-  const d = note.data ?? {};
-  let raw = typeof d.videoLength === "string" ? d.videoLength : null;
-  if (!raw && typeof d.duration === "string" && /^\d{1,2}(:\d{2}){1,2}$/.test(d.duration.trim())) {
-    raw = d.duration;
-  }
-  return raw && raw.trim() ? raw.trim() : null;
-}
-
 // Board covers keep their natural shape only within this band; extremes get cropped by
 // object-cover. Keeps the masonry lively but rhythmic: a 9:16 reel can't swallow a column
 // and a wide og-image banner can't collapse into a sliver.
 const BOARD_RATIO_MIN = 3 / 4; // tallest tile (portrait)
 const BOARD_RATIO_MAX = 3 / 2; // shortest tile (landscape)
 
-export function BoardCard({ note }: { note: Note }) {
+// `ratio` pins the cover (and coverless placeholder) to a fixed aspect instead of the
+// natural-shape masonry band — the Shelves view passes 4/5 (portrait) so every tile in a
+// horizontal row lands the same height and the row scrolls as one clean strip.
+// `hideCategory` drops the category name from the footer — Shelves already groups by
+// category, so repeating it under every tile read as noise.
+export function BoardCard({
+  note,
+  ratio,
+  hideCategory = false,
+}: {
+  note: Note;
+  ratio?: number;
+  hideCategory?: boolean;
+}) {
   const accent = noteAccent(note.content_type);
   const TypeIcon = noteIcon(note.content_type);
   const { hasCover, onImageError } = useCoverPresent(note);
@@ -279,11 +268,8 @@ export function BoardCard({ note }: { note: Note }) {
   // Drives the image's fade-in — covers pop in as they finish loading instead of snapping in,
   // which reads calmer on a fast-scrolling feed. Placeholders (no network image) skip this.
   const [coverLoaded, setCoverLoaded] = useState(false);
-  const video = isVideoNote(note);
-  const duration = videoDuration(note);
   // Sub-line: a quiet accent dot (the same color-coding as the category chip elsewhere,
-  // without the loud pill background) plus the short date. The source is only indicated by
-  // the chip on the cover — repeating it down here read as a duplicate.
+  // without the loud pill background), with the source favicon + short date on the right.
   const date = formatDateShort(note.created_at);
   const placeholderAspect = PLACEHOLDER_ASPECTS[seedFromId(note.id) % PLACEHOLDER_ASPECTS.length];
   // The accent's underlying token name ("recipe" from "bg-recipe"), so the placeholder can
@@ -295,7 +281,8 @@ export function BoardCard({ note }: { note: Note }) {
   // Placeholder text sits on the `-soft` gradient, not the `-chip` pill background, but the
   // WCAG-audited pairing for `-soft` is the `-chip` foreground (see PALETTES above) — reuse
   // the chip's text-* class rather than accent.text (contrast-audited for the plain card bg).
-  const placeholderTextClass = accent.chip.split(" ").find((cls) => cls.startsWith("text-")) ?? accent.text;
+  const placeholderTextClass =
+    accent.chip.split(" ").find((cls) => cls.startsWith("text-")) ?? accent.text;
   // Cached/back-forward-cache images never fire `onLoad` (and Safari's lazy-load can skip it
   // too), which would leave the tile permanently at opacity-0. A callback ref checks the
   // already-loaded state synchronously on mount so those covers still show up.
@@ -331,10 +318,12 @@ export function BoardCard({ note }: { note: Note }) {
                 coverLoaded ? "opacity-100" : "opacity-0"
               }`}
               style={{
-                aspectRatio: Math.min(
-                  BOARD_RATIO_MAX,
-                  Math.max(BOARD_RATIO_MIN, coverRatio ?? BOARD_RATIO_MIN),
-                ),
+                aspectRatio:
+                  ratio ??
+                  Math.min(
+                    BOARD_RATIO_MAX,
+                    Math.max(BOARD_RATIO_MIN, coverRatio ?? BOARD_RATIO_MIN),
+                  ),
               }}
             />
           ) : (
@@ -343,57 +332,85 @@ export function BoardCard({ note }: { note: Note }) {
             // face and a faint oversized type-icon watermark — designed to sit between real
             // photos, not read as an empty box.
             <div
-              className={`relative flex ${placeholderAspect} flex-col justify-between overflow-hidden p-5`}
+              className={`relative flex ${ratio ? "" : placeholderAspect} flex-col justify-between overflow-hidden p-5`}
               style={{
                 backgroundImage: `linear-gradient(155deg, var(--${accentToken}-soft), var(--card))`,
+                ...(ratio ? { aspectRatio: ratio } : {}),
               }}
             >
-              <TypeIcon aria-hidden className={`h-5 w-5 shrink-0 opacity-50 ${placeholderTextClass}`} />
+              <TypeIcon
+                aria-hidden
+                className={`h-5 w-5 shrink-0 opacity-50 ${placeholderTextClass}`}
+              />
               <TypeIcon
                 aria-hidden
                 className={`pointer-events-none absolute -bottom-8 -right-8 h-32 w-32 opacity-[0.07] ${accent.text}`}
               />
+              {/* The fixed shelf tile has less vertical room than the tallest masonry
+                  placeholders, so the title clamps tighter there to stay inside the tile. */}
               <span
-                className={`relative line-clamp-5 break-words font-serif text-2xl leading-[1.15] [overflow-wrap:anywhere] ${placeholderTextClass}`}
+                className={`relative break-words font-serif text-2xl leading-[1.15] [overflow-wrap:anywhere] ${
+                  ratio ? "line-clamp-4" : "line-clamp-5"
+                } ${placeholderTextClass}`}
               >
                 {note.title}
               </span>
             </div>
           )}
-
-          {/* Source chip (video sources only), top-left. */}
-          {video && note.source_domain && (
-            <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
-              <img
-                src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-                alt=""
-                className="h-3 w-3 rounded-sm"
-              />
-              <span className="capitalize">{sourceLabel(note.source_domain)}</span>
-            </span>
-          )}
-
-          {/* Play pill (video notes), bottom-left. Duration only when the note carries one. */}
-          {video && (
-            <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
-              <Play className="h-3 w-3 fill-white" />
-              {duration}
-            </span>
-          )}
         </div>
 
         <div className="flex min-w-0 flex-col px-3.5 pb-3.5 pt-3">
-          {/* The only loud element on the tile — everything else below is deliberately quiet. */}
-          <h3 className="text-[15px] font-semibold leading-snug tracking-tight text-ink line-clamp-2">
+          {/* The only loud element on the tile — everything else below is deliberately quiet.
+              Fixed-ratio (shelf) tiles reserve two lines for the title so every card in the
+              row lands the same total height, whatever the title's actual length. */}
+          <h3
+            className={`text-[15px] font-semibold leading-snug tracking-tight text-ink line-clamp-2 ${
+              ratio ? "min-h-[2.75em]" : ""
+            }`}
+          >
             {note.title}
           </h3>
           <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-soft/80">
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${accent.dot}`} aria-hidden />
-            <span className="truncate">{noteLabel(note.content_type)}</span>
-            {date && <span className="shrink-0 whitespace-nowrap">· {date}</span>}
+            {hideCategory ? (
+              // Shelf tiles: the shelf header already names the category, so the left slot
+              // carries the source instead — favicon + name (a failed favicon just hides
+              // itself and the name still reads).
+              note.source_domain && (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                    alt=""
+                    aria-hidden
+                    className="h-3.5 w-3.5 shrink-0 rounded-sm"
+                  />
+                  <span className="truncate capitalize">{sourceLabel(note.source_domain)}</span>
+                </span>
+              )
+            ) : (
+              <>
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${accent.dot}`} aria-hidden />
+                <span className="truncate">{noteLabel(note.content_type)}</span>
+              </>
+            )}
+            {/* Date anchors the bottom-right; the board (category-labelled) tile keeps its
+                source favicon riding just left of the date. */}
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              {!hideCategory && note.source_domain && (
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                  alt={sourceLabel(note.source_domain)}
+                  title={sourceLabel(note.source_domain)}
+                  className="h-3.5 w-3.5 rounded-sm"
+                />
+              )}
+              {date && <span className="whitespace-nowrap">{date}</span>}
+            </span>
           </p>
         </div>
       </Link>

@@ -15,6 +15,7 @@ import {
   Mail,
   LayoutGrid,
   LayoutDashboard,
+  GalleryHorizontalEnd,
   Rows3,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -225,18 +226,20 @@ function AppearanceSection() {
         />
       </label>
 
-      <div className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-5">
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
         <span>
           <span className="block text-sm font-medium text-ink">Feed view</span>
           <span className="block text-xs text-ink-soft">How notes are laid out in your feed.</span>
         </span>
-        {/* Segmented control: cards / masonry board / condensed list. Persisted via the
-            shared layout hook. */}
+        {/* Segmented control: cards / masonry board / category shelves / condensed list.
+            Persisted via the shared layout hook. flex-wrap on the row: four segments no
+            longer fit beside the label on narrow phones, so the control drops below it. */}
         <div className="inline-flex shrink-0 rounded-full border border-border bg-background p-0.5">
           {(
             [
               { value: "standard", label: "Cards", icon: LayoutGrid },
               { value: "board", label: "Board", icon: LayoutDashboard },
+              { value: "shelves", label: "Shelves", icon: GalleryHorizontalEnd },
               { value: "condensed", label: "Compact", icon: Rows3 },
             ] as const
           ).map((opt) => {
@@ -264,8 +267,8 @@ function AppearanceSection() {
 
 function NotificationsSection() {
   const { user } = useAuth();
-  // Digest is opt-out (absent field = opted in), so default the toggle on until the read lands.
-  const [optIn, setOptIn] = useState(true);
+  // Digest is opt-in (absent field = off), so default the toggle off until the read lands.
+  const [optIn, setOptIn] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {

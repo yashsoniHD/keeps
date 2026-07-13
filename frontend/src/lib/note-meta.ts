@@ -540,3 +540,30 @@ export function groupNotesByDate(notes: Note[]): NoteGroup[] {
 
   return order.map((k) => groups.get(k)!);
 }
+
+export interface CategoryGroup {
+  label: string;
+  slugs: string[]; // every content_type slug that collapsed into this label
+  notes: Note[];
+}
+
+// Bucket a feed (already sorted newest-first) into category shelves for the Shelves view.
+// Groups collapse by display label — the same rule as the filter chips — so "itinerary" and
+// "trip" land on one "Trips" shelf instead of two near-duplicates. Shelf order follows first
+// appearance in the pre-sorted input, so the category with the newest note sits on top.
+export function groupNotesByCategory(notes: Note[]): CategoryGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, CategoryGroup>();
+  for (const n of notes) {
+    const label = noteLabel(n.content_type);
+    let g = groups.get(label);
+    if (!g) {
+      g = { label, slugs: [], notes: [] };
+      groups.set(label, g);
+      order.push(label);
+    }
+    if (!g.slugs.includes(n.content_type)) g.slugs.push(n.content_type);
+    g.notes.push(n);
+  }
+  return order.map((k) => groups.get(k)!);
+}

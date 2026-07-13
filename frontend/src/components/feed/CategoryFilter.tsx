@@ -163,7 +163,7 @@ function CategoryOverflowButton({
         createPortal(
           <>
             {/* Outside-tap catcher at <body> root: closes the menu and swallows the tap, so it
-                never falls through to a note card behind it (same pattern as SourceFilter). */}
+                never falls through to a note card behind it (same pattern as LayoutToggle). */}
             <div className="fixed inset-0 z-[60]" aria-hidden onClick={() => setOpen(false)} />
             <div
               role="listbox"

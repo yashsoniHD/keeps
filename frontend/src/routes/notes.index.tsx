@@ -4,24 +4,19 @@ import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-ro
 import {
   Search,
   Sparkles,
-  Sparkle,
-  Plus,
   WandSparkles,
   AlertCircle,
   X,
   Check,
-  Layers,
   Link2,
-  AlignLeft,
-  ImagePlus,
-  Mic,
   ArrowLeft,
   Pin,
   Settings as SettingsIcon,
   LayoutGrid,
   LayoutDashboard,
+  GalleryHorizontalEnd,
   Rows3,
-  type LucideIcon,
+  ChevronRight,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
@@ -31,7 +26,6 @@ import {
   watchPendingJobs,
   watchCollections,
   getUserCategories,
-  getUserSources,
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
@@ -44,7 +38,14 @@ import {
   replayQueue,
   type QueuedCapture,
 } from "@/lib/capture-queue";
-import { groupNotesByDate, noteLabel, sourceLabel } from "@/lib/note-meta";
+import {
+  groupNotesByDate,
+  groupNotesByCategory,
+  noteAccent,
+  noteIcon,
+  noteLabel,
+  type CategoryGroup,
+} from "@/lib/note-meta";
 import { setFeedOrder } from "@/lib/note-nav";
 import { getCached, hasCached, setCached } from "@/lib/swr-cache";
 import { FOCUS_RING } from "@/lib/ui";
@@ -61,7 +62,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GettingStarted } from "@/components/GettingStarted";
 import { AddNoteSheet } from "@/components/AddNoteSheet";
 import { AppShell } from "@/components/AppShell";
-import { CategoryChips, CollectionsMenu } from "@/components/feed/CategoryFilter";
+import { CategoryChips } from "@/components/feed/CategoryFilter";
 import { ClipMark, ClipLoader } from "@/components/ClipMark";
 import { useLayout, type Layout } from "@/lib/layout";
 import type { Note, Job, Collection } from "@/lib/types";
@@ -79,44 +80,6 @@ export const Route = createFileRoute("/notes/")({
 // (The + FAB is intentionally left without a focus ring.)
 const ICON_BTN = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const GRID_CLS = "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
-
-// A source-filter option: either a web domain (rendered with its favicon) or a synthetic
-// "manual" group for captures that have no web source (typed/voice/uploaded/Clip-AI notes),
-// rendered with a lucide icon. `id` is what `source` filter state holds.
-type SourceOption = { id: string; label: string; domain?: string; icon?: LucideIcon };
-
-// Manual capture groups, keyed by a `manual:*` id (see noteMatchesSource). Shown only when
-// the loaded feed actually contains a matching note, so the filter never lists empty buckets.
-const MANUAL_SOURCES: { id: string; label: string; icon: LucideIcon }[] = [
-  { id: "manual:text", label: "Written", icon: AlignLeft },
-  { id: "manual:voice", label: "Voice notes", icon: Mic },
-  { id: "manual:upload", label: "Uploads", icon: ImagePlus },
-  { id: "manual:ai", label: "Clip AI", icon: Sparkle },
-];
-
-// True if a note belongs to the selected source. Web sources match on domain; the synthetic
-// `manual:*` groups match on how the note was captured (Clip-AI provenance wins over its
-// input_type so an AI-authored text note lands under "Clip AI", not "Written").
-function noteMatchesSource(n: Note, source: string): boolean {
-  if (source === "all") return true;
-  if (source === "manual:ai") return n.source === "ai";
-  if (source === "manual:text") return n.source !== "ai" && n.input_type === "text";
-  if (source === "manual:voice") return n.input_type === "voice";
-  if (source === "manual:upload")
-    return n.input_type === "image" || n.input_type === "pdf" || n.input_type === "video";
-  return n.source_domain === source;
-}
-
-// Which manual groups have at least one note in the loaded feed.
-function presentManualSources(notes: Note[]): Set<string> {
-  const present = new Set<string>();
-  for (const n of notes) {
-    for (const g of MANUAL_SOURCES) {
-      if (!present.has(g.id) && noteMatchesSource(n, g.id)) present.add(g.id);
-    }
-  }
-  return present;
-}
 
 // First-run "try a sample" link: lets a new user reach the aha (a real, structured note)
 // in one tap, without having to go find a URL. It runs the real pipeline — a recipe page
@@ -154,9 +117,7 @@ export function Feed({
   const [feedError, setFeedError] = useState(false);
   const [max, setMax] = useState(50);
   const [userCategories, setUserCategories] = useState<string[]>([]);
-  const [userSources, setUserSources] = useState<string[]>([]);
   const [active, setActive] = useState<string>(typeParam ?? "all");
-  const [source, setSource] = useState<string>("all");
   // The view toggle (Cards / Board / Compact) lives both in the header (LayoutToggle, below)
   // and in Settings (Appearance) — the hook syncs both via localStorage + a custom event, so
   // switching one updates the other live.
@@ -246,9 +207,6 @@ export function Feed({
     if (!user) return;
     getUserCategories(user.uid)
       .then(setUserCategories)
-      .catch(() => {});
-    getUserSources(user.uid)
-      .then(setUserSources)
       .catch(() => {});
   }, [user]);
 
@@ -433,34 +391,10 @@ export function Feed({
     setShowAdd(false);
   };
 
-  // Web-source domains come from users/{uid}.sources (whole-corpus source of truth) unioned
-  // with loaded notes, so the filter doesn't vanish when a server-side category filter
-  // narrows the loaded notes to one domain — same trick as the category chips above. Empty
-  // domains (manual captures) are dropped here and surfaced as the manual groups below.
-  const domainSources = useMemo(
-    () =>
-      Array.from(new Set([...userSources, ...notes.map((n) => n.source_domain)]))
-        .filter(Boolean)
-        .sort(),
-    [notes, userSources],
-  );
-  // The full ordered option list for the source filter: web domains first, then any manual
-  // capture groups present in the feed (Written / Voice / Uploads / Clip AI).
-  const sourceOptions = useMemo<SourceOption[]>(() => {
-    const present = presentManualSources(notes);
-    return [
-      ...domainSources.map((d) => ({ id: d, label: sourceLabel(d), domain: d })),
-      ...MANUAL_SOURCES.filter((g) => present.has(g.id)).map((g) => ({
-        id: g.id,
-        label: g.label,
-        icon: g.icon,
-      })),
-    ];
-  }, [domainSources, notes]);
-
-  // Browse view: the live feed filtered only by the type/source chips. Free-text search now
+  // Browse view: the live feed filtered only by the category chips. Free-text search now
   // lives on its own route (/search) over the whole corpus, so the feed no longer filters by
-  // a query — it's purely the chip-filtered stream.
+  // a query — it's purely the chip-filtered stream. (The old source filter is gone: the
+  // source is visible on every card's footer instead.)
   const filtered = useMemo(() => {
     return notes.filter((n) => {
       // Home is THE feed — every note streams here regardless of collection. The /notes
@@ -469,10 +403,9 @@ export function Feed({
       // notes have the collection_id field yet (a Firestore `== null` query would miss those).
       if (!home && n.collection_id) return false;
       if (activeSlugs && !activeSlugs.includes(n.content_type)) return false;
-      if (!noteMatchesSource(n, source)) return false;
       return true;
     });
-  }, [notes, activeSlugs, source, home]);
+  }, [notes, activeSlugs, home]);
 
   // Pinned notes float into their own section above the dated groups (newest-pinned first),
   // so a note the user marked "come back to this" stays at the top of the feed instead of
@@ -489,20 +422,29 @@ export function Feed({
     [filtered],
   );
 
-  // Persist the visible order (pinned first, then the date-grouped stream — matching what's on
+  // Shelves view: the same stream re-bucketed by category (one horizontal shelf per label
+  // group), excluding pinned notes — they get their own shelf on top, like the date view.
+  const shelfGroups = useMemo(
+    () => (layout === "shelves" ? groupNotesByCategory(filtered.filter((n) => !n.pinned_at)) : []),
+    [layout, filtered],
+  );
+
+  // Persist the visible order (pinned first, then the grouped stream — matching what's on
   // screen) so the note view can swipe/arrow to the next note in the same filtered context.
+  // Shelves reorder the stream by category, so the swipe order follows the shelves there.
   useEffect(() => {
-    setFeedOrder([
-      ...pinnedNotes.map((n) => n.id),
-      ...filtered.filter((n) => !n.pinned_at).map((n) => n.id),
-    ]);
-  }, [filtered, pinnedNotes]);
+    const stream =
+      layout === "shelves"
+        ? shelfGroups.flatMap((g) => g.notes)
+        : filtered.filter((n) => !n.pinned_at);
+    setFeedOrder([...pinnedNotes.map((n) => n.id), ...stream.map((n) => n.id)]);
+  }, [filtered, pinnedNotes, layout, shelfGroups]);
 
   // Processing cards show only on the default view — an in-flight job has no type/title
   // yet to match a filter or search. Merge server jobs with not-yet-acknowledged local
   // placeholders, drop any whose note already landed (the brief completion overlap).
   const pendingJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all") return [];
+    if (active !== "all") return [];
     const inflight = jobs.filter((j) => j.status === "pending" || j.status === "processing");
     const noteUrls = new Set(notes.map((n) => n.source_url));
     const jobUrls = new Set(jobs.map((j) => j.url));
@@ -510,33 +452,33 @@ export function Feed({
       .filter((o) => !jobUrls.has(o.url) && !noteUrls.has(o.url))
       .map((o) => ({ id: o.id, url: o.url, status: "pending" }) as Job);
     return [...placeholders, ...inflight.filter((j) => !noteUrls.has(j.url))];
-  }, [jobs, optimistic, notes, active, source]);
+  }, [jobs, optimistic, notes, active]);
 
   // Offline-held captures render as "waiting" cards so they're visibly parked. Hidden
   // once a real job/note for the same URL exists (replay succeeded elsewhere).
   const queuedJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all") return [];
+    if (active !== "all") return [];
     const jobUrls = new Set(jobs.map((j) => j.url));
     const noteUrls = new Set(notes.map((n) => n.source_url));
     return queued
       .filter((q) => !jobUrls.has(q.url) && !noteUrls.has(q.url))
       .map((q) => ({ id: `queued-${q.url}`, url: q.url, status: "pending" }) as Job);
-  }, [queued, jobs, notes, active, source]);
+  }, [queued, jobs, notes, active]);
 
   // Captures parked by the global daily cap (launch-spike protection). They render as a calm
   // "Queued — high demand" card instead of an error, and drain automatically when budget frees.
   const deferredJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all") return [];
+    if (active !== "all") return [];
     const noteUrls = new Set(notes.map((n) => n.source_url));
     return jobs.filter((j) => j.status === "deferred" && !noteUrls.has(j.url));
-  }, [jobs, notes, active, source]);
+  }, [jobs, notes, active]);
 
   // Failed captures stay visible (with the error) until dismissed or retried — a card
   // that silently disappears reads as data loss.
   const failedJobs = useMemo<Job[]>(() => {
-    if (active !== "all" || source !== "all") return [];
+    if (active !== "all") return [];
     return jobs.filter((j) => j.status === "failed" && !dismissedJobs.includes(j.id));
-  }, [jobs, dismissedJobs, active, source]);
+  }, [jobs, dismissedJobs, active]);
 
   const dismissJob = (jobId: string) => {
     setDismissedJobs((prev) => {
@@ -578,30 +520,25 @@ export function Feed({
                   <Search className="h-4 w-4" />
                 </Link>
                 <LayoutToggle layout={layout} setLayout={setLayout} />
-                {/* Collections and Settings move to the mobile bottom tab bar on small screens
-                    (BottomNav, md:hidden) — hide the header buttons there so they aren't
-                    duplicated, but keep them here for desktop, which has no bottom nav. */}
-                <div className="hidden items-center gap-1 md:flex">
-                  <CollectionsMenu />
-                  <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
-                    <SettingsIcon className="h-4 w-4" />
-                  </Link>
-                </div>
+                {/* With the bottom tab bar gone, the header is the only nav surface, so
+                    Settings lives here on every screen size. (Collections is parked for
+                    now — no entry point until the feature returns.) */}
+                <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
+                  <SettingsIcon className="h-4 w-4" />
+                </Link>
               </div>
             </div>
 
-            {(categories.length > 0 || sourceOptions.length > 1) && (
-              <div className="flex items-center gap-2">
-                {sourceOptions.length > 1 && (
-                  <SourceFilter options={sourceOptions} source={source} setSource={setSource} />
-                )}
-                <CategoryChips groups={chipGroups} active={active} setActive={applyActive} />
-              </div>
+            {/* Shelves already lays the feed out by category, so the chip strip has no
+                place there at all — the other layouts keep it as their filter surface. */}
+            {categories.length > 0 && layout !== "shelves" && (
+              <CategoryChips groups={chipGroups} active={active} setActive={applyActive} />
             )}
           </div>
         </header>
 
-        <main className="mx-auto max-w-7xl px-4 pb-6 pt-5 md:pb-28 md:px-8">
+        {/* Bottom padding clears the capture FAB (bottom-right) on every screen size. */}
+        <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8">
           {ingestError && (
             <div className="mb-4 flex items-start gap-3 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -654,7 +591,7 @@ export function Feed({
             queuedJobs.length === 0 ? (
             showGuide ? null : (
               <EmptyState
-                hasNotes={notes.length > 0 || active !== "all" || source !== "all"}
+                hasNotes={notes.length > 0 || active !== "all"}
                 onTrySample={() => handleCapture(SAMPLE_LINK)}
               />
             )
@@ -692,22 +629,43 @@ export function Feed({
                   </section>
                 ))}
 
-              {pinnedNotes.length > 0 && (
-                <div>
-                  <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
-                    <Pin className="h-3.5 w-3.5" />
-                    Pinned
-                  </h2>
-                  <NotesView notes={pinnedNotes} layout={layout} />
-                </div>
-              )}
+              {layout === "shelves" ? (
+                <>
+                  {pinnedNotes.length > 0 && (
+                    <div>
+                      <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+                        <Pin className="h-3.5 w-3.5" />
+                        Pinned
+                      </h2>
+                      <ShelfRow notes={pinnedNotes} />
+                    </div>
+                  )}
+                  {shelfGroups.map((g) => (
+                    <CategoryShelf key={g.label} group={g} />
+                  ))}
+                </>
+              ) : (
+                <>
+                  {pinnedNotes.length > 0 && (
+                    <div>
+                      <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-soft">
+                        <Pin className="h-3.5 w-3.5" />
+                        Pinned
+                      </h2>
+                      <NotesView notes={pinnedNotes} layout={layout} />
+                    </div>
+                  )}
 
-              {dateGroups.map((g) => (
-                <div key={g.key}>
-                  <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">{g.label}</h2>
-                  <NotesView notes={g.notes} layout={layout} />
-                </div>
-              ))}
+                  {dateGroups.map((g) => (
+                    <div key={g.key}>
+                      <h2 className="mb-3 text-xs uppercase tracking-wider text-ink-soft">
+                        {g.label}
+                      </h2>
+                      <NotesView notes={g.notes} layout={layout} />
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
 
@@ -724,22 +682,8 @@ export function Feed({
           )}
         </main>
 
-        {/* Primary action FAB: capture a new note. Desktop only — on mobile the bottom tab bar's
-            center + button owns capture (BottomNav). Sits above the global Ask launcher pill
-            (AskFab, bottom-right) so the two right-corner controls stack instead of overlapping. */}
-        <button
-          type="button"
-          onClick={() => {
-            setPendingUrl("");
-            setShowAdd(true);
-          }}
-          aria-label="New note"
-          title="New note"
-          className="fixed bottom-24 right-6 z-40 hidden h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-transform active:scale-95 md:flex"
-        >
-          <Plus className="h-6 w-6" />
-        </button>
-
+        {/* Capture is owned by the global CaptureFab (bottom-right, __root.tsx); the feed's own
+            AddNoteSheet below still serves the share-target / deep-link capture flows. */}
         {showAdd && (
           <AddNoteSheet
             url={pendingUrl}
@@ -756,131 +700,10 @@ export function Feed({
   );
 }
 
-// Platform logo for a source domain. Lucide has no brand icons, so we pull the
-// site's favicon (Google's service returns a generic globe for unknown domains).
-function SourceLogo({ domain, className }: { domain: string; className?: string }) {
-  return (
-    <img
-      src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
-      alt=""
-      aria-hidden
-      loading="lazy"
-      className={className}
-    />
-  );
-}
-
-// Source filter: a custom dropdown (native <select> can't render logos) showing each web
-// platform's favicon — or, for manual captures, a lucide icon — beside its name. Manual
-// notes (typed/voice/uploaded/Clip-AI) have no web source, so they'd otherwise collapse
-// into a single label-less "?" favicon; the synthetic groups give them real entries.
-function SourceFilter({
-  options,
-  source,
-  setSource,
-}: {
-  options: SourceOption[];
-  source: string;
-  setSource: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  // Anchor coords for the portaled menu. The menu is rendered into <body> (not here) so
-  // it escapes the header's backdrop-filter, which otherwise traps fixed-position children
-  // to the header's box — that's what let outside taps fall through to the notes below.
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 8, left: r.left });
-  }, [open]);
-
-  const allOptions: SourceOption[] = [
-    { id: "all", label: "All sources", icon: Layers },
-    ...options,
-  ];
-  const selected = options.find((o) => o.id === source);
-
-  // The glyph for an option: its favicon if it's a web domain, otherwise its lucide icon.
-  const Glyph = ({ option, className }: { option: SourceOption; className?: string }) =>
-    option.domain ? (
-      <SourceLogo domain={option.domain} className={`${className} rounded`} />
-    ) : option.icon ? (
-      <option.icon className={className} />
-    ) : (
-      <Layers className={className} />
-    );
-
-  return (
-    <div className="shrink-0">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Filter by source"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors ${FOCUS_RING} ${
-          selected
-            ? "border-ink bg-card text-ink"
-            : "border-border bg-card text-ink-soft hover:text-ink"
-        }`}
-      >
-        {selected ? (
-          <Glyph option={selected} className="h-5 w-5" />
-        ) : (
-          <Layers className="h-4 w-4" />
-        )}
-      </button>
-
-      {open &&
-        pos &&
-        createPortal(
-          <>
-            {/* Full-viewport catcher at <body> root: an outside tap closes the menu AND is
-                consumed here, so it never falls through to (and opens) a note behind it. */}
-            <div className="fixed inset-0 z-[60]" aria-hidden onClick={() => setOpen(false)} />
-            <div
-              role="listbox"
-              style={{ top: pos.top, left: pos.left }}
-              className="fixed z-[61] max-h-72 w-52 overflow-y-auto rounded-2xl border border-border bg-popover p-1.5 shadow-2xl"
-            >
-              {allOptions.map((o) => {
-                const isSelected = source === o.id;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onClick={() => {
-                      setSource(o.id);
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm capitalize transition-colors ${
-                      isSelected
-                        ? "bg-ink/5 text-ink"
-                        : "text-ink-soft hover:bg-ink/5 hover:text-ink"
-                    }`}
-                  >
-                    <Glyph option={o} className="h-5 w-5 shrink-0 text-ink-soft" />
-                    <span className="flex-1 truncate">{o.label}</span>
-                    {isSelected && <Check className="h-4 w-4 shrink-0 text-ink" />}
-                  </button>
-                );
-              })}
-            </div>
-          </>,
-          document.body,
-        )}
-    </div>
-  );
-}
-
 const LAYOUT_OPTIONS = [
   { value: "standard" as const, label: "Cards", icon: LayoutGrid },
   { value: "board" as const, label: "Board", icon: LayoutDashboard },
+  { value: "shelves" as const, label: "Shelves", icon: GalleryHorizontalEnd },
   { value: "condensed" as const, label: "Compact", icon: Rows3 },
 ];
 
@@ -923,8 +746,9 @@ function LayoutToggle({ layout, setLayout }: { layout: Layout; setLayout: (v: La
         pos &&
         createPortal(
           <>
-            {/* Same outside-tap catcher pattern as SourceFilter, for the same reason: the
-                portaled menu escapes the header's backdrop-filter stacking context. */}
+            {/* Full-viewport outside-tap catcher at <body> root: closes the menu AND consumes
+                the tap (the portaled menu escapes the header's backdrop-filter stacking
+                context, so without this the tap would fall through to a note behind it). */}
             <div className="fixed inset-0 z-[60]" aria-hidden onClick={() => setOpen(false)} />
             <div
               role="listbox"
@@ -1002,6 +826,63 @@ function BoardMasonry({ notes }: { notes: Note[] }) {
         </div>
       ))}
     </section>
+  );
+}
+
+// One shelf of the Shelves view: a category header above a horizontally-scrolling strip of
+// uniform board tiles. The accent-colored pill (same visual language as the filter chips) is
+// a pure label — it deliberately does NOT filter; the only control up here is the chevron,
+// which collapses the shelf to just its header. Collapse is per-mount UI state, not persisted.
+function CategoryShelf({ group }: { group: CategoryGroup }) {
+  const slug = group.slugs[0];
+  const accent = noteAccent(slug);
+  const Icon = noteIcon(slug);
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <h2
+          className={`inline-flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${accent.chip}`}
+        >
+          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{group.label}</span>
+        </h2>
+        <span className="text-[11px] tabular-nums text-ink-soft/60">{group.notes.length}</span>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+          className={`rounded-full p-1 text-ink-soft/60 transition-colors hover:text-ink ${FOCUS_RING}`}
+        >
+          <ChevronRight
+            className={`h-3.5 w-3.5 transition-transform ${collapsed ? "" : "rotate-90"}`}
+          />
+        </button>
+      </div>
+      {!collapsed && <ShelfRow notes={group.notes} />}
+    </div>
+  );
+}
+
+// The horizontal strip itself: snap-scrolling, scrollbar hidden, bleeding to the viewport
+// edge (negative margins mirror <main>'s px-4/md:px-8 padding) so a half-visible tile at
+// the edge advertises that the row scrolls. Fixed tile width + the fixed 4:5 portrait cover
+// keeps every card in the strip the same footprint, and portrait (most saved covers are
+// vertical video thumbnails) shows far more of the image than a square crop did. The shelf
+// header already names the category, so tiles drop their own category line ("hideCategory").
+// Same error-boundary isolation as the grid.
+function ShelfRow({ notes }: { notes: Note[] }) {
+  return (
+    <div className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:-mx-8 md:px-8">
+      {notes.map((n) => (
+        <div key={n.id} className="w-60 shrink-0 snap-start sm:w-64">
+          <ErrorBoundary label="feed-shelf-card" fallback={<FallbackNoteCard note={n} />}>
+            <BoardCard note={n} ratio={4 / 5} hideCategory />
+          </ErrorBoundary>
+        </div>
+      ))}
+    </div>
   );
 }
 

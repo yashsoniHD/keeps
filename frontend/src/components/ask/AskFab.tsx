@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
-import { FOCUS_RING, PRESS } from "@/lib/ui";
 import { AskChat } from "./AskChat";
 
 // Routes where the Ask-AI FAB has no place: signed-out / public viewer surfaces, plus the
@@ -13,17 +11,16 @@ const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/settings"];
 // Past this much downward drag, releasing dismisses the mobile sheet (otherwise it snaps back).
 const DISMISS_THRESHOLD = 110;
 
-// Global Ask-AI chat overlay + its desktop launcher. Mounted once in __root.tsx (inside the
-// provider tree) so both persist across navigation. On desktop a fixed bottom-right pill opens
-// the chat (`openChat`); on mobile the launcher is the BottomNav "Ask" tab instead (this pill is
-// `md:` only). The chat is also opened from the feed search hand-off and the per-note affordance.
+// Global Ask-AI chat overlay. Mounted once in __root.tsx (inside the provider tree) so it
+// persists across navigation. There is no standalone launcher anymore — the chat opens from
+// the search page's "Ask Clip AI about …" hand-off and the per-note Ask affordance.
 // Two presentations:
 //   • Desktop (sm+): a full-height right rail.
 //   • Mobile: a full-screen sheet you can flick down to dismiss (Notion-AI style).
 // Closing happens via swipe-down or the header's close button.
 export function AskFab() {
   const { user } = useAuth();
-  const { isOpen, openChat, closeChat, seed, clearSeed, focalNoteId, focalNoteTitle } = useAsk();
+  const { isOpen, closeChat, seed, clearSeed, focalNoteId, focalNoteTitle } = useAsk();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Swipe-to-dismiss (mobile only). The live gesture values live in refs so the native listeners
@@ -185,19 +182,6 @@ export function AskFab() {
 
   return (
     <>
-      {/* Desktop launcher: a fixed ink pill (mobile uses the BottomNav "Ask" tab, so this is
-          md-only). Hidden while the overlay is open — the rail/sheet is the affordance then. */}
-      {!isOpen && (
-        <button
-          type="button"
-          onClick={() => openChat()}
-          aria-label="Ask Clip AI"
-          className={`fixed bottom-6 right-6 z-40 hidden items-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-paper shadow-lg md:inline-flex ${PRESS} ${FOCUS_RING}`}
-        >
-          <Sparkles className="h-4 w-4" aria-hidden />
-          Ask
-        </button>
-      )}
       {isOpen && (
         <>
           {/* Backdrop: dims what's behind. On mobile it's revealed as the sheet is dragged down
