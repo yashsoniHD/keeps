@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { RotateCcw, ArrowRight, BookmarkPlus, Loader2, Sparkles } from "lucide-react";
+import { RotateCcw, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { ingest } from "@/lib/api";
-import { useAsk } from "@/contexts/ask-context";
 import { PillButton, PillLink } from "@/components/shared/PillButton";
 import { ClipMark } from "@/components/ClipMark";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -283,25 +282,6 @@ function CoverFallback({ note, className = "" }: { note: Note; className?: strin
   );
 }
 
-// "Ask about this note" — the per-note launcher for Clip AI. The note-detail route registers
-// this note as the Ask focal scope (setFocalNote), so opening the chat here lands scoped to it
-// ("this note first, then all") and the chat shows its focal-context UI. Owner view only.
-function AskAboutNote() {
-  const { openChat } = useAsk();
-  return (
-    <PillButton
-      type="button"
-      variant="secondary"
-      onClick={() => openChat()}
-      aria-label="Ask Clip AI about this note"
-      className="mb-8"
-    >
-      <Sparkles className="h-4 w-4 text-summary" aria-hidden />
-      Ask about this note
-    </PillButton>
-  );
-}
-
 export function NoteContent({
   note,
   onDelete,
@@ -338,9 +318,6 @@ export function NoteContent({
       {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
       {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
       {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
-      {/* Per-note Clip AI launcher, right under the header — owner view only (public viewers
-          can't chat over the corpus). */}
-      {!isPublic && <AskAboutNote />}
       {showHero &&
         (coverKind === "compact" && url ? (
           // Portrait/small cover (reel thumbnail, creator face): a centered, contained card
