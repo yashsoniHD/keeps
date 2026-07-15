@@ -69,7 +69,10 @@ async def _fix_notes(db, dry_run: bool, user_id: str | None, delay: float,
     scanned = stale = fixed = failed = 0
     v2_embeddings: dict[str, Vector] = {}
 
-    async for doc in query.stream():
+    # Materialize the stream before the paced loop: the per-embed sleeps add up to minutes,
+    # and a Firestore stream held open that long dies with DeadlineExceeded mid-run.
+    docs = [doc async for doc in query.stream()]
+    for doc in docs:
         scanned += 1
         note = doc.to_dict() or {}
         if (note.get("embedding_version") or 0) >= EMBED_TEXT_VERSION:
@@ -114,7 +117,8 @@ async def _fix_search_index(db, dry_run: bool, user_id: str | None, per_user: di
 
     scanned = stale = fixed = failed = 0
 
-    async for doc in query.stream():
+    docs = [doc async for doc in query.stream()]
+    for doc in docs:
         scanned += 1
         entry = doc.to_dict() or {}
         if (entry.get("embedding_version") or 0) >= EMBED_TEXT_VERSION:
