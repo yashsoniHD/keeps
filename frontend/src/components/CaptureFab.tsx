@@ -8,10 +8,8 @@ import { FOCUS_RING, PRESS } from "@/lib/ui";
 // The app's single primary-action FAB: capture a new note. Replaces the old bottom tab bar
 // (Home · Collections · + · Ask · Settings) — capture was the only action there that earns a
 // persistent control; Ask now rides with search and Settings lives in the feed header.
-// Hidden on the chromeless surfaces (sign-in + public viewer), when signed out, on the
-// search screen (that surface's focus belongs to the query, not a floating +), and on the
-// digest stories (a full-screen overlay the FAB would float above).
-const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/search", "/digest"];
+// Home-only: every other surface (note detail, settings, search, digest, library) is a
+// focused context where a floating + is noise.
 
 // Only react once a scroll gesture accumulates past this many px, so momentum wobble and
 // sub-pixel jitter don't flip the button back and forth mid-scroll.
@@ -62,7 +60,7 @@ export function CaptureFab() {
   const { openCapture } = useCapture();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  const hidden = !user || HIDDEN_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+  const hidden = !user || pathname !== "/";
   const visible = useScrollDirectionVisible(!hidden);
   if (hidden) return null;
 
@@ -72,8 +70,10 @@ export function CaptureFab() {
       onClick={openCapture}
       aria-label="New note"
       title="New note"
-      className={`fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-[transform,opacity] duration-300 ease-out ${PRESS} ${FOCUS_RING} ${
-        visible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-24 opacity-0"
+      className={`fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-xl transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${PRESS} ${FOCUS_RING} ${
+        visible
+          ? "translate-y-0 scale-100 opacity-100"
+          : "pointer-events-none translate-y-20 scale-75 opacity-0"
       }`}
     >
       <Plus className="h-6 w-6" aria-hidden />

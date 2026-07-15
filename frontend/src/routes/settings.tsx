@@ -132,14 +132,15 @@ function Settings() {
           </div>
         </section>
 
-        {/* Preferences first (appearance + view), then organisation, then device setup. */}
+        {/* The digest is the marquee feature, so it sits right under the profile;
+            then preferences, organisation, and device setup. */}
+        <YourDigestSection />
+
         <AppearanceSection />
 
         <CategoriesSection />
 
         <ConnectPhone />
-
-        <YourDigestSection />
 
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
