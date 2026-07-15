@@ -134,23 +134,6 @@ function NoteDetail() {
     return () => window.removeEventListener("keydown", onKey);
   }, [go, prev, next]);
 
-  // Horizontal touch swipe (mobile). Require clear horizontal intent so it doesn't fight
-  // vertical scrolling or a horizontal scroller inside the note (map, table).
-  const touchRef = useRef<{ x: number; y: number } | null>(null);
-  const onTouchStart = (e: React.TouchEvent) => {
-    const t = e.touches[0];
-    touchRef.current = { x: t.clientX, y: t.clientY };
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    const start = touchRef.current;
-    touchRef.current = null;
-    if (!start) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - start.x;
-    const dy = t.clientY - start.y;
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? next : prev);
-  };
-
   if (loadError) {
     return (
       <ErrorState
@@ -173,7 +156,7 @@ function NoteDetail() {
 
   return (
     <AppShell>
-      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div>
         <NoteContent
           note={note}
           onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
@@ -189,39 +172,32 @@ function NoteDetail() {
       </div>
 
       {/* In-flow footer nav to the neighbouring notes in the feed order the user came from.
-          The feed only stashes ids (not titles), so the cards use plain labels. Mobile still
-          pages by swiping. */}
+          The only note-to-note navigation on mobile (swipe paging was removed on purpose). */}
       {(prev || next) && (
-        <nav className="mx-auto grid max-w-4xl grid-cols-2 gap-3 px-5 pb-10 md:px-8">
+        <nav className="mx-auto flex max-w-4xl items-center justify-between border-t border-border px-5 py-3 md:px-8">
           {prev ? (
             <button
               type="button"
               onClick={() => go(prev)}
-              className={`flex flex-col gap-1 rounded-2xl border border-border bg-card p-4 text-left transition-shadow hover:shadow-md ${FOCUS_RING}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
             >
-              <span className="inline-flex items-center gap-1 text-xs uppercase tracking-wider text-ink-soft">
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Previous
-              </span>
-              <span className="line-clamp-2 font-serif text-lg text-ink">Previous note</span>
+              <ChevronLeft className="h-4 w-4" />
+              Previous
             </button>
           ) : (
-            <div />
+            <span />
           )}
           {next ? (
             <button
               type="button"
               onClick={() => go(next)}
-              className={`flex flex-col items-end gap-1 rounded-2xl border border-border bg-card p-4 text-right transition-shadow hover:shadow-md ${FOCUS_RING}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
             >
-              <span className="inline-flex items-center gap-1 text-xs uppercase tracking-wider text-ink-soft">
-                Next
-                <ChevronRight className="h-3.5 w-3.5" />
-              </span>
-              <span className="line-clamp-2 font-serif text-lg text-ink">Next note</span>
+              Next
+              <ChevronRight className="h-4 w-4" />
             </button>
           ) : (
-            <div />
+            <span />
           )}
         </nav>
       )}

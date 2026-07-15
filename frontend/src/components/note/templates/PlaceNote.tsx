@@ -130,92 +130,104 @@ function VenueBlock({
       </span>
     ) : null;
 
+  const metaLine = hasMeta ? (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-soft">
+      {!showName && rating}
+      {(v.location || v.formatted_address) && (
+        <span className="inline-flex items-center gap-1.5">
+          <MapPin className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+          <span className="text-ink">{v.location || v.formatted_address}</span>
+        </span>
+      )}
+      {(v.category || v.cuisine) && (
+        <span>{[v.category, v.cuisine].filter(Boolean).join(" · ")}</span>
+      )}
+      {price && (
+        <span className="inline-flex items-center gap-1.5">
+          <Wallet className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+          {price}
+        </span>
+      )}
+      {/* Source-said hours; skipped when live Google hours render below. */}
+      {v.timings && !liveHours && (
+        <span className="inline-flex items-center gap-1.5">
+          <Clock className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+          {v.timings}
+        </span>
+      )}
+    </div>
+  ) : null;
+
+  // Region-aware actions built by backend enrichment (Directions / Reserve / Order / …).
+  const actionsRow = <ActionRow actions={v.action_links} />;
+
+  // Live hours as a compact one-line disclosure: today's hours in the summary, the
+  // full week on expand. Never a full-width bar.
+  const hoursBlock = liveHours ? (
+    <details className="group text-sm">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-ink-soft transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
+        <Clock className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
+        <span>{today ? `Today · ${today}` : "Opening hours"}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <ul className="mt-2 space-y-1 pl-5 text-ink-soft">
+        {v.opening_hours!.map((h, i) => (
+          <li key={i}>{h}</li>
+        ))}
+      </ul>
+    </details>
+  ) : null;
+
   return (
     <div className="space-y-5">
-      {showName && v.name && (
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
-            {number}
-            <h2 className="min-w-0 font-serif text-2xl text-ink">{v.name}</h2>
-            {rating}
+      {showName ? (
+        // Header, meta, actions and hours share the column BESIDE the thumbnail, so a long
+        // address wraps around the image instead of leaving a blank band under the name.
+        <div className="flex items-start gap-5">
+          <div className="min-w-0 flex-1 space-y-4">
+            {v.name && (
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                {number}
+                <h2 className="min-w-0 font-serif text-2xl text-ink">{v.name}</h2>
+                {rating}
+              </div>
+            )}
+            {metaLine}
+            {/* Full-width photo on mobile (the sm+ thumbnail sits beside this column). */}
+            {v.photo_url && (
+              <img
+                src={v.photo_url}
+                alt={v.name ?? ""}
+                loading="lazy"
+                className="aspect-[16/9] w-full rounded-xl border border-border object-cover sm:hidden"
+              />
+            )}
+            {actionsRow}
+            {hoursBlock}
           </div>
-          {/* Fixed thumbnail beside the header on sm+; a full-width crop shows on mobile below. */}
           {v.photo_url && (
             <img
               src={v.photo_url}
-              alt={v.name}
+              alt={v.name ?? ""}
               loading="lazy"
               className="hidden h-24 w-32 shrink-0 rounded-xl border border-border object-cover sm:block md:h-28 md:w-40"
             />
           )}
         </div>
-      )}
-
-      {hasMeta && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-soft">
-          {!showName && rating}
-          {(v.location || v.formatted_address) && (
-            <span className="inline-flex items-center gap-1.5">
-              <MapPin className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
-              <span className="text-ink">{v.location || v.formatted_address}</span>
-            </span>
+      ) : (
+        <>
+          {metaLine}
+          {/* Single-venue: a generous photo laid out by its own aspect (blur-fill for portraits). */}
+          {v.photo_url && (
+            <SmartImage
+              src={v.photo_url}
+              alt={v.name ?? ""}
+              frameClass="aspect-[4/3] rounded-2xl border border-border sm:aspect-[3/2]"
+            />
           )}
-          {(v.category || v.cuisine) && (
-            <span>{[v.category, v.cuisine].filter(Boolean).join(" · ")}</span>
-          )}
-          {price && (
-            <span className="inline-flex items-center gap-1.5">
-              <Wallet className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
-              {price}
-            </span>
-          )}
-          {/* Source-said hours; skipped when live Google hours render below. */}
-          {v.timings && !liveHours && (
-            <span className="inline-flex items-center gap-1.5">
-              <Clock className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
-              {v.timings}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Multi-venue: full-width photo on mobile (the sm+ thumbnail sits beside the header). */}
-      {showName && v.photo_url && (
-        <img
-          src={v.photo_url}
-          alt={v.name ?? ""}
-          loading="lazy"
-          className="aspect-[16/9] w-full rounded-xl border border-border object-cover sm:hidden"
-        />
-      )}
-
-      {/* Single-venue: a generous photo laid out by its own aspect (blur-fill for portraits). */}
-      {!showName && v.photo_url && (
-        <SmartImage
-          src={v.photo_url}
-          alt={v.name ?? ""}
-          frameClass="aspect-[4/3] rounded-2xl border border-border sm:aspect-[3/2]"
-        />
-      )}
-
-      {/* Region-aware actions built by backend enrichment (Directions / Reserve / Order / …). */}
-      <ActionRow actions={v.action_links} />
-
-      {/* Live hours as a compact one-line disclosure: today's hours in the summary, the
-          full week on expand. Never a full-width bar. */}
-      {liveHours && (
-        <details className="group text-sm">
-          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-ink-soft transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
-            <Clock className={`h-3.5 w-3.5 shrink-0 ${accent.text}`} />
-            <span>{today ? `Today · ${today}` : "Opening hours"}</span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" />
-          </summary>
-          <ul className="mt-2 space-y-1 pl-5 text-ink-soft">
-            {v.opening_hours!.map((h, i) => (
-              <li key={i}>{h}</li>
-            ))}
-          </ul>
-        </details>
+          {actionsRow}
+          {hoursBlock}
+        </>
       )}
 
       <FactsBlock facts={v.facts} accent={accent} />

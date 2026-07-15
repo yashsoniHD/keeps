@@ -37,9 +37,9 @@ export function SummaryNote({ note }: { note: Note }) {
         {data.tldr && (
           <div className={`rounded-3xl p-6 md:p-8 ${accent.soft}`}>
             <div className={`text-xs uppercase tracking-wider ${accent.text}`}>TL;DR</div>
-            <p className="mt-2 font-serif text-2xl leading-snug text-ink md:text-3xl">
-              {data.tldr}
-            </p>
+            {/* Sans, reading size: the TL;DR is a full paragraph, not a display heading —
+                large serif turns multi-sentence text into a wall of italic-ish strokes. */}
+            <p className="mt-2 text-base leading-relaxed text-ink md:text-lg">{data.tldr}</p>
           </div>
         )}
       </div>
