@@ -442,6 +442,39 @@ async def reserve_collection_digest(user_id: str, collection_id: str) -> bool:
     return await _claim(db.transaction())
 
 
+async def reserve_personal_digest(user_id: str) -> bool:
+    """Transactionally claim one personal-digest (week-in-review) build for today — same shape as
+    reserve_collection_digest, minus the per-collection tier: a build is a paid Gemini call over
+    up to DIGEST_MAX_NOTES notes at once, so it's capped per user AND against a global daily
+    kill-switch (MAX_MY_DIGEST_BUILDS_PER_USER_PER_DAY / DAILY_GLOBAL_MY_DIGEST_CAP). Returns
+    False when either budget is used up — the router falls back to the existing cached digest
+    (marked stale) rather than a 429, since a digest miss must never break the home view."""
+    from google.cloud import firestore as fs
+
+    db = get_db()
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    @fs.async_transactional
+    async def _claim(tx) -> bool:
+        user_ref = db.collection("usage").document(f"{user_id}-{today}")
+        global_ref = db.collection("system").document(f"usage-{today}")
+        user_snap = await user_ref.get(transaction=tx)
+        global_snap = await global_ref.get(transaction=tx)
+        user_n = (user_snap.to_dict() or {}).get("my_digest_count", 0)
+        global_n = (global_snap.to_dict() or {}).get("my_digest_count", 0)
+        if user_n >= settings.MAX_MY_DIGEST_BUILDS_PER_USER_PER_DAY:
+            return False
+        if global_n >= settings.DAILY_GLOBAL_MY_DIGEST_CAP:
+            return False
+        tx.set(user_ref, {
+            "user_id": user_id, "date": today, "my_digest_count": user_n + 1,
+        }, merge=True)
+        tx.set(global_ref, {"date": today, "my_digest_count": global_n + 1}, merge=True)
+        return True
+
+    return await _claim(db.transaction())
+
+
 async def reserve_apify_slot() -> bool:
     """Transactionally claim one paid-scrape (Apify) slot for today against the global
     daily cap. Returns True if claimed (caller may call Apify), False if the cap is hit

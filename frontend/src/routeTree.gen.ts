@@ -19,6 +19,7 @@ import { Route as RecipesRouteImport } from './routes/recipes'
 import { Route as PlacesRouteImport } from './routes/places'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LibraryRouteImport } from './routes/library'
+import { Route as DigestRouteImport } from './routes/digest'
 import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -81,6 +82,11 @@ const LoginRoute = LoginRouteImport.update({
 const LibraryRoute = LibraryRouteImport.update({
   id: '/library',
   path: '/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DigestRoute = DigestRouteImport.update({
+  id: '/digest',
+  path: '/digest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CollectionsRoute = CollectionsRouteImport.update({
@@ -154,6 +160,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
   '/collections': typeof CollectionsRoute
+  '/digest': typeof DigestRoute
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/places': typeof PlacesRouteWithChildren
@@ -179,6 +186,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
   '/collections': typeof CollectionsRoute
+  '/digest': typeof DigestRoute
   '/login': typeof LoginRoute
   '/recipes': typeof RecipesRoute
   '/search': typeof SearchRoute
@@ -202,6 +210,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/ask': typeof AskRoute
   '/collections': typeof CollectionsRoute
+  '/digest': typeof DigestRoute
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/places': typeof PlacesRouteWithChildren
@@ -229,6 +238,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/ask'
     | '/collections'
+    | '/digest'
     | '/library'
     | '/login'
     | '/places'
@@ -254,6 +264,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/ask'
     | '/collections'
+    | '/digest'
     | '/login'
     | '/recipes'
     | '/search'
@@ -276,6 +287,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/ask'
     | '/collections'
+    | '/digest'
     | '/library'
     | '/login'
     | '/places'
@@ -302,6 +314,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AskRoute: typeof AskRoute
   CollectionsRoute: typeof CollectionsRoute
+  DigestRoute: typeof DigestRoute
   LibraryRoute: typeof LibraryRouteWithChildren
   LoginRoute: typeof LoginRoute
   PlacesRoute: typeof PlacesRouteWithChildren
@@ -387,6 +400,13 @@ declare module '@tanstack/react-router' {
       path: '/library'
       fullPath: '/library'
       preLoaderRoute: typeof LibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/digest': {
+      id: '/digest'
+      path: '/digest'
+      fullPath: '/digest'
+      preLoaderRoute: typeof DigestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/collections': {
@@ -528,6 +548,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AskRoute: AskRoute,
   CollectionsRoute: CollectionsRoute,
+  DigestRoute: DigestRoute,
   LibraryRoute: LibraryRouteWithChildren,
   LoginRoute: LoginRoute,
   PlacesRoute: PlacesRouteWithChildren,

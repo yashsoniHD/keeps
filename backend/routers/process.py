@@ -34,7 +34,7 @@ from services.agent_tools import AgentContext, run_agent_collect
 from services.cloud_tasks import enqueue_process_job
 from services.collections import match_collections_by_embedding
 from services.covers import persist_cover
-from services.embeddings import embedding_service
+from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
 from services.firebase import (
     add_user_category,
     add_user_source,
@@ -59,10 +59,12 @@ router = APIRouter(tags=["process"])
 log = logging.getLogger("clipnote.process")
 
 
-async def _note_embedding(title: str, ai_summary: str = "") -> Vector | None:
-    """Embed a note's text for semantic search. Non-fatal: on any failure the note is
-    still written (search just misses it until a backfill re-embeds it)."""
-    text = "\n".join(p for p in (title, ai_summary) if p).strip()
+async def _note_embedding(title: str, ai_summary: str = "",
+                          data: dict | None = None) -> Vector | None:
+    """Embed a note's text (title + summary + flattened data) for semantic search. Non-fatal:
+    on any failure the note is still written (search just misses it until a backfill re-embeds
+    it)."""
+    text = note_embedding_text(title, ai_summary, data)
     if not text:
         return None
     try:
@@ -233,6 +235,7 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: 
     }
     if embedding is not None:
         note_doc["embedding"] = embedding
+        note_doc["embedding_version"] = EMBED_TEXT_VERSION
     await db.collection("notes").document(note_id).set(note_doc)
     return note_id
 
@@ -437,7 +440,9 @@ async def _process_job(job_id: str) -> dict:
 
         # Every capture is a note.
         note_id = _stable_id("note", job_id)
-        embedding = await _note_embedding(extracted.title, extracted.ai_summary)
+        # Embed title + summary + the (now enriched) data so search matches the note's content,
+        # not just its headline.
+        embedding = await _note_embedding(extracted.title, extracted.ai_summary, extracted.data)
         # Smart-bucket membership: pure in-memory cosine match against the user's collections'
         # topic_embedding (no new AI calls). A note can now belong to more than one collection;
         # the legacy scalar `collection_id` is kept coherent (first match, or null) for the
@@ -470,6 +475,7 @@ async def _process_job(job_id: str) -> dict:
         }
         if embedding is not None:
             note_doc["embedding"] = embedding
+            note_doc["embedding_version"] = EMBED_TEXT_VERSION
         await db.collection("notes").document(note_id).set(note_doc)
         # Keep the note searchable + Clip-AI-answerable (reuse its embedding, no second embed call).
         await search_index.upsert_for_note(db, note_id, note_doc, embedding)
@@ -623,7 +629,7 @@ async def process_agent_job(job_id: str, request: Request):
 
         slug = match_existing(normalize_slug(content_type), await get_user_categories(user_id))
         new_id = _stable_id("agent-note", job_id)
-        embedding = await _note_embedding(title, ai_summary)
+        embedding = await _note_embedding(title, ai_summary, data)
         collection_ids = await _match_collections(user_id, new_id, embedding)
         collection_id = collection_ids[0] if collection_ids else None
         note_doc = {
@@ -647,6 +653,7 @@ async def process_agent_job(job_id: str, request: Request):
         }
         if embedding is not None:
             note_doc["embedding"] = embedding
+            note_doc["embedding_version"] = EMBED_TEXT_VERSION
         await db.collection("notes").document(new_id).set(note_doc)
         await search_index.upsert_for_note(db, new_id, note_doc, embedding)
         await add_user_category(user_id, slug)

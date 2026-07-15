@@ -69,5 +69,5 @@ async def test_search_notes_by_source_matches_short_link():
         {"id": "pin1", "source_domain": "pin.it", "title": "Mango sago", "content_type": "recipe"},
         {"id": "ig1", "source_domain": "instagram.com", "title": "Reel", "content_type": "summary"},
     ])
-    hits = await search_mod._notes_by_source(db, "u", "pinterest")
-    assert [h["id"] for h in hits] == ["pin1"]
+    source_hits, _ = await search_mod._keyword_hits(db, "u", "pinterest", match_source=True)
+    assert [h["id"] for h in source_hits] == ["pin1"]

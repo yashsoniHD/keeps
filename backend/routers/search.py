@@ -60,22 +60,30 @@ def _project_index(d: dict) -> dict:
     }
 
 
-async def _notes_by_source(db, user_id: str, keyword: str) -> list[dict]:
-    """Notes saved from a named brand ("pinterest" → pin.it links). Scans the newest notes
-    (existing user_id+created_at index) and filters in Python — Firestore can't substring-
-    match. Brand-aware via source_alias, so short-link domains count."""
+async def _keyword_hits(db, user_id: str, q: str, *,
+                        match_source: bool) -> tuple[list[dict], list[dict]]:
+    """One pass over the user's newest notes collecting cheap exact-intent matches Firestore
+    can't do server-side (no substring index):
+      - source hits: notes saved from a named brand ("pinterest" → pin.it links), brand-aware
+        via source_alias so short-link domains count. Only when `match_source` (the query looks
+        like a brand name — see the caller's gating).
+      - title hits: notes whose title contains the query as a substring.
+    Returns (source_hits, title_hits), each capped at SEARCH_LIMIT, in one Firestore read."""
     query = (
         db.collection("notes").where("user_id", "==", user_id)
         .order_by("created_at", direction="DESCENDING").limit(300)
     )
-    out = []
+    ql = q.lower()
+    source_hits: list[dict] = []
+    title_hits: list[dict] = []
     async for doc in query.stream():
         d = doc.to_dict() or {}
-        if source_matches(d.get("source_domain", ""), keyword):
-            out.append(_project(doc.id, d))
-            if len(out) >= settings.SEARCH_LIMIT:
-                break
-    return out
+        if match_source and len(source_hits) < settings.SEARCH_LIMIT and \
+                source_matches(d.get("source_domain", ""), q):
+            source_hits.append(_project(doc.id, d))
+        if len(title_hits) < settings.SEARCH_LIMIT and ql in d.get("title", "").lower():
+            title_hits.append(_project(doc.id, d))
+    return source_hits, title_hits
 
 
 async def _enforce_search_caps(db, user_id: str) -> None:
@@ -111,15 +119,20 @@ async def search(
     # Meter the query embedding so search spend shows up in the admin dashboard.
     meter = start_metering()
     try:
-        # A one-word query is often a source name ("pinterest", "youtube"). Vector search alone
-        # misses these — a recipe note isn't semantically "pinterest" — so look up notes by brand
-        # and surface them first, ahead of the semantic results.
+        # Cheap exact-intent matches vector search alone misses: a one-word query is often a
+        # source name ("pinterest" — a recipe note isn't semantically "pinterest"), and a short
+        # query is often a literal title fragment. One Firestore pass collects both, surfaced
+        # ahead of the semantic results.
         source_hits: list[dict] = []
-        if " " not in q and len(q) <= 20:
+        title_hits: list[dict] = []
+        if len(q) <= 40:
             try:
-                source_hits = await _notes_by_source(db, user_id, q)
+                match_source = " " not in q and len(q) <= 20
+                source_hits, title_hits = await _keyword_hits(
+                    db, user_id, q, match_source=match_source)
             except Exception as e:
-                log.warning("source lookup failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
+                log.warning("keyword lookup failed: %s: %s", type(e).__name__, e,
+                            extra={"user_id": user_id})
 
         vector_hits: list[dict] = []
         try:
@@ -133,13 +146,16 @@ async def search(
                 vector_field="embedding",
                 query_vector=Vector(query_vec),
                 distance_measure=DistanceMeasure.COSINE,
-                limit=settings.SEARCH_LIMIT,
+                # Over-fetch: keyword hits above may dedup away several KNN results, so pull a few
+                # extra to still fill SEARCH_LIMIT after the merge.
+                limit=settings.SEARCH_LIMIT + 10,
             )
             vector_hits = [_project_index(doc.to_dict() or {}) async for doc in vector_query.stream()]
 
-        # Source matches first (exact intent), then semantic, deduped by underlying doc id and capped.
+        # Source matches first (exact intent), then title substrings, then semantic — deduped by
+        # underlying doc id and capped.
         seen, results = set(), []
-        for d in (*source_hits, *vector_hits):
+        for d in (*source_hits, *title_hits, *vector_hits):
             if d["id"] in seen:
                 continue
             seen.add(d["id"])

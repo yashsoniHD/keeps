@@ -61,3 +61,55 @@ async def test_search_returns_index_hits_with_content_type(fake_db, monkeypatch)
     assert [r["ref_id"] for r in result["results"]] == ["n1"]
     # Note hits carry their real content_type (drives the result-row icon/accent).
     assert result["results"][0]["content_type"] == "recipe"
+
+
+async def test_ranking_source_then_title_then_vector(fake_db, monkeypatch):
+    from services import search_index
+
+    async def fake_flush(uid, meter):
+        return None
+    monkeypatch.setattr(search_mod, "flush_usage", fake_flush)
+
+    # Source hit: saved from pinterest, title unrelated to the query.
+    fake_db.seed("notes", "s1", {"user_id": "u", "source_domain": "pin.it", "title": "Mango sago"})
+    # Title-substring hit: title literally contains the query.
+    fake_db.seed("notes", "t1", {"user_id": "u", "source_domain": "example.com",
+                                 "title": "My pinterest board"})
+    # Vector hit: only lives in the index.
+    fake_db.seed(search_index.COLLECTION, "note-v1",
+                 {"user_id": "u", "kind": "note", "ref_id": "v1", "title": "Semantic match",
+                  "summary": "", "embedding": [0.0] * 8})
+
+    result = await search_mod.search(q="pinterest", user_id="u")
+    assert [r["id"] for r in result["results"]] == ["s1", "t1", "v1"]
+
+
+async def test_dedup_keeps_first_occurrence(fake_db, monkeypatch):
+    from services import search_index
+
+    async def fake_flush(uid, meter):
+        return None
+    monkeypatch.setattr(search_mod, "flush_usage", fake_flush)
+
+    # Same note is both a title-substring hit and a vector hit — it must appear once.
+    fake_db.seed("notes", "d1", {"user_id": "u", "source_domain": "example.com",
+                                 "title": "pinterest ideas"})
+    fake_db.seed(search_index.COLLECTION, "note-d1",
+                 {"user_id": "u", "kind": "note", "ref_id": "d1", "title": "pinterest ideas",
+                  "summary": "", "embedding": [0.0] * 8})
+
+    result = await search_mod.search(q="pinterest", user_id="u")
+    assert [r["id"] for r in result["results"]] == ["d1"]
+
+
+async def test_result_cap_is_enforced(fake_db, monkeypatch):
+    async def fake_flush(uid, meter):
+        return None
+    monkeypatch.setattr(search_mod, "flush_usage", fake_flush)
+
+    for i in range(settings.SEARCH_LIMIT + 5):
+        fake_db.seed("notes", f"n{i}", {"user_id": "u", "source_domain": "example.com",
+                                        "title": f"pinterest board {i}"})
+
+    result = await search_mod.search(q="pinterest", user_id="u")
+    assert len(result["results"]) == settings.SEARCH_LIMIT

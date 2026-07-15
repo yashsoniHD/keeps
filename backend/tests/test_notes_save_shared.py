@@ -12,7 +12,7 @@ def patch_notes(fake_db, monkeypatch):
     async def no_caps(db, user_id):
         return None
 
-    async def no_embed(title, ai_summary):
+    async def no_embed(title, ai_summary, data=None):
         return None
 
     async def cats(user_id):

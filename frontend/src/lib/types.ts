@@ -106,6 +106,51 @@ export interface CollectionDigest {
   model?: string;
 }
 
+// The Wrapped-style personal digest narrative built by `POST /api/digest/me`. Reuses the same
+// DigestFact/DigestSection shapes as a collection digest, but `generated_at` is an ISO string
+// (not a Firestore Timestamp — this is a plain API response, never streamed from Firestore).
+// `fallback: true` means the week was sparse and the set is "your latest saves", not "this week".
+export interface PersonalDigest {
+  intro: string;
+  facts: DigestFact[];
+  sections: DigestSection[];
+  generated_at: string;
+  fallback: boolean;
+}
+
+// The at-a-glance numbers behind the story slides. `fallback: true` mirrors the digest's — the
+// window is "latest N saves" rather than a real 7-day week, so copy must not claim "this week".
+export interface PersonalDigestStats {
+  total: number;
+  window_days: number;
+  window_start: string; // "YYYY-MM-DD"
+  window_end: string; // "YYYY-MM-DD"
+  fallback: boolean;
+  categories: { slug: string; count: number }[];
+  top_domains: { domain: string; count: number }[];
+  busiest_day: { label: string; count: number } | null;
+  active_days: number;
+}
+
+// A lightweight note pointer used by the finale slide + section item deep-links.
+export interface NoteRef {
+  id: string;
+  title: string;
+  content_type: string;
+  source_domain: string;
+}
+
+// The full `POST /api/digest/me` response. `digest:null, stats:null` = zero notes (empty state);
+// `digest:null, stale:true` = the narrative couldn't be built and there was no cache to fall back
+// on (render stat slides + a graceful "couldn't write your story" slide); `stale:true` with a
+// digest = the cached narrative is outdated (render everything + a small "from earlier" pill).
+export interface MyDigestResponse {
+  digest: PersonalDigest | null;
+  stats: PersonalDigestStats | null;
+  note_refs: NoteRef[];
+  stale: boolean;
+}
+
 // A user-created smart bucket. Owner-writable directly from the client for its presentation
 // (name/icon/palette/description); membership is no longer stored here — notes carry
 // `collection_ids` (multi-home, backend-written: embedding match + rescore + pin/exclude

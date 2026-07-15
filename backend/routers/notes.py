@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -10,7 +11,7 @@ from config import settings
 from routers.ingest import _enforce_cost_caps
 from services import search_index
 from services.auth_dep import require_user
-from services.embeddings import embedding_service
+from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
 from services.firebase import (
     add_user_category,
     firestore_safe,
@@ -22,6 +23,7 @@ from services.gemini import match_existing, normalize_slug
 from services.item_reconcile import reconcile_note_items
 
 router = APIRouter(tags=["notes"])
+log = logging.getLogger("clipnote.notes")
 
 
 class NoteUpdate(BaseModel):
@@ -74,9 +76,11 @@ class ConsolidatedNoteIn(BaseModel):
     origin: str = "consolidated"   # "consolidated" | "created" → note provenance
 
 
-async def _note_embedding(title: str, ai_summary: str) -> Vector | None:
-    """Embed a note for semantic search; non-fatal (the note is written either way)."""
-    text = "\n".join(p for p in (title, ai_summary) if p).strip()
+async def _note_embedding(title: str, ai_summary: str,
+                          data: dict | None = None) -> Vector | None:
+    """Embed a note (title + summary + flattened data) for semantic search; non-fatal (the note
+    is written either way)."""
+    text = note_embedding_text(title, ai_summary, data)
     if not text:
         return None
     try:
@@ -158,13 +162,14 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc)
         await ref.update(updates)
-        # The search vector is built from title + ai_summary, so a rename/summary edit must
-        # refresh it or semantic search drifts. Best-effort — the note is already saved.
-        if "title" in updates or "ai_summary" in updates:
+        # The search vector is built from title + summary + flattened data, so a rename/summary
+        # OR body edit must refresh it or semantic search drifts. Best-effort — note already saved.
+        if {"title", "ai_summary", "data"} & set(updates):
             cur = (await ref.get()).to_dict() or {}
-            vec = await _note_embedding(cur.get("title", ""), cur.get("ai_summary", ""))
+            vec = await _note_embedding(cur.get("title", ""), cur.get("ai_summary", ""),
+                                        cur.get("data"))
             if vec is not None:
-                await ref.update({"embedding": vec})
+                await ref.update({"embedding": vec, "embedding_version": EMBED_TEXT_VERSION})
 
     if body.content_type is not None:
         # Normalise + collapse to an existing category so the list doesn't fragment
@@ -190,8 +195,8 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
             merge=True,
         )
 
-    # Re-sync the search index if anything it mirrors (title/summary/category) changed.
-    if ({"title", "ai_summary"} & body.model_fields_set) or body.content_type is not None:
+    # Re-sync the search index if anything it mirrors (title/summary/data/category) changed.
+    if ({"title", "ai_summary", "data"} & body.model_fields_set) or body.content_type is not None:
         cur = (await ref.get()).to_dict() or {}
         await search_index.upsert_for_note(db, note_id, cur, cur.get("embedding"))
 
@@ -226,9 +231,10 @@ async def create_consolidated_note(body: ConsolidatedNoteIn, user_id: str = Depe
         "created_at": now,
         "updated_at": now,
     }
-    embedding = await _note_embedding(body.title, body.ai_summary)
+    embedding = await _note_embedding(body.title, body.ai_summary, body.data)
     if embedding is not None:
         note_doc["embedding"] = embedding
+        note_doc["embedding_version"] = EMBED_TEXT_VERSION
     await db.collection("notes").document(note_id).set(note_doc)
     await search_index.upsert_for_note(db, note_id, note_doc, embedding)
     await add_user_category(user_id, slug)
@@ -251,6 +257,16 @@ async def augment_note(note_id: str, body: AugmentNoteIn, user_id: str = Depends
         "source_note_ids": sources,
         "updated_at": datetime.now(timezone.utc),
     })
+    # The merged blocks are now part of the note's content, so refresh its search vector +
+    # index entry. Best-effort — the note is already saved; a miss just leaves search stale.
+    try:
+        vec = await _note_embedding(current.get("title", ""), current.get("ai_summary", ""), merged)
+        if vec is not None:
+            await ref.update({"embedding": vec, "embedding_version": EMBED_TEXT_VERSION})
+        refreshed = {**current, "data": merged, "embedding": vec}
+        await search_index.upsert_for_note(db, note_id, refreshed, vec)
+    except Exception as e:  # noqa: BLE001 — re-index is best-effort, never fail the augment.
+        log.warning("augment re-embed failed (%s): %s: %s", note_id, type(e).__name__, e)
     return {"ok": True, "id": note_id}
 
 
@@ -305,9 +321,10 @@ async def save_shared_note(note_id: str, user_id: str = Depends(require_user)):
         "created_at": now,
         "updated_at": now,
     }
-    embedding = await _note_embedding(note_doc["title"], note_doc["ai_summary"])
+    embedding = await _note_embedding(note_doc["title"], note_doc["ai_summary"], note_doc["data"])
     if embedding is not None:
         note_doc["embedding"] = embedding
+        note_doc["embedding_version"] = EMBED_TEXT_VERSION
     await db.collection("notes").document(new_id).set(note_doc)
     await search_index.upsert_for_note(db, new_id, note_doc, embedding)
     await add_user_category(user_id, slug)

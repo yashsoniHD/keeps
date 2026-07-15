@@ -1,8 +1,8 @@
 """Shared OIDC verification for internal worker endpoints.
 
-Cloud Tasks and Cloud Scheduler call our private worker endpoints (/api/process*,
-/api/digest/run) with an OIDC token signed by the service account. We verify the token's
-signature, audience (the worker URL), and SA email — never a shared secret.
+Cloud Tasks calls our private worker endpoints (/api/process*) with an OIDC token signed
+by the service account. We verify the token's signature, audience (the worker URL), and
+SA email — never a shared secret.
 """
 from fastapi import HTTPException
 from google.auth.transport import requests as google_requests

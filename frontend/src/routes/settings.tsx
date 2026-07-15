@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { PillButton, pillClasses } from "@/components/shared/PillButton";
+import { PillButton, PillLink, pillClasses } from "@/components/shared/PillButton";
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -12,18 +12,12 @@ import {
   Share2,
   Moon,
   Sun,
-  Mail,
-  LayoutGrid,
-  LayoutDashboard,
-  GalleryHorizontalEnd,
-  Rows3,
+  Sparkles,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { useLayout } from "@/lib/layout";
 import { checkAdminAccess } from "@/routes/admin";
 import { createToken, listTokensCached, revokeToken, type ShortcutToken } from "@/lib/api";
-import { getDigestOptIn, setDigestOptIn } from "@/lib/firestore";
 import { AppShell } from "@/components/AppShell";
 import { CategoriesSection } from "@/components/CategoriesSection";
 import { Switch } from "@/components/ui/switch";
@@ -145,7 +139,7 @@ function Settings() {
 
         <ConnectPhone />
 
-        <NotificationsSection />
+        <YourDigestSection />
 
         <section className="mt-4 rounded-3xl border border-border bg-card p-6">
           <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
@@ -206,7 +200,6 @@ function Settings() {
 function AppearanceSection() {
   const { resolved, setTheme } = useTheme();
   const isDark = resolved === "dark";
-  const [layout, setLayout] = useLayout();
 
   return (
     <section className="mt-4 rounded-3xl border border-border bg-card p-6">
@@ -225,96 +218,24 @@ function AppearanceSection() {
           aria-label="Toggle dark mode"
         />
       </label>
-
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
-        <span>
-          <span className="block text-sm font-medium text-ink">Feed view</span>
-          <span className="block text-xs text-ink-soft">How notes are laid out in your feed.</span>
-        </span>
-        {/* Segmented control: cards / masonry board / category shelves / condensed list.
-            Persisted via the shared layout hook. flex-wrap on the row: four segments no
-            longer fit beside the label on narrow phones, so the control drops below it. */}
-        <div className="inline-flex shrink-0 rounded-full border border-border bg-background p-0.5">
-          {(
-            [
-              { value: "standard", label: "Cards", icon: LayoutGrid },
-              { value: "board", label: "Board", icon: LayoutDashboard },
-              { value: "shelves", label: "Shelves", icon: GalleryHorizontalEnd },
-              { value: "condensed", label: "Compact", icon: Rows3 },
-            ] as const
-          ).map((opt) => {
-            const active = layout === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setLayout(opt.value)}
-                aria-pressed={active}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-                  active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
-                }`}
-              >
-                <opt.icon className="h-3.5 w-3.5" />
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </section>
   );
 }
 
-function NotificationsSection() {
-  const { user } = useAuth();
-  // Digest is opt-in (absent field = off), so default the toggle off until the read lands.
-  const [optIn, setOptIn] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    getDigestOptIn(user.uid)
-      .then((v) => {
-        if (!cancelled) {
-          setOptIn(v);
-          setLoaded(true);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  const handleToggle = (on: boolean) => {
-    if (!user) return;
-    setOptIn(on); // optimistic
-    setDigestOptIn(user.uid, on).catch(() => setOptIn(!on)); // revert on failure
-  };
-
+// A Wrapped-style, in-app story recap of recent saves — replaces the old email digest opt-in.
+function YourDigestSection() {
   return (
     <section className="mt-4 rounded-3xl border border-border bg-card p-6">
       <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        <Mail className="h-3.5 w-3.5" />
-        Email
+        <Sparkles className="h-3.5 w-3.5" />
+        Your digest
       </h2>
-      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3">
-        <span>
-          <span className="block text-sm font-medium text-ink">Weekly digest</span>
-          <span className="block text-xs text-ink-soft">
-            A short email of your best saves, once a week.
-          </span>
-        </span>
-        <Switch
-          checked={optIn}
-          onCheckedChange={handleToggle}
-          disabled={!loaded}
-          aria-label="Toggle weekly digest email"
-        />
-      </label>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <p className="text-sm text-ink-soft">A recap of what you have been saving.</p>
+        <PillLink to="/digest" className="shrink-0">
+          View your digest
+        </PillLink>
+      </div>
     </section>
   );
 }

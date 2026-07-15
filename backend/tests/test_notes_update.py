@@ -3,6 +3,7 @@ import pytest
 from fastapi import HTTPException
 
 import routers.notes as notes_mod
+from services.embeddings import EMBED_TEXT_VERSION
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +105,45 @@ async def test_missing_note_404(fake_db):
     with pytest.raises(HTTPException) as exc:
         await notes_mod.update_note("nope", notes_mod.NoteUpdate(user_note="x"), user_id="u")
     assert exc.value.status_code == 404
+
+
+async def test_data_edit_reembeds_and_reindexes(fake_db):
+    """A body/data edit (not just title/summary) must refresh the search vector + index entry,
+    stamped with the current embedding_version, so search reflects the new content."""
+    from services import search_index
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "Butter chicken",
+                                 "ai_summary": "Curry.", "data": {"ingredients": ["old"]}})
+    await notes_mod.update_note(
+        "n1", notes_mod.NoteUpdate(data={"ingredients": ["garam masala"]}), user_id="u")
+
+    note = fake_db.docs[("notes", "n1")]
+    assert note["data"] == {"ingredients": ["garam masala"]}
+    assert note["embedding"] is not None
+    assert note["embedding_version"] == EMBED_TEXT_VERSION
+    idx = fake_db.docs[(search_index.COLLECTION, "note-n1")]
+    assert idx["embedding"] is not None
+    assert idx["embedding_version"] == EMBED_TEXT_VERSION
+
+
+async def test_augment_reembeds_best_effort(fake_db):
+    """"Add to this note" merges blocks into data and must re-embed + re-index so the appended
+    content becomes searchable."""
+    from services import search_index
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "Trip", "ai_summary": "Plan.",
+                                 "data": {"sections": [{"heading": "Day 1", "items": ["Arrive"]}]}})
+    await notes_mod.augment_note(
+        "n1",
+        notes_mod.AugmentNoteIn(data={"sections": [{"heading": "Stay", "items": ["Hotel X"]}]},
+                                source_note_ids=["src1"]),
+        user_id="u",
+    )
+
+    note = fake_db.docs[("notes", "n1")]
+    assert len(note["data"]["sections"]) == 2
+    assert note["embedding"] is not None
+    assert note["embedding_version"] == EMBED_TEXT_VERSION
+    idx = fake_db.docs[(search_index.COLLECTION, "note-n1")]
+    assert idx["embedding_version"] == EMBED_TEXT_VERSION
 
 
 async def _noop():

@@ -13,7 +13,7 @@ def patch_notes(fake_db, monkeypatch):
 
     embedded: list[tuple[str, str]] = []
 
-    async def fake_embed(title, ai_summary):
+    async def fake_embed(title, ai_summary, data=None):
         embedded.append((title, ai_summary))
         return [0.1, 0.2, 0.3]
 

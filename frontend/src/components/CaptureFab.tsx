@@ -8,9 +8,10 @@ import { FOCUS_RING, PRESS } from "@/lib/ui";
 // The app's single primary-action FAB: capture a new note. Replaces the old bottom tab bar
 // (Home · Collections · + · Ask · Settings) — capture was the only action there that earns a
 // persistent control; Ask now rides with search and Settings lives in the feed header.
-// Hidden on the chromeless surfaces (sign-in + public viewer), when signed out, and on the
-// search screen (that surface's focus belongs to the query, not a floating +).
-const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/search"];
+// Hidden on the chromeless surfaces (sign-in + public viewer), when signed out, on the
+// search screen (that surface's focus belongs to the query, not a floating +), and on the
+// digest stories (a full-screen overlay the FAB would float above).
+const HIDDEN_PREFIXES = ["/login", "/share", "/p/", "/search", "/digest"];
 
 // Only react once a scroll gesture accumulates past this many px, so momentum wobble and
 // sub-pixel jitter don't flip the button back and forth mid-scroll.

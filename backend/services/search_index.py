@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from google.cloud.firestore_v1.vector import Vector
 
-from services.embeddings import embedding_service
+from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
 
 log = logging.getLogger("clipnote.search_index")
 
@@ -23,12 +23,13 @@ def _doc_id(kind: str, ref_id: str) -> str:
     return f"{kind}-{ref_id}"
 
 
-async def _embed(title: str, summary: str, existing: Vector | None) -> Vector | None:
+async def _embed(title: str, summary: str, existing: Vector | None,
+                 extra_text: str = "") -> Vector | None:
     """Reuse a caller-supplied embedding (e.g. the note's) to avoid a second embed call; otherwise
-    embed title+summary. Non-fatal."""
+    embed title+summary, plus any `extra_text` (a note's flattened data) supplied. Non-fatal."""
     if existing is not None:
         return existing
-    text = "\n".join(p for p in (title, summary) if p).strip()
+    text = "\n".join(p for p in (title, summary, extra_text) if p).strip()
     if not text:
         return None
     try:
@@ -44,14 +45,17 @@ async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
                  content_type: str | None = None,
                  collection_id: str | None = None,
                  collection_ids: list[str] | None = None, created_at=None,
-                 embedding: Vector | None = None) -> None:
+                 embedding: Vector | None = None, extra_text: str = "") -> None:
     """Create/replace the index entry for a note. Idempotent per (kind, ref_id).
 
     Carries collection membership two ways, kept coherent: the legacy scalar `collection_id`
-    (deprecated shim, first match or null) and the multi-membership `collection_ids` array."""
+    (deprecated shim, first match or null) and the multi-membership `collection_ids` array.
+
+    `extra_text` is folded into the fallback embed (when no vector is supplied) so the index can
+    match a note's flattened `data`, not just its title/summary."""
     try:
         now = datetime.now(timezone.utc)
-        vec = await _embed(title, summary, embedding)
+        vec = await _embed(title, summary, embedding, extra_text)
         doc = {
             "user_id": user_id,
             "kind": kind,
@@ -67,6 +71,7 @@ async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
         }
         if vec is not None:
             doc["embedding"] = vec
+            doc["embedding_version"] = EMBED_TEXT_VERSION
         await db.collection(COLLECTION).document(_doc_id(kind, ref_id)).set(doc)
     except Exception as e:  # noqa: BLE001 — never let indexing break the capture.
         log.warning("search_index upsert failed (%s %s): %s: %s",
@@ -75,7 +80,8 @@ async def upsert(db, *, user_id: str, kind: str, ref_id: str, title: str,
 
 async def upsert_for_note(db, note_id: str, note_doc: dict,
                           embedding: Vector | None = None) -> None:
-    """Index a note, reusing its already-computed embedding when available."""
+    """Index a note, reusing its already-computed embedding when available. When it isn't, the
+    fallback embed folds in the note's flattened `data` (same recipe as the note's own vector)."""
     await upsert(
         db, user_id=note_doc["user_id"], kind="note", ref_id=note_id,
         title=note_doc.get("title", ""), summary=note_doc.get("ai_summary", ""),
@@ -84,6 +90,7 @@ async def upsert_for_note(db, note_id: str, note_doc: dict,
         collection_id=note_doc.get("collection_id"),
         collection_ids=note_doc.get("collection_ids"),
         created_at=note_doc.get("created_at"), embedding=embedding,
+        extra_text=note_embedding_text("", "", note_doc.get("data")),
     )
 
 

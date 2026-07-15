@@ -37,13 +37,6 @@ class Settings:
     # OIDC, not a shared secret: tasks are signed by this SA; the worker validates the token.
     CLOUD_TASKS_SA_EMAIL: str = os.getenv("CLOUD_TASKS_SA_EMAIL", "")
 
-    # Weekly digest email (Resend). The /digest/run worker is OIDC-authed (same SA as
-    # Cloud Tasks) and triggered by Cloud Scheduler. Sends are no-ops until the key + sender
-    # are set, so the endpoint is safe to deploy before the provider is wired.
-    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
-    DIGEST_FROM_EMAIL: str = os.getenv("DIGEST_FROM_EMAIL", "")  # e.g. "Clipnote <digest@clipnote.app>"
-    # Signs unsubscribe links so they work without login but can't be forged.
-    DIGEST_UNSUB_SECRET: str = os.getenv("DIGEST_UNSUB_SECRET", "")
     APP_BASE_URL: str = os.getenv("APP_BASE_URL", "https://clipnote.web.app")
 
     CLOUD_STORAGE_BUCKET: str = os.getenv("CLOUD_STORAGE_BUCKET", "")
@@ -128,6 +121,10 @@ class Settings:
     # past 3000 chars, which was silently truncating exactly the content the digest needs to
     # synthesize. 6000 covers every note observed in that pass with headroom to spare.
     DIGEST_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("DIGEST_NOTE_DATA_EXCERPT_CHARS", "6000"))
+    # Each note's `data` is truncated to this many characters when building the note's search
+    # embedding (title + summary + flattened data). Mirrors the digest excerpt knob so search can
+    # match a note's actual content, not just its title/summary.
+    EMBED_NOTE_DATA_EXCERPT_CHARS: int = int(os.getenv("EMBED_NOTE_DATA_EXCERPT_CHARS", "6000"))
     # Bumped whenever DIGEST_SYSTEM changes meaningfully (prompt behavior, not just wording) so
     # digests cached under an older prompt are treated as stale and rebuilt automatically, even
     # when membership (source_note_ids) hasn't changed. Stored on the digest map as
@@ -145,6 +142,23 @@ class Settings:
     MAX_DIGEST_REGENS_PER_USER_PER_DAY: int = int(
         os.getenv("MAX_DIGEST_REGENS_PER_USER_PER_DAY", "15"))
     DAILY_GLOBAL_DIGEST_CAP: int = int(os.getenv("DAILY_GLOBAL_DIGEST_CAP", "50"))
+
+    # --- Personal (my) digest: the in-app week-in-review at /api/digest/me ---
+    # Bumped whenever PERSONAL_DIGEST_SYSTEM changes meaningfully so a digest cached under an
+    # older prompt is treated as stale and rebuilt on next view, even when the fed note set
+    # hasn't changed. Stored on users/{uid}.digest as `prompt_version`.
+    PERSONAL_DIGEST_PROMPT_VERSION: int = 1
+    # Minimum notes saved in the last 7 days for the digest to be built over the WEEK; below this
+    # the digest falls back to the user's newest MY_DIGEST_FALLBACK_NOTES saves instead (so a
+    # sparse week still gets a useful review rather than nothing).
+    MY_DIGEST_MIN_WEEK_NOTES: int = int(os.getenv("MY_DIGEST_MIN_WEEK_NOTES", "3"))
+    MY_DIGEST_FALLBACK_NOTES: int = int(os.getenv("MY_DIGEST_FALLBACK_NOTES", "10"))
+    # A personal-digest (re)build is a paid Gemini call over up to DIGEST_MAX_NOTES notes, so
+    # repeats are capped per user and against a global daily kill-switch (same shape as the
+    # collection digest caps, minus the per-collection tier).
+    MAX_MY_DIGEST_BUILDS_PER_USER_PER_DAY: int = int(
+        os.getenv("MAX_MY_DIGEST_BUILDS_PER_USER_PER_DAY", "5"))
+    DAILY_GLOBAL_MY_DIGEST_CAP: int = int(os.getenv("DAILY_GLOBAL_MY_DIGEST_CAP", "75"))
 
     # --- Agent (orchestrator + subagents + tools) ---
     # Master kill switch: when false, /api/ask/stream answers with no tools (falls back to

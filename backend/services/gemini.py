@@ -666,6 +666,62 @@ Rules:
   can't ground rather than inventing it."""
 
 
+PERSONAL_DIGEST_SYSTEM = """You are Clipnote's assistant. Write a personal WEEK IN REVIEW for one
+user, addressed directly to them ("you saved", "you were into", "you kept coming back to"): a warm,
+brief piece of writing that reflects back what they actually saved and read, the way a friend who'd
+skimmed their whole week of links would tell them what they'd been on about, not an index and not a
+list of the notes' own titles and summaries restated.
+
+Each note's `data` field (marked CONTENT below) holds the real substance (named tools, techniques,
+steps, places, prompts, numbers) and that is what you are reading and reporting on. The note's
+title/summary (marked metadata below) exist only to identify which note is which; they are NEVER
+something you may copy into your output. If a section body could have been written from the titles
+and summaries alone, without opening `data`, you have failed at this task.
+
+INTERNAL STEP (do this before writing anything): scan every note's CONTENT and build a mental list
+of every specific named thing across ALL of them (every tool, skill, technique, step, prompt,
+place, or number). Notice which ones repeat or relate across different notes. Only then group them
+into themes and write each theme's body from that list.
+
+Return ONLY valid JSON:
+{"intro": "1-2 sentences characterizing the themes of the user's week",
+ "facts": [{"label": str, "value": str}],
+ "sections": [{"heading": str,
+               "body": "1-3 short paragraphs of prose, \\n\\n between paragraphs",
+               "items": [{"title": str, "summary": str, "note_id": str}],
+               "source_note_ids": [str]}]}
+
+Rules:
+- intro: 1-2 sentences, second person, characterizing what the week was about ("This week you went
+  deep on agent tooling and squeezed in two recipes."). Name the actual themes, not "you saved
+  several notes".
+- Group into 2-4 theme sections that are specific and content-derived, never generic buckets like
+  "Articles" or "Notes"; name each for what's actually in it (e.g. "AI coding tools", "Weeknight
+  dinners"). Order sections by how much of the week they represent, biggest first.
+- `body` is mandatory and is the primary output; write it first, for every section. It must read as
+  synthesis in second person: name the specific things, explain what each does or means, and connect
+  them across notes when more than one contributes ("this pairs with...", "the same idea shows up
+  in..."). 1-3 short paragraphs, plain text, "\\n\\n" between paragraphs, no headings or bullets
+  inside it.
+- `items` is OPTIONAL and reserved for genuinely atomic listables worth their own row (a specific
+  tool, site, or place worth clicking through to); many good sections have body-only prose and an
+  empty items list. Never pad items with vague or duplicate entries.
+  - An item's title must NEVER restate or rephrase the source note's title. Name the actual thing.
+  - Merge duplicates across notes into ONE item, citing whichever note covers it in most detail.
+  - Every item MUST carry the exact note_id it came from, chosen ONLY from the NOTE ids given
+    below. Never invent an id, never cite one not in the notes provided.
+- `source_note_ids`: every note id (from the ones provided) the section's body actually draws on, so
+  the section can deep-link and cite even when it has no items.
+- facts: 0-2 QUALITATIVE at-a-glance highlights only (e.g. "Deepest read: <what it was about>",
+  "Kept coming back to: <theme>"). NEVER emit numeric counts of any kind: no "5 notes", no "3
+  recipes", no totals or tallies. Python computes all the counting stats separately; a numeric fact
+  here is always wrong. Omit any fact that would be filler; return an empty list when nothing
+  qualitative stands out.
+- No em-dashes anywhere in intro, facts, body, or item summaries.
+- NEVER FABRICATE: ground every claim, item, and fact in the CONTENT provided; omit anything you
+  can't ground rather than inventing it."""
+
+
 def _history_lines(history: list[dict]) -> str:
     return "\n".join(f"{t['role']}: {t['text']}" for t in history)
 
@@ -1188,18 +1244,21 @@ class GeminiService:
         return await asyncio.to_thread(self._synthesize, question, history, notes, output,
                                        focal_title, existing_categories)
 
-    # ---------- Smart collections: cached digest ----------
+    # ---------- Composed digests (smart collections + personal week-in-review) ----------
 
-    def _build_digest(self, name: str, description: str,
-                      notes: list[dict]) -> CollectionDigest | None:
-        # Building is best-effort end to end: a failure anywhere in here — including note
-        # serialization while assembling the prompt, not just the model call — must never break
-        # the collection view. The caller keeps serving the last cached digest (marked stale)
-        # instead of a 500, so every exception path below resolves to `return None`.
+    def _run_digest(self, header_lines: list[str], notes: list[dict],
+                    system: str) -> CollectionDigest | None:
+        """Shared core behind both digest builders: serialize the fed notes (CONTENT-first, with
+        the per-note data excerpt), call Gemini once (retry once) under `system`, parse into a
+        CollectionDigest, drop entries citing ids outside the fed set, and drop sections left with
+        neither body nor items.
+
+        Best-effort end to end: a failure anywhere in here — including note serialization while
+        assembling the prompt, not just the model call — resolves to `return None` so the caller
+        can keep serving the last cached digest (marked stale) instead of a 500.
+        """
         try:
-            prompt_parts = [f"Collection name: {name}"]
-            if description:
-                prompt_parts.append(f"Collection description: {description}")
+            prompt_parts = list(header_lines)
             for n in notes:
                 # CONTENT (data) comes FIRST and is what the model must read; title/summary are
                 # pushed below and labeled as metadata only, so the model can't take the lazy
@@ -1224,7 +1283,7 @@ class GeminiService:
                         contents=["\n\n".join(prompt_parts)],
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
-                            system_instruction=DIGEST_SYSTEM,
+                            system_instruction=system,
                             temperature=0.5,
                         ),
                     )
@@ -1232,8 +1291,8 @@ class GeminiService:
                     digest = CollectionDigest.model_validate_json(_strip_code_fences(response.text))
                     # Drop any entry the model cited that isn't actually one of the fed notes (a
                     # hallucinated/foreign id must never deep-link into someone else's note), then
-                    # drop any section left with nothing at all — but a v3 section can be
-                    # body-only (no items), so only drop sections with neither.
+                    # drop any section left with nothing at all — but a section can be body-only
+                    # (no items), so only drop sections with neither.
                     valid_ids = {n.get("id") for n in notes}
                     for section in digest.sections:
                         section.items = [it for it in section.items if it.note_id in valid_ids]
@@ -1254,9 +1313,29 @@ class GeminiService:
             log.error("build_digest failed: %s: %s", type(e).__name__, e)
             return None
 
+    def _build_digest(self, name: str, description: str,
+                      notes: list[dict]) -> CollectionDigest | None:
+        header_lines = [f"Collection name: {name}"]
+        if description:
+            header_lines.append(f"Collection description: {description}")
+        return self._run_digest(header_lines, notes, DIGEST_SYSTEM)
+
     async def build_digest(self, name: str, description: str,
                            notes: list[dict]) -> CollectionDigest | None:
         return await asyncio.to_thread(self._build_digest, name, description, notes)
+
+    def _build_personal_digest(self, display_name: str, window_label: str,
+                               notes: list[dict]) -> CollectionDigest | None:
+        header_lines = [
+            f"User: {display_name or 'there'}",
+            f"Window: {window_label}",
+        ]
+        return self._run_digest(header_lines, notes, PERSONAL_DIGEST_SYSTEM)
+
+    async def build_personal_digest(self, display_name: str, window_label: str,
+                                    notes: list[dict]) -> CollectionDigest | None:
+        return await asyncio.to_thread(
+            self._build_personal_digest, display_name, window_label, notes)
 
     def _create_note(self, question: str, history: list[dict],
                      existing_categories: list[str]) -> ArtifactNote:

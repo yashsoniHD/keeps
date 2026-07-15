@@ -1,161 +1,231 @@
-"""Weekly digest email.
+"""Personal digest — the in-app week-in-review.
 
-POST /digest/run  — OIDC-authed batch (Cloud Scheduler triggers it weekly). For each
-eligible user with at least one note in the last 7 days, renders and sends a digest via
-Resend. Digest is opt-IN: a user is eligible only once they've explicitly set
-digest_opt_in=True (the Settings toggle); an absent field means off. Best-effort: one
-bad user never aborts the batch.
+POST /digest/me — return (rebuilding when stale/forced) the caller's personal digest: a warm,
+second-person reflection of what they saved and read this week (an intro + optional qualitative
+facts + 2-4 content-derived theme sections that synthesize their notes into read prose, each
+deep-linking back to source notes), built by Gemini from the fed note set (services/gemini.py
+`build_personal_digest`). The narrative is cached on the user doc (`users/{uid}.digest`), keyed by
+a signature of the fed note ids so an unchanged week never re-triggers a paid rebuild.
 
-GET /digest/unsubscribe?u=&t=  — login-free unsubscribe (HMAC-signed so it can't be forged);
-flips users/{uid}.digest_opt_in to False.
+The endpoint also returns pure-Python STATS over the fed set (counts by type, top domains, busiest
+weekday, active days) — computed fresh on every call, never modeled, so the numbers are always
+right regardless of digest cache state. A digest miss (empty week, cap exhausted, or a build
+failure) never 429s or 500s: the stats and note refs still come back, with `digest` null/stale.
+
+There is NO email path: the old weekly Resend digest was removed in favor of this in-app view.
 """
-import hashlib
-import hmac
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
-from html import escape
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from config import settings
-from services.email import send_email
-from services.firebase import get_db, list_auth_users
-from services.oidc import verify_oidc
+from services.auth_dep import require_user
+from services.firebase import (
+    flush_usage,
+    get_db,
+    reserve_personal_digest,
+)
+from services.gemini import gemini_service
+from services.usage_meter import start_metering
 
 router = APIRouter(tags=["digest"])
 log = logging.getLogger("clipnote.digest")
 
-DIGEST_LOOKBACK_DAYS = 7
-DIGEST_MAX_NOTES = 12
+WINDOW_DAYS = 7
 
 
-def _unsub_secret() -> str:
-    # Dedicated secret if set; otherwise fall back to the Resend key (also server-only).
-    # No literal fallback — a known constant would make unsubscribe tokens forgeable. With
-    # neither configured, sends are already no-ops, so failing loud here is safe.
-    secret = settings.DIGEST_UNSUB_SECRET or settings.RESEND_API_KEY
-    if not secret:
-        raise RuntimeError("Set DIGEST_UNSUB_SECRET (or RESEND_API_KEY) to sign unsubscribe links")
-    return secret
+class MyDigestRequest(BaseModel):
+    force: bool = False
 
 
-def _unsub_token(uid: str) -> str:
-    return hmac.new(_unsub_secret().encode(), uid.encode(), hashlib.sha256).hexdigest()[:32]
+def _as_datetime(value) -> datetime | None:
+    """Firestore timestamps materialize as tz-aware datetimes; anything else (a test int, a
+    missing field) is ignored for the date-based stats rather than blowing up a comparison."""
+    if isinstance(value, datetime):
+        return value
+    return None
 
 
-def _unsub_url(uid: str) -> str:
-    return f"{settings.CLOUD_TASKS_WORKER_URL}/api/digest/unsubscribe?u={uid}&t={_unsub_token(uid)}"
+def _compute_stats(fed: list[dict], fallback: bool, now: datetime) -> dict:
+    """Pure-Python stats over the fed note set — never modeled, so the numbers are always right."""
+    total = len(fed)
+    created = [dt for dt in (_as_datetime(n.get("created_at")) for n in fed) if dt is not None]
+    dates = sorted({dt.date() for dt in created})
 
+    if fallback:
+        if dates:
+            window_start = dates[0]
+            window_end = dates[-1]
+            window_days = (window_end - window_start).days + 1
+        else:
+            window_start = window_end = now.date()
+            window_days = 1
+    else:
+        window_end = now.date()
+        window_start = (now - timedelta(days=WINDOW_DAYS)).date()
+        window_days = WINDOW_DAYS
 
-def build_digest_html(display_name: str | None, notes: list[dict], unsub_url: str) -> str:
-    """Render the weekly digest body. `notes` are dicts with id/title/ai_summary/content_type."""
-    name = escape((display_name or "there").split(" ")[0])
-    rows = []
-    for n in notes:
-        nid = escape(str(n.get("id", "")))
-        title = escape(str(n.get("title") or "Untitled note"))
-        summary = escape(str(n.get("ai_summary") or "")[:180])
-        ctype = escape(str(n.get("content_type") or "note").replace("-", " "))
-        link = f"{settings.APP_BASE_URL}/notes/{nid}"
-        rows.append(
-            f'<tr><td style="padding:14px 0;border-bottom:1px solid #eee;">'
-            f'<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#9a8f80;">{ctype}</div>'
-            f'<a href="{link}" style="font-size:18px;color:#1a1a1a;text-decoration:none;font-weight:600;">{title}</a>'
-            f'<div style="font-size:14px;color:#6b6256;margin-top:4px;line-height:1.5;">{summary}</div>'
-            f"</td></tr>"
-        )
-    body = "".join(rows)
-    return f"""\
-<div style="max-width:560px;margin:0 auto;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;padding:24px;">
-  <div style="font-size:22px;font-weight:700;">Clipnote</div>
-  <p style="font-size:16px;color:#3a342c;margin-top:20px;">Hi {name}, here's what you saved this week — worth a re-read:</p>
-  <table style="width:100%;border-collapse:collapse;">{body}</table>
-  <a href="{settings.APP_BASE_URL}" style="display:inline-block;margin-top:24px;background:#1a1a1a;color:#fff;text-decoration:none;padding:11px 22px;border-radius:999px;font-size:14px;">Open Clipnote</a>
-  <p style="font-size:12px;color:#9a8f80;margin-top:28px;">
-    You're getting this because you have a Clipnote account.
-    <a href="{unsub_url}" style="color:#9a8f80;">Unsubscribe from the weekly digest</a>.
-  </p>
-</div>"""
+    cat_counts = Counter(n.get("content_type") or "note" for n in fed)
+    categories = [
+        {"slug": slug, "count": count}
+        for slug, count in cat_counts.most_common()
+    ]
 
-
-async def _recent_notes(db, uid: str, cutoff: datetime) -> list[dict]:
-    q = (
-        db.collection("notes")
-        .where("user_id", "==", uid)
-        .order_by("created_at", direction="DESCENDING")
-        .limit(DIGEST_MAX_NOTES)
+    dom_counts = Counter(
+        d for d in (n.get("source_domain") for n in fed) if d
     )
-    out = []
-    async for doc in q.stream():
-        d = doc.to_dict() or {}
-        created = d.get("created_at")
-        # created_at is a Firestore timestamp (datetime). Keep only the last-7-days window.
-        if created is not None and created < cutoff:
-            break  # ordered desc — everything after this is older too
-        out.append({
-            "id": doc.id,
-            "title": d.get("title"),
-            "ai_summary": d.get("ai_summary"),
-            "content_type": d.get("content_type"),
-        })
-    return out
+    top_domains = [
+        {"domain": domain, "count": count}
+        for domain, count in dom_counts.most_common(3)
+    ]
+
+    weekday_counts = Counter(dt.strftime("%A") for dt in created)
+    busiest = weekday_counts.most_common(1)
+    busiest_day = (
+        {"label": busiest[0][0], "count": busiest[0][1]} if busiest else None
+    )
+
+    return {
+        "total": total,
+        "window_days": window_days,
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "fallback": fallback,
+        "categories": categories,
+        "top_domains": top_domains,
+        "busiest_day": busiest_day,
+        "active_days": len(dates),
+    }
 
 
-@router.post("/digest/run")
-async def run_digest(request: Request):
-    verify_oidc(request)
+def _window_label(fallback: bool, stats: dict) -> str:
+    """Human-readable window for the prompt header (steers the intro's framing, not user-facing)."""
+    if fallback:
+        return "your latest saves"
+    start = datetime.fromisoformat(stats["window_start"]).date()
+    end = datetime.fromisoformat(stats["window_end"]).date()
+    return f"{start.day}-{end.day} {end.strftime('%b %Y')} (the last 7 days)"
+
+
+def _note_refs(fed: list[dict]) -> list[dict]:
+    return [
+        {
+            "id": n["id"],
+            "title": n.get("title") or "Untitled note",
+            "content_type": n.get("content_type") or "note",
+            "source_domain": n.get("source_domain") or "",
+        }
+        for n in fed
+    ]
+
+
+@router.post("/digest/me")
+async def my_digest(body: MyDigestRequest | None = None,
+                    user_id: str = Depends(require_user)):
+    """Return the caller's personal week-in-review digest plus fresh stats over the fed note set.
+
+    Response contract:
+      `{"digest": <map>|None, "stats": <map>|None, "note_refs": [...], "stale": bool}`.
+    - No notes at all → `{digest: None, stats: None, note_refs: [], stale: False}`; no reserve,
+      no Gemini call.
+    - Fed set = the last-7-days notes when there are at least MY_DIGEST_MIN_WEEK_NOTES of them
+      (fallback False); otherwise the newest MY_DIGEST_FALLBACK_NOTES of all saves (fallback True).
+    - A signature match (same fed note ids as the last build, same or newer prompt_version, not
+      forced) returns the cached digest with `stale: False` — no reserve, no Gemini call. Stats are
+      still recomputed fresh.
+    - When today's build budget is exhausted (MAX_MY_DIGEST_BUILDS_PER_USER_PER_DAY /
+      DAILY_GLOBAL_MY_DIGEST_CAP) or the model call fails, the existing cached digest (possibly
+      None) is returned with `stale: True`. A digest miss never 429s or 500s; stats still return.
+    """
+    body = body or MyDigestRequest()
     db = get_db()
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=DIGEST_LOOKBACK_DAYS)
 
-    # Identity (email) from Auth; opt-in flag from the user doc.
-    auth_users = await list_auth_users()
-    user_docs: dict[str, dict] = {}
-    async for doc in db.collection("users").stream():
-        user_docs[doc.id] = doc.to_dict() or {}
-
-    sent = skipped = 0
-    for u in auth_users:
-        uid, email = u["uid"], u.get("email")
-        prof = user_docs.get(uid, {})
-        # Default = opted OUT: the digest is opt-in, so only an explicit True (the user turned
-        # it on in Settings) is eligible. An absent field / never-touched user is skipped.
-        if not email or prof.get("digest_opt_in") is not True:
-            skipped += 1
-            continue
-        notes = await _recent_notes(db, uid, cutoff)
-        if not notes:
-            skipped += 1
-            continue
-        html = build_digest_html(u.get("display_name"), notes, _unsub_url(uid))
-        subject = f"Your week in Clipnote — {len(notes)} note{'s' if len(notes) != 1 else ''} to revisit"
-        if await send_email(email, subject, html):
-            sent += 1
-            await db.collection("users").document(uid).set({"last_digest_at": now}, merge=True)
-        else:
-            skipped += 1
-
-    log.info("weekly digest run complete", extra={"sent": sent, "skipped": skipped})
-    return {"sent": sent, "skipped": skipped}
-
-
-@router.get("/digest/unsubscribe")
-async def unsubscribe(u: str = "", t: str = ""):
-    """Login-free, HMAC-verified unsubscribe link target from the digest email."""
-    ok = bool(u) and hmac.compare_digest(t, _unsub_token(u))
-    if ok:
-        await get_db().collection("users").document(u).set({"digest_opt_in": False}, merge=True)
-    msg = (
-        "You've been unsubscribed from the weekly digest."
-        if ok
-        else "This unsubscribe link is invalid or expired."
+    # Fed candidate set: newest DIGEST_MAX_NOTES notes, full docs.
+    q = (
+        db.collection("notes")
+        .where("user_id", "==", user_id)
+        .order_by("created_at", direction="DESCENDING")
+        .limit(settings.DIGEST_MAX_NOTES)
     )
-    return HTMLResponse(
-        f"""<!doctype html><html><body style="font-family:-apple-system,sans-serif;text-align:center;padding:64px 24px;color:#1a1a1a;">
-        <div style="font-size:22px;font-weight:700;">Clipnote</div>
-        <p style="margin-top:16px;color:#6b6256;">{msg}</p>
-        <a href="{settings.APP_BASE_URL}" style="color:#1a1a1a;">Back to Clipnote</a>
-        </body></html>""",
-        status_code=200 if ok else 400,
+    fetched: list[dict] = []
+    async for doc in q.stream():
+        d = doc.to_dict() or {}
+        d["id"] = doc.id
+        fetched.append(d)
+
+    if not fetched:
+        return {"digest": None, "stats": None, "note_refs": [], "stale": False}
+
+    # Prefer the last-7-days window; fall back to the newest N when the week is too sparse.
+    cutoff = now - timedelta(days=WINDOW_DAYS)
+    week = [
+        n for n in fetched
+        if (dt := _as_datetime(n.get("created_at"))) is not None and dt >= cutoff
+    ]
+    if len(week) >= settings.MY_DIGEST_MIN_WEEK_NOTES:
+        fed, fallback = week, False
+    else:
+        fed, fallback = fetched[: settings.MY_DIGEST_FALLBACK_NOTES], True
+
+    stats = _compute_stats(fed, fallback, now)
+    note_refs = _note_refs(fed)
+    fed_ids = sorted(n["id"] for n in fed)
+
+    user_ref = db.collection("users").document(user_id)
+    user_snap = await user_ref.get()
+    user_doc = user_snap.to_dict() or {}
+    stored = user_doc.get("digest") or {}
+
+    # Cache hit: same fed set, current-or-newer prompt, not forced.
+    same_membership = sorted(stored.get("source_note_ids") or []) == fed_ids
+    current_prompt = stored.get("prompt_version")
+    prompt_current = (
+        current_prompt is not None
+        and current_prompt >= settings.PERSONAL_DIGEST_PROMPT_VERSION
     )
+    if not body.force and same_membership and prompt_current:
+        return {"digest": stored, "stats": stats, "note_refs": note_refs, "stale": False}
+
+    if not await reserve_personal_digest(user_id):
+        return {"digest": stored or None, "stats": stats,
+                "note_refs": note_refs, "stale": True}
+
+    display_name = user_doc.get("display_name") or ""
+    meter = start_metering()
+    try:
+        built = await gemini_service.build_personal_digest(
+            display_name, _window_label(fallback, stats), fed)
+    finally:
+        await flush_usage(user_id, meter)
+
+    if built is None:
+        return {"digest": stored or None, "stats": stats,
+                "note_refs": note_refs, "stale": True}
+
+    # Ground every section against the fed set the same way the collection digest does: an id the
+    # model cited that isn't a fed note must never deep-link into a note it doesn't cover.
+    fed_id_set = set(fed_ids)
+    for section in built.sections:
+        section.source_note_ids = [nid for nid in section.source_note_ids if nid in fed_id_set]
+    built.sections = [s for s in built.sections if s.items or s.body.strip()]
+
+    digest_map = {
+        "intro": built.intro,
+        "facts": [f.model_dump() for f in built.facts],
+        "sections": [s.model_dump() for s in built.sections],
+        "source_note_ids": fed_ids,
+        "generated_at": now,
+        "model": settings.GEMINI_MODEL,
+        "prompt_version": settings.PERSONAL_DIGEST_PROMPT_VERSION,
+        "fallback": fallback,
+    }
+    # merge=True writes only the `digest` key — sibling user fields (categories, region,
+    # display_name, token counters, etc) are left untouched.
+    await user_ref.set({"digest": digest_map}, merge=True)
+    log.info("personal digest built", extra={"user_id": user_id, "fed": len(fed),
+                                             "fallback": fallback})
+    return {"digest": digest_map, "stats": stats, "note_refs": note_refs, "stale": False}

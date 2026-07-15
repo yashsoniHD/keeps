@@ -41,7 +41,7 @@ def _wire(monkeypatch, fake_db, *, content_type, data=None,
         return ContentBundle(kind="text", text="x" * 60, metadata={"platform": "web"},
                              strategy="web_scrape")
 
-    async def note_embedding(title, ai_summary=""):
+    async def note_embedding(title, ai_summary="", data=None):
         return embedding
 
     enrich_calls = []

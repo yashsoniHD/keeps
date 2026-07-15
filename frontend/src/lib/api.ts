@@ -6,6 +6,7 @@ import type {
   PlaceSearchResult,
   PlaceItemDetails,
   CollectionDigest,
+  MyDigestResponse,
 } from "@/lib/types";
 
 // The fallback must be environment-aware: a production build must NEVER point at localhost
@@ -226,6 +227,21 @@ export async function buildCollectionDigest(
   });
   if (!res.ok)
     throw new ApiError(await errorDetail(res, "Couldn't build the collection digest."), res.status);
+  return res.json();
+}
+
+// Build (or refresh) the signed-in user's Wrapped-style personal digest: a story recap of their
+// recent saves (stat slides + a written narrative). Cached server-side and returned instantly when
+// the recent set hasn't changed; `force: true` bypasses the cache and rebuilds. See MyDigestResponse
+// for the null/stale semantics the /digest UI branches on.
+export async function buildMyDigest(force = false): Promise<MyDigestResponse> {
+  const res = await apiFetch("/api/digest/me", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (!res.ok)
+    throw new ApiError(await errorDetail(res, "Couldn't build your digest."), res.status);
   return res.json();
 }
 

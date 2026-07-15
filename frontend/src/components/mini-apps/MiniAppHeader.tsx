@@ -3,9 +3,10 @@
 // saturated fill — while back/search/settings stay in the same place on every wall. Identity
 // comes straight from TOOLS (collections-meta) so it can't drift.
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Search, Settings } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
 import type { ToolMeta } from "@/lib/collections-meta";
 import { FOCUS_RING } from "@/lib/ui";
+import { SettingsAvatarLink } from "@/components/shared/SettingsAvatarLink";
 
 const ICON_BTN_BASE = `h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`;
 const ICON_BTN = `inline-flex ${ICON_BTN_BASE}`;
@@ -40,14 +41,7 @@ export function MiniAppHeader({
         <Link to="/search" aria-label="Search" title="Search" className={ICON_BTN}>
           <Search className="h-4 w-4" />
         </Link>
-        <Link
-          to="/settings"
-          aria-label="Settings"
-          title="Settings"
-          className={`hidden md:inline-flex ${ICON_BTN_BASE}`}
-        >
-          <Settings className="h-4 w-4" />
-        </Link>
+        <SettingsAvatarLink className="hidden md:inline-flex" />
       </div>
     </header>
   );

@@ -11,7 +11,6 @@ import {
   Link2,
   ArrowLeft,
   Pin,
-  Settings as SettingsIcon,
   LayoutGrid,
   LayoutDashboard,
   GalleryHorizontalEnd,
@@ -50,6 +49,7 @@ import { setFeedOrder } from "@/lib/note-nav";
 import { getCached, hasCached, setCached } from "@/lib/swr-cache";
 import { FOCUS_RING } from "@/lib/ui";
 import { PillButton } from "@/components/shared/PillButton";
+import { SettingsAvatarLink } from "@/components/shared/SettingsAvatarLink";
 import {
   NoteCard,
   NoteRowList,
@@ -521,11 +521,9 @@ export function Feed({
                 </Link>
                 <LayoutToggle layout={layout} setLayout={setLayout} />
                 {/* With the bottom tab bar gone, the header is the only nav surface, so
-                    Settings lives here on every screen size. (Collections is parked for
-                    now — no entry point until the feature returns.) */}
-                <Link to="/settings" aria-label="Settings" title="Settings" className={ICON_BTN}>
-                  <SettingsIcon className="h-4 w-4" />
-                </Link>
+                    Settings lives here on every screen size — now as the user's profile
+                    avatar. (Collections is parked for now — no entry point until it returns.) */}
+                <SettingsAvatarLink />
               </div>
             </div>
 
