@@ -360,8 +360,16 @@ best-of article). Extract EVERY distinct venue mentioned as its own entry so eac
 trackable place to try. NEVER merge two different venues into one entry, and NEVER invent a venue
 that is not named in the source.
 
+COUNT CHECK: if the source announces a count ("10 must-visit restaurants", "5 rooftop bars"),
+`venues` MUST contain exactly that many entries — recount before you answer. The ONLY exception:
+if the source actually names fewer venues than it announces, output only the named ones — NEVER
+invent a venue to reach the announced count. Output venues in the source's own order;
+array position IS the ranking (there is no separate rank field).
+
 `data` schema for place (restaurant, cafe, bar, attraction, hotel):
 {
+  "facts"?: [{"label": str, "value": str}],   // 2-4 at-a-glance facts ABOUT THE LIST itself
+                                              // (e.g. "City":"Lisbon", "Count":"10 cafes"), optional
   "venues": [{
     "name": "the venue's name exactly as stated",
     "location": "area, city (whatever is given)",
@@ -383,6 +391,10 @@ that is not named in the source.
   }],
   "listTheme"?: "the theme if it's a themed roundup, e.g. 'best brunch in Bandra'"
 }
+COMPLETENESS (fabrication-safe): every venue MUST carry at least one of `why` or `highlights`,
+drawn from the source. If the source only names the venue with no detail, set `why` from the
+list's own framing (e.g. "One of the 10 best brunch spots in Bandra") — NEVER invent dishes,
+prices, ratings, or any attribute the source did not state.
 A single-venue post yields a one-element `venues` array; a listicle yields one entry per venue.
 The note's own `title`/`ai_summary` should describe the reel/list as a whole.""",
 
@@ -1054,6 +1066,9 @@ class GeminiService:
         )
         if bundle.video_uri:
             # Low media resolution: ~4x fewer video tokens; plenty for note extraction.
+            # INVARIANT: this only applies to video bundles (bundle.video_uri set). Carousel
+            # image_parts (Apify slides) ride the default resolution — MEDIA_RESOLUTION_LOW never
+            # downsamples them, so a listicle's slides keep their full detail for extraction.
             try:
                 config.media_resolution = types.MediaResolution.MEDIA_RESOLUTION_LOW
             except AttributeError:

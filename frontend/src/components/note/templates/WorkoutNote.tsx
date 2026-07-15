@@ -2,6 +2,7 @@ import { Target, Gauge, Clock, Repeat, Dumbbell, Lightbulb, type LucideIcon } fr
 import type { Note } from "@/lib/types";
 import { noteAccent, type NoteAccent } from "@/lib/note-meta";
 import { StatGrid, type Stat } from "../StatGrid";
+import { SectionHeader } from "../SectionHeader";
 
 interface Exercise {
   name: string;
@@ -32,15 +33,15 @@ export function WorkoutNote({ note }: { note: Note }) {
       { icon: Gauge, label: "Level", value: data.level },
       { icon: Clock, label: "Duration", value: data.duration },
       { icon: Repeat, label: "Frequency", value: data.frequency },
-    ] as { icon: LucideIcon; label: string; value?: string }[]
+    ] as { icon?: LucideIcon; label: string; value?: string }[]
   ).filter((s): s is Stat => Boolean(s.value));
 
   return (
-    <div>
+    <div className="space-y-10">
       <StatGrid stats={stats} accent={accent} capitalize />
 
       {data.equipment && data.equipment.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Dumbbell className={`h-4 w-4 ${accent.text}`} />
           {data.equipment.map((eq, i) => (
             <span
@@ -54,8 +55,8 @@ export function WorkoutNote({ note }: { note: Note }) {
       )}
 
       {(data.structure ?? []).map((block, i) => (
-        <section key={i} className="mt-8">
-          <h2 className="font-serif text-2xl text-ink">{block.block}</h2>
+        <section key={i}>
+          <SectionHeader>{block.block}</SectionHeader>
           <ul className="mt-3 space-y-2">
             {(block.items ?? []).map((item, j) => (
               <li key={j} className="flex items-start gap-3 text-ink">
@@ -68,8 +69,8 @@ export function WorkoutNote({ note }: { note: Note }) {
       ))}
 
       {data.exercises && data.exercises.length > 0 && (
-        <section className="mt-10">
-          <h2 className="font-serif text-2xl text-ink">Exercises</h2>
+        <section>
+          <SectionHeader>Exercises</SectionHeader>
           <ol className="mt-4 space-y-4">
             {data.exercises.map((ex, i) => (
               <li key={i} className="rounded-2xl border border-border bg-card p-4">
@@ -97,10 +98,10 @@ export function WorkoutNote({ note }: { note: Note }) {
       )}
 
       {data.tips && data.tips.length > 0 && (
-        <section className="mt-10 rounded-2xl border border-border bg-card p-5">
-          <h2 className="inline-flex items-center gap-2 font-serif text-xl text-ink">
-            <Lightbulb className={`h-4 w-4 ${accent.text}`} /> Tips
-          </h2>
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <SectionHeader icon={Lightbulb} iconClassName={accent.text}>
+            Tips
+          </SectionHeader>
           <ul className="mt-3 space-y-2">
             {data.tips.map((tip, i) => (
               <li key={i} className="flex items-start gap-3 text-ink">

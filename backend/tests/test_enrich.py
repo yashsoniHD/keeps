@@ -131,3 +131,52 @@ async def test_place_venue_falls_back_to_alias_map_without_a_places_match(monkey
     data = {"venues": [{"name": "Hidden Gem", "city": "Bangalore"}]}
     out, _ = await enrich.enrich_note_data("u", "place", data, None)
     assert out["venues"][0]["city"] == "Bengaluru"  # alias map alone still normalizes
+
+
+async def test_venue_gains_photo_dimensions_and_attribution(monkeypatch):
+    from services.google_places import PlaceHit
+
+    async def fake_search(name, location=None, region=None):
+        return PlaceHit(place_id="p1", name=name)
+
+    async def fake_details(place_id):
+        return {"place_id": "p1", "name": "Blue Tokai", "photo_url": "https://lh3/p1.jpg",
+                "photo_width": 4032, "photo_height": 3024, "photo_attribution": "Jane Doe"}
+
+    monkeypatch.setattr(enrich.google_places, "search_place", fake_search)
+    monkeypatch.setattr(enrich.google_places, "place_details", fake_details)
+
+    data = {"venues": [{"name": "Blue Tokai"}]}
+    out, cover = await enrich.enrich_note_data("u", "place", data, None)
+    v = out["venues"][0]
+    assert v["photo_url"] == "https://lh3/p1.jpg"
+    assert v["photo_width"] == 4032 and v["photo_height"] == 3024
+    assert v["photo_attribution"] == "Jane Doe"
+    assert cover == "https://lh3/p1.jpg"  # first photo offered as cover
+
+
+async def test_enrich_venues_capped_rest_untouched(monkeypatch):
+    """A long listicle: only the first PLACES_MAX_ENRICHED_VENUES venues hit Places; the rest are
+    kept verbatim (un-enriched) so the list stays complete without running up the bill."""
+    from services.google_places import PlaceHit
+
+    calls: list[str] = []
+
+    async def fake_search(name, location=None, region=None):
+        calls.append(name)
+        return PlaceHit(place_id=f"p_{name}", name=name)
+
+    async def fake_details(place_id):
+        return {"place_id": place_id, "name": place_id, "photo_url": "https://lh3/x.jpg"}
+
+    monkeypatch.setattr(enrich.google_places, "search_place", fake_search)
+    monkeypatch.setattr(enrich.google_places, "place_details", fake_details)
+    monkeypatch.setattr(enrich.settings, "PLACES_MAX_ENRICHED_VENUES", 15)
+
+    venues = [{"name": f"V{i}"} for i in range(16)]
+    out, _ = await enrich.enrich_note_data("u", "place", {"venues": venues}, None)
+
+    assert len(out["venues"]) == 16                       # every venue preserved
+    assert all("place_id" in v for v in out["venues"][:15])  # first 15 enriched
+    assert out["venues"][15] == {"name": "V15"}           # 16th untouched
+    assert len(calls) == 15                               # only the first 15 hit Places

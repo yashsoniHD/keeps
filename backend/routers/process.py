@@ -269,6 +269,15 @@ async def _salvage_and_complete(db, job_ref, *, job_id: str, user_id: str, url: 
     return {"status": "completed", "note_id": note_id, "salvaged": True}
 
 
+async def _fail_reextract(job_ref, error: str) -> dict:
+    """A re-extract job whose source can no longer be extracted: mark it failed WITHOUT touching
+    the target note. Never salvage — a dead source (deleted IG post, expired page) must not turn a
+    good note into a bookmark. Returns 200 so Cloud Tasks doesn't retry a permanent failure."""
+    await job_ref.update({"status": "failed", "error": error[:500],
+                          "updated_at": datetime.now(timezone.utc)})
+    return {"status": "failed", "error": error[:200]}
+
+
 def _verify_oidc(request: Request) -> None:
     """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email.
     Thin wrapper over the shared verifier (kept as a module-level name so existing tests can
@@ -317,6 +326,10 @@ async def _process_job(job_id: str) -> dict:
     source: str = job.get("source", "web")
     note_hint: str | None = job.get("note_hint")
     process_ai: bool = job.get("process_ai", True) is not False
+    # Re-extract: overwrite this existing note in place instead of minting a new one. On a
+    # failed re-extract the salvage path must NEVER clobber it (a dead source must not turn a
+    # good note into a bookmark) — guarded at both salvage entry points below.
+    target_note_id: str | None = job.get("target_note_id")
     now = datetime.now(timezone.utc)
     # This run's attempt number (bumped by the claim) — the transient ladder below compares
     # it against MAX_TRANSIENT_ATTEMPTS without a second Firestore read.
@@ -373,6 +386,11 @@ async def _process_job(job_id: str) -> dict:
         # the URL slug (a real 404 produced a full fake recipe). Write an honest is_fallback
         # bookmark and stop: no classify, no extract, no mini-app fan-out.
         if bundle.kind == "metadata_only" or bundle.strategy == "unreachable":
+            if target_note_id:
+                log.warning("re-extract source unreachable, failing without clobbering the note",
+                            extra={"job_id": job_id, "user_id": user_id, "url": url})
+                return await _fail_reextract(
+                    job_ref, "unreachable: source could not be retrieved (re-extract)")
             log.warning("source unreachable, salvaging bookmark instead of extracting",
                         extra={"job_id": job_id, "user_id": user_id, "url": url})
             return await _salvage_and_complete(
@@ -438,8 +456,25 @@ async def _process_job(job_id: str) -> dict:
                     if cover_image_url:
                         await record_image_generated(user_id)
 
-        # Every capture is a note.
-        note_id = _stable_id("note", job_id)
+        # Every capture is a note. A re-extract targets the existing note (overwrite in place)
+        # and must preserve owner-set state — created_at plus any flag the owner toggled through
+        # a dedicated action (favorite/pinned/public) — while still regenerating everything AI
+        # produced (title/summary/data/content_type/cover). `collection_ids`/`collection_id`
+        # need no special-casing: `_match_collections` below re-derives them for this SAME
+        # note_id, and pin/exclude overrides are keyed by note_id on the collection doc, so a
+        # manually pinned/excluded note stays pinned/excluded automatically. `user_note` lives
+        # in a separate annotations/{note_id} doc and is untouched by this write.
+        note_id = target_note_id or _stable_id("note", job_id)
+        created_at = now
+        preserved: dict = {}
+        if target_note_id:
+            existing = await db.collection("notes").document(note_id).get()
+            if existing.exists:
+                old = existing.to_dict() or {}
+                created_at = old.get("created_at") or now
+                for field in ("is_favorite", "is_public", "pinned_at"):
+                    if field in old:
+                        preserved[field] = old[field]
         # Embed title + summary + the (now enriched) data so search matches the note's content,
         # not just its headline.
         embedding = await _note_embedding(extracted.title, extracted.ai_summary, extracted.data)
@@ -470,8 +505,9 @@ async def _process_job(job_id: str) -> dict:
             "collection_id": collection_id,
             "data": firestore_safe(extracted.data),
             "acquisition": bundle.strategy,
-            "created_at": now,
+            "created_at": created_at,
             "updated_at": now,
+            **preserved,   # re-extract only: is_favorite/is_public/pinned_at carried over
         }
         if embedding is not None:
             note_doc["embedding"] = embedding
@@ -521,6 +557,14 @@ async def _process_job(job_id: str) -> dict:
                                   "error": f"transient: {type(e).__name__}: {e}"[:500],
                                   "updated_at": datetime.now(timezone.utc)})
             raise HTTPException(500, "Transient failure — Cloud Tasks will retry")
+
+        # A re-extract that failed permanently must NOT salvage — that would replace the
+        # existing note with a bookmark. Fail the job and leave the note untouched.
+        if target_note_id:
+            log.warning("re-extract failed, failing job without clobbering the note: %s: %s",
+                        type(e).__name__, e,
+                        extra={"job_id": job_id, "user_id": user_id, "url": url})
+            return await _fail_reextract(job_ref, f"reextract failed: {type(e).__name__}: {e}")
 
         # Permanent extraction failure (or transient at the cap) → salvage a bookmark
         # note. The capture is preserved even when the AI pipeline can't deliver.

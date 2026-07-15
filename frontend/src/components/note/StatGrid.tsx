@@ -2,9 +2,10 @@ import type { LucideIcon } from "lucide-react";
 import type { NoteAccent } from "@/lib/note-meta";
 
 // One at-a-glance fact (recipe time, trip budget, workout level, venue rating). Shared so
-// every template's stat row looks and wraps identically.
+// every template's stat row looks and wraps identically. `icon` is optional so the same grid
+// renders icon-less `data.facts[]` bands (label + value only).
 export interface Stat {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   label: string;
   value: string;
 }
@@ -42,7 +43,7 @@ export function StatGrid({
         <span
           className={`inline-flex items-center gap-2 rounded-full border border-border px-3.5 py-1.5 ${accent.soft}`}
         >
-          <s.icon className={`h-4 w-4 shrink-0 ${accent.text}`} />
+          {s.icon && <s.icon className={`h-4 w-4 shrink-0 ${accent.text}`} />}
           <span className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</span>
           <span className={`font-serif text-base text-ink ${capitalize ? "capitalize" : ""}`}>
             {s.value}
@@ -56,7 +57,7 @@ export function StatGrid({
     <div className={`grid gap-3 rounded-2xl border border-border p-4 ${accent.soft} ${cols}`}>
       {stats.map((s, i) => (
         <div key={i} className="flex min-w-0 flex-col items-center gap-1 text-center">
-          <s.icon className={`h-4 w-4 shrink-0 ${accent.text}`} />
+          {s.icon && <s.icon className={`h-4 w-4 shrink-0 ${accent.text}`} />}
           <div className="text-xs uppercase tracking-wider text-ink-soft">{s.label}</div>
           <div
             className={`break-words font-serif text-base leading-tight text-ink ${capitalize ? "capitalize" : ""}`}

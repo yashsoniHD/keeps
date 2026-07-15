@@ -260,6 +260,10 @@ class Settings:
     GOOGLE_PLACES_API_BASE: str = os.getenv("GOOGLE_PLACES_API_BASE", "https://places.googleapis.com/v1")
     # Place search/details results cache for this many hours — they change rarely.
     PLACES_DETAIL_CACHE_HOURS: int = int(os.getenv("PLACES_DETAIL_CACHE_HOURS", "168"))
+    # Cap Places enrichment per note (a long listicle) so a pathological 30-venue list can't run
+    # up the bill — the first N venues get photos/ratings/coords; the rest keep their extracted
+    # text and are simply un-enriched. Mirrors TRIP_MAX_GEOCODED_STOPS.
+    PLACES_MAX_ENRICHED_VENUES: int = int(os.getenv("PLACES_MAX_ENRICHED_VENUES", "15"))
 
     # --- Trips mini-app (itinerary fan-out) ---
     # Itinerary stops carry no coords, so the trip fan-out geocodes each stop by name via the same

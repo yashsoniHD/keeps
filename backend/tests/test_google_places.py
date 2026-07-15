@@ -38,7 +38,9 @@ def test_parse_details_flattens():
         "regularOpeningHours": {"weekdayDescriptions": ["Mon: 9–5"]},
         "websiteUri": "https://x.com", "internationalPhoneNumber": "+91 1",
         "googleMapsUri": "https://maps/x", "editorialSummary": {"text": "nice"},
-        "reservable": True, "photos": [{"name": "places/p1/photos/y"}],
+        "reservable": True,
+        "photos": [{"name": "places/p1/photos/y", "widthPx": 4032, "heightPx": 3024,
+                    "authorAttributions": [{"displayName": "Jane Doe"}]}],
     }
     d = gp._parse_details(raw)
     assert d["opening_hours"] == ["Mon: 9–5"]
@@ -46,6 +48,31 @@ def test_parse_details_flattens():
     assert d["photo_name"] == "places/p1/photos/y" and d["editorial_summary"] == "nice"
     assert d["reservable"] is True
     assert d["locality"] is None  # no addressComponents in this fixture
+    # first photo's intrinsic dimensions + author attribution (redesigned layouts need them)
+    assert d["photo_width"] == 4032 and d["photo_height"] == 3024
+    assert d["photo_attribution"] == "Jane Doe"
+
+
+def test_parse_details_no_photos_leaves_photo_fields_none():
+    d = gp._parse_details({"id": "p1", "displayName": {"text": "X"}})
+    assert d["photo_name"] is None
+    assert d["photo_width"] is None and d["photo_height"] is None
+    assert d["photo_attribution"] is None
+
+
+async def test_photo_url_requests_1200px(monkeypatch):
+    """The redesigned templates need larger photos — the default request width is 1200px."""
+    monkeypatch.setattr(gp, "enabled", lambda: True)
+    seen = {}
+
+    async def fake_get(path, field_mask=None, params=None):
+        seen["params"] = params
+        return {"photoUri": "https://lh3/x.jpg"}
+
+    monkeypatch.setattr(gp, "_get", fake_get)
+    out = await gp.photo_url("places/p1/photos/y")
+    assert out == "https://lh3/x.jpg"
+    assert seen["params"]["maxWidthPx"] == 1200
 
 
 def test_locality_from_components_prefers_locality_type():

@@ -187,18 +187,28 @@ def _enrichment_from_details(venue: dict, details: dict) -> dict:
         "google_maps_url": details.get("google_maps_url"),
         "reservable": details.get("reservable"),
         "photo_url": details.get("photo_url"),
+        "photo_width": details.get("photo_width"),
+        "photo_height": details.get("photo_height"),
+        "photo_attribution": details.get("photo_attribution"),
     }
 
 
 async def _enrich_venues(venues: list, region: str) -> tuple[list, str | None]:
     """Match each extracted venue to Google Places and merge photo/rating/coords/action links
-    onto it. Returns (venues, first_photo_url) — the photo is the cover candidate."""
+    onto it. Returns (venues, first_photo_url) — the photo is the cover candidate. Bounded by
+    PLACES_MAX_ENRICHED_VENUES so a long listicle can't run up the bill: venues past the cap keep
+    their extracted text and are appended un-enriched (mirrors _geocode_days)."""
     cover: str | None = None
     out: list = []
+    budget = settings.PLACES_MAX_ENRICHED_VENUES
     for v in venues:
         if not isinstance(v, dict) or not (v.get("name") or "").strip():
             out.append(v)
             continue
+        if budget <= 0:
+            out.append(v)  # past the cap: un-enriched, but kept so the list stays complete
+            continue
+        budget -= 1
         name = v["name"].strip()
         location = v.get("location") or ""
         source_city = v.get("city") or _city_from_location(location)

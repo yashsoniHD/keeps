@@ -38,8 +38,9 @@ _DURATION_FIELDS = ("videoDuration", "duration")
 # `images` URL array or as `childPosts` objects each carrying their own `displayUrl`.
 _IMAGES_FIELDS = ("images", "imageUrls")
 # Cap how many slides we pull — keeps the Gemini request small and the (free) image
-# fetches bounded for a pathological 20-slide carousel.
-MAX_CAROUSEL_IMAGES = 10
+# fetches bounded for a pathological 20-slide carousel. 12 covers an intro slide + a
+# 10-venue listicle (10 dropped the last venue).
+MAX_CAROUSEL_IMAGES = 12
 
 
 def _carousel_images(item: dict) -> list[str]:

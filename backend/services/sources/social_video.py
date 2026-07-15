@@ -36,6 +36,11 @@ _DOMAINS = ("instagram.com", "facebook.com", "fb.watch", "tiktok.com")
 _IMAGE_MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                "webp": "image/webp", "gif": "image/gif"}
 
+# How much of a post's caption to keep. Listicle captions ("10 restaurants…", full recipe in
+# the description) routinely run past 2k chars — truncating them was the root cause of venues
+# 4–10 coming back bare. Still bounded so a pathological caption can't bloat the Gemini request.
+_CAPTION_MAX = 4000
+
 os.makedirs(settings.TEMP_DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -112,7 +117,7 @@ def _metadata(info: dict, url: str) -> dict:
         "author": info.get("uploader") or info.get("creator") or info.get("channel"),
         "platform": _platform(url),
         "duration": int(info.get("duration") or 0),
-        "caption": (info.get("description") or "")[:2000],
+        "caption": (info.get("description") or "")[:_CAPTION_MAX],
     }
 
 
@@ -264,7 +269,7 @@ async def _acquire_via_apify(url: str) -> ContentBundle | None:
         "author": result.get("author"),
         "platform": _platform(url),
         "duration": result.get("duration") or 0,
-        "caption": (result.get("caption") or "")[:2000],
+        "caption": (result.get("caption") or "")[:_CAPTION_MAX],
     }
 
     video_url = result.get("video_url")
@@ -301,7 +306,19 @@ async def _acquire_via_apify(url: str) -> ContentBundle | None:
 
 async def acquire(url: str) -> ContentBundle:
     file_path = None
+    # Instagram non-reel posts (/p/, /tv/) are Apify-first: the post scraper returns the caption
+    # + EVERY carousel slide as vision input, where yt-dlp on a mixed carousel only ever gets the
+    # single video slide (dropping every image-only venue). Reels/TikTok/FB stay yt-dlp-first
+    # (cheaper, usually works). Bounded by APIFY_DAILY_GLOBAL_CAP.
+    apify_first = _platform(url) == "instagram" and "/reel" not in url.lower()
+    apify_tried = False
     try:
+        if apify_first:
+            apify_tried = True
+            apify_bundle = await _acquire_via_apify(url)
+            if apify_bundle is not None:
+                return apify_bundle
+
         try:
             file_path, info = await asyncio.wait_for(asyncio.to_thread(_download, url),
                                                      timeout=DOWNLOAD_TIMEOUT_SECONDS)
@@ -315,7 +332,8 @@ async def acquire(url: str) -> ContentBundle:
             file_path, info = None, None
 
         if not file_path or not info:
-            apify_bundle = await _acquire_via_apify(url)
+            # Skip a second (paid) Apify attempt if it already missed above.
+            apify_bundle = None if apify_tried else await _acquire_via_apify(url)
             return apify_bundle if apify_bundle is not None else await _caption_fallback(url)
 
         meta = _metadata(info, url)

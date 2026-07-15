@@ -20,7 +20,7 @@ router = APIRouter(tags=["ingest"])
 log = logging.getLogger("clipnote.ingest")
 
 
-async def _enforce_cost_caps(db, user_id: str) -> bool:
+async def _enforce_cost_caps(db, user_id: str, *, skip_note_cap: bool = False) -> bool:
     """Budget guardrails. Returns True when the capture must be *deferred* (parked, not
     processed today) and False when it may proceed now.
 
@@ -37,12 +37,15 @@ async def _enforce_cost_caps(db, user_id: str) -> bool:
     # salvage docs (absent on normal notes), and Firestore can't express "!= True OR missing"
     # in one aggregate, so we count all notes minus the fallback ones (both cheap count()s, no
     # doc reads billed).
-    notes_q = db.collection("notes").where("user_id", "==", user_id)
-    total_agg = await notes_q.count().get()
-    fallback_agg = await notes_q.where("is_fallback", "==", True).count().get()
-    note_count = total_agg[0][0].value - fallback_agg[0][0].value
-    if note_count >= settings.MAX_NOTES_PER_USER:
-        raise HTTPException(429, "Note limit reached for this account.")
+    # Re-extract overwrites an existing note in place, so the lifetime cap doesn't apply —
+    # a user at the note limit must still be able to heal what they already have.
+    if not skip_note_cap:
+        notes_q = db.collection("notes").where("user_id", "==", user_id)
+        total_agg = await notes_q.count().get()
+        fallback_agg = await notes_q.where("is_fallback", "==", True).count().get()
+        note_count = total_agg[0][0].value - fallback_agg[0][0].value
+        if note_count >= settings.MAX_NOTES_PER_USER:
+            raise HTTPException(429, "Note limit reached for this account.")
 
     transaction = db.transaction()
 
@@ -103,15 +106,20 @@ async def _parse_ingest_request(request: Request) -> IngestRequest:
                          content=content, source=source, note_hint=note_hint, process_ai=process_ai)
 
 
-async def _create_job(db, user_id: str, body: IngestRequest) -> JobStatus:
+async def _create_job(db, user_id: str, body: IngestRequest,
+                      target_note_id: str | None = None) -> JobStatus:
     """Shared by both ingest endpoints: enforce caps, write the job doc, enqueue the worker.
     When the global daily kill-switch has tripped the capture is parked ("deferred") instead
-    of enqueued — drained later once the budget resets — so a launch spike never rejects users."""
-    deferred = await _enforce_cost_caps(db, user_id)
+    of enqueued — drained later once the budget resets — so a launch spike never rejects users.
+
+    `target_note_id` (re-extract): the worker overwrites that existing note in place instead of
+    minting a new one (preserving its created_at), so a note captured before an extraction fix
+    can be re-healed against its original source_url."""
+    deferred = await _enforce_cost_caps(db, user_id, skip_note_cap=target_note_id is not None)
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     status = "deferred" if deferred else "pending"
-    await db.collection("jobs").document(job_id).set({
+    job_doc = {
         "user_id": user_id,
         "input_type": body.input_type,    # "url" | "text" | "image" | "pdf" | "voice"
         "url": body.url or None,
@@ -130,7 +138,10 @@ async def _create_job(db, user_id: str, body: IngestRequest) -> JobStatus:
         "attempt_count": 0,
         "created_at": now,
         "updated_at": now,
-    })
+    }
+    if target_note_id:
+        job_doc["target_note_id"] = target_note_id  # re-extract: overwrite this note in place
+    await db.collection("jobs").document(job_id).set(job_doc)
 
     await touch_user_activity(user_id)  # retention signal (best-effort)
     if deferred:

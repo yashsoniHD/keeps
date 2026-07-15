@@ -37,7 +37,7 @@ class FakeUpload:
 
 @pytest.fixture(autouse=True)
 def patch_ingest(fake_db, monkeypatch):
-    async def no_caps(db, user_id):
+    async def no_caps(db, user_id, **kw):
         return None
 
     async def public_ok(url):

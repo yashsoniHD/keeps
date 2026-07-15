@@ -129,6 +129,19 @@ export async function ingestVoice(
   return ingestMedia(file, "voice", title);
 }
 
+// Re-run a note's source through the extraction pipeline, overwriting the note in place
+// (heals a sparse or stale capture). Returns a job_id the caller watches via watchJob; the
+// note refreshes once the job completes. Counts against the per-user daily ingest cap.
+export async function reextractNote(noteId: string): Promise<{ job_id: string }> {
+  const res = await apiFetch(`/api/notes/${noteId}/reextract`, { method: "POST" });
+  if (!res.ok)
+    throw new ApiError(
+      await errorDetail(res, "Couldn't re-extract this note. Please try again."),
+      res.status,
+    );
+  return res.json();
+}
+
 // Owner edits to a note: a private annotation (user_note) and/or recategorisation
 // (content_type). Writes route through the backend (Firestore forbids client writes);
 // the feed's onSnapshot listener reflects the change live.

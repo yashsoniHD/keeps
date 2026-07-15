@@ -186,6 +186,10 @@ def _parse_details(raw: dict) -> dict:
     loc = raw.get("location") or {}
     photos = raw.get("photos") or []
     hours = (raw.get("regularOpeningHours") or {}).get("weekdayDescriptions") or []
+    # First photo's intrinsic dimensions + author attribution (same response, no extra cost) —
+    # the redesigned templates use the aspect ratio to frame the image and must credit the author.
+    photo = photos[0] if photos else {}
+    attributions = photo.get("authorAttributions") or []
     return {
         "place_id": raw.get("id"),
         "name": (raw.get("displayName") or {}).get("text") or "",
@@ -203,7 +207,10 @@ def _parse_details(raw: dict) -> dict:
         "google_maps_url": raw.get("googleMapsUri"),
         "editorial_summary": (raw.get("editorialSummary") or {}).get("text"),
         "reservable": raw.get("reservable"),
-        "photo_name": (photos[0].get("name") if photos else None),
+        "photo_name": (photo.get("name") if photo else None),
+        "photo_width": photo.get("widthPx") if photo else None,
+        "photo_height": photo.get("heightPx") if photo else None,
+        "photo_attribution": (attributions[0].get("displayName") if attributions else None),
     }
 
 
@@ -307,7 +314,7 @@ async def place_details(place_id: str) -> dict | None:
     return parsed
 
 
-async def photo_url(photo_name: str, max_w: int = 800) -> str | None:
+async def photo_url(photo_name: str, max_w: int = 1200) -> str | None:
     """Resolve a Place photo resource name to a keyless, publicly loadable googleusercontent URL
     (skipHttpRedirect returns the URI as JSON instead of a 302). None when disabled or on error."""
     if not enabled() or not photo_name:

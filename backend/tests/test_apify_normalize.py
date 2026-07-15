@@ -88,8 +88,10 @@ def test_normalize_carousel_from_child_posts():
 
 
 def test_carousel_images_capped():
+    # 12 covers an intro slide + a 10-venue listicle (10 dropped the last venue).
+    assert apify.MAX_CAROUSEL_IMAGES == 12
     item = {"images": [f"https://cdn/{i}.jpg" for i in range(25)]}
-    assert len(apify._carousel_images(item)) == apify.MAX_CAROUSEL_IMAGES
+    assert len(apify._carousel_images(item)) == 12
 
 
 def test_normalize_tiktok_item():

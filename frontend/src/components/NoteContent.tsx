@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { RotateCcw, ArrowRight, BookmarkPlus, Loader2 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { RotateCcw, ArrowRight, BookmarkPlus, Loader2, X } from "lucide-react";
 import type { Note } from "@/lib/types";
-import { ingest } from "@/lib/api";
 import { PillButton, PillLink } from "@/components/shared/PillButton";
 import { ClipMark } from "@/components/ClipMark";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { NoteHeader } from "./note/NoteHeader";
+import { NoteActions, NoteMeta } from "./note/NoteHeader";
+import { SmartImage } from "./note/SmartImage";
+import { useImageAspect } from "./note/useImageAspect";
 import { TypeBadge } from "./note/TypeBadge";
 import { SourcePill } from "./note/SourcePill";
 import { formatDate, noteAccent, noteIcon } from "@/lib/note-meta";
@@ -112,58 +112,83 @@ function SafeNoteBody({ note, onPatch }: { note: Note; onPatch?: (patch: Partial
 }
 
 // Salvage notes (backend couldn't process the content) carry is_fallback — offer a
-// one-tap re-ingest, which lands a fresh job/note in the feed.
-function FallbackBanner({ note }: { note: Note }) {
-  const navigate = useNavigate();
-  const [retrying, setRetrying] = useState(false);
-  const retry = async () => {
-    setRetrying(true);
-    try {
-      await ingest(note.source_url);
-      navigate({ to: "/" });
-    } catch {
-      setRetrying(false);
-    }
-  };
+// one-tap re-extract, which re-runs the source through the pipeline and refreshes this note
+// in place once the job completes. `retrying` comes from the same route-level state the header
+// Re-extract button uses, so the two entry points can't fire overlapping jobs.
+function FallbackBanner({
+  note,
+  onRetry,
+  retrying,
+}: {
+  note: Note;
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
   return (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/50 px-4 py-3 text-sm text-ink-soft">
       <span>Limited preview. We couldn't fully process this capture.</span>
-      {/* Retry re-ingests the original URL; a typed/uploaded capture has none, so it's hidden. */}
-      {note.source_url && (
+      {/* Retry re-extracts the original URL; a typed/uploaded capture has none, so it's hidden. */}
+      {note.source_url && onRetry && (
         <PillButton
           type="button"
           variant="secondary"
           size="sm"
-          onClick={retry}
+          onClick={onRetry}
           disabled={retrying}
           className="shrink-0"
         >
           <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />
-          {retrying ? "Retrying…" : "Retry"}
+          {retrying ? "Re-extracting" : "Retry"}
         </PillButton>
       )}
     </div>
   );
 }
 
-// Header for the public /p/{id} view: branded, no owner controls (share/delete) and no
-// back-link into the private feed. The wordmark + bottom CTA both route to sign-up.
-function PublicNoteHeader({ note }: { note: Note }) {
+// Dismissible banner for a re-extract job that ended in the backend's deliberate failed state
+// (a dead source) or a request-level error (429 / network). The note itself was left untouched.
+function ReextractErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
   return (
-    <header className="mb-8 flex flex-col gap-5">
-      <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-ink">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
-          <ClipMark className="h-3.5 w-3.5" />
-        </span>
-        Clipnote
-      </Link>
+    <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-ink">
+      <span>{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="shrink-0 rounded-full p-1 text-ink-soft transition-colors hover:text-ink"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+// Top row of the public /p/{id} view: the branded wordmark (routes to sign-up). No owner
+// controls and no back-link into the private feed. Mirrors NoteActions' placement so the
+// hero layout below is shared between the owner and public variants.
+function PublicActions() {
+  return (
+    <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-ink">
+      <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
+        <ClipMark className="h-3.5 w-3.5" />
+      </span>
+      Clipnote
+    </Link>
+  );
+}
+
+// Pill row + plain (non-editable) title for the public view — the meta block the shared hero
+// layout places either stacked or in a portrait cover's right column.
+function PublicMeta({ note }: { note: Note }) {
+  return (
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2">
         <TypeBadge type={note.content_type} size="md" />
         <SourcePill domain={note.source_domain} url={note.source_url} />
         <span className="text-xs text-ink-soft">{formatDate(note.created_at)}</span>
       </div>
       <h1 className="font-serif text-3xl leading-[1.05] text-ink md:text-5xl">{note.title}</h1>
-    </header>
+    </div>
   );
 }
 
@@ -228,44 +253,6 @@ function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
   );
 }
 
-// Aspect-ratio of the cover decides the hero layout: a wide, sizeable image
-// (article/recipe/travel hero) becomes a full-width banner; a square/portrait/small image
-// (a creator face or reel thumbnail from a social video) is "compact" and renders as a
-// centered contained card so it is never crudely cropped. We measure the image off-screen
-// first so the choice doesn't flash. "loading" reuses the banner-shaped fallback; "none"
-// covers no-cover and broken images alike.
-type CoverKind = "loading" | "none" | "banner" | "compact";
-
-// Returns the layout bucket plus the measured aspect ratio (width / height). The compact
-// branch feeds `ratio` into an aspect-ratio box so a portrait cover shows in full instead of
-// being cropped into a band.
-function useCoverKind(url?: string | null): { kind: CoverKind; ratio: number } {
-  const [state, setState] = useState<{ kind: CoverKind; ratio: number }>(
-    url ? { kind: "loading", ratio: 1 } : { kind: "none", ratio: 1 },
-  );
-  useEffect(() => {
-    if (!url) {
-      setState({ kind: "none", ratio: 1 });
-      return;
-    }
-    setState({ kind: "loading", ratio: 1 });
-    let live = true;
-    const img = new Image();
-    img.onload = () => {
-      if (!live) return;
-      const ratio = img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
-      const kind: CoverKind = img.naturalWidth >= 480 && ratio >= 1.3 ? "banner" : "compact";
-      setState({ kind, ratio });
-    };
-    img.onerror = () => live && setState({ kind: "none", ratio: 1 });
-    img.src = url;
-    return () => {
-      live = false;
-    };
-  }, [url]);
-  return state;
-}
-
 // Gradient + faded type-icon stand-in so the detail view never reads as empty — the same
 // accent system the feed cards use (note-meta), scaled up. Used when there's no cover, a
 // broken one, or while measuring; also the safety net when an AI cover is capped/disabled.
@@ -286,6 +273,10 @@ export function NoteContent({
   note,
   onDelete,
   onPatch,
+  onReextract,
+  reextracting,
+  reextractError,
+  onDismissReextractError,
   variant = "owner",
   onSave,
   saving,
@@ -294,6 +285,10 @@ export function NoteContent({
   note: Note;
   onDelete?: () => void;
   onPatch?: (patch: Partial<Note>) => void;
+  onReextract?: () => void; // owner-only: re-run the source through extraction
+  reextracting?: boolean; // true from click until the job completes or fails
+  reextractError?: string | null; // set when the job failed or the request itself errored
+  onDismissReextractError?: () => void;
   variant?: "owner" | "public";
   onSave?: () => void; // public view: save this shared note to the viewer's account
   saving?: boolean;
@@ -304,44 +299,86 @@ export function NoteContent({
   // Key off the structural template (not the editable category) so a recategorised
   // product doesn't render both its own image and the shared hero.
   const showHero = resolveTemplate(note) !== "product";
-  const { kind: coverKind, ratio: coverRatio } = useCoverKind(
-    showHero ? note.cover_image_url : null,
-  );
   const url = note.cover_image_url;
+  // Measure the cover off-screen so the hero layout is chosen before it paints. A wide cover
+  // (ratio >= 1.3) becomes a full-width banner; a portrait/square cover pairs beside the title.
+  const { status, ratio } = useImageAspect(showHero ? url : null);
+  const hasCover = showHero && !!url && status === "loaded";
+  const banner = hasCover && ratio >= 1.3;
+  const portrait = hasCover && ratio < 1.3;
+  const loadingCover = showHero && !!url && status === "loading";
+
+  const actions = isPublic ? (
+    <PublicActions />
+  ) : (
+    <NoteActions
+      note={note}
+      onDelete={onDelete}
+      onReextract={onReextract}
+      reextracting={reextracting}
+    />
+  );
+  const meta = isPublic ? (
+    <PublicMeta note={note} />
+  ) : (
+    <NoteMeta note={note} onPatch={onPatch} />
+  );
+
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
-      {isPublic ? (
-        <PublicNoteHeader note={note} />
-      ) : (
-        <NoteHeader note={note} onDelete={onDelete} onPatch={onPatch} />
+      {actions}
+      {isPublic && (
+        <div className="mt-6">
+          <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />
+        </div>
       )}
-      {isPublic && <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />}
-      {/* Salvage retry re-ingests via an authed call — hide it on the public view. */}
-      {note.is_fallback && !isPublic && <FallbackBanner note={note} />}
-      {showHero &&
-        (coverKind === "compact" && url ? (
-          // Portrait/small cover (reel thumbnail, creator face): a centered, contained card
-          // sized to the image's own aspect (clamped), so it reads as a deliberate poster
-          // instead of a cropped band or a lonely thumbnail.
-          <div className="mb-8 flex justify-center">
-            <div
-              className={`w-full max-w-[16rem] overflow-hidden rounded-3xl border border-border ${noteAccent(note.content_type).soft}`}
-            >
-              <img
-                src={url}
-                alt=""
-                style={{ aspectRatio: Math.min(Math.max(coverRatio, 0.62), 1.4) }}
-                className="w-full object-cover"
-              />
+      {/* Re-extract failed (dead source) or the request itself errored — the note was left
+          untouched either way. Hidden on the public view (no owner controls there). */}
+      {reextractError && !isPublic && onDismissReextractError && (
+        <div className="mt-6">
+          <ReextractErrorBanner message={reextractError} onDismiss={onDismissReextractError} />
+        </div>
+      )}
+      {/* Salvage retry re-extracts via an authed call — hide it on the public view. */}
+      {note.is_fallback && !isPublic && (
+        <div className="mt-6">
+          <FallbackBanner note={note} onRetry={onReextract} retrying={reextracting} />
+        </div>
+      )}
+
+      {portrait ? (
+        // A single meta block and a single SmartImage, laid out with responsive utilities
+        // rather than duplicated CSS-toggled subtrees — two live mounts of NoteMeta would each
+        // hold their own EditableTitle/CategoryEditor state and desync across a breakpoint
+        // change (rotation, resize) mid-edit. Mobile: meta first, then a full-width 16:9
+        // blur-fill cover (DOM order). md+: cover card on the left, meta on the right
+        // (order-* flips the visual order without a second mount).
+        <div className="mt-6 flex flex-col gap-5 md:flex-row md:items-center md:gap-8">
+          <div className="order-2 md:order-1 md:shrink-0">
+            <SmartImage
+              src={url}
+              frameClass="aspect-[16/9] w-full rounded-3xl border border-border md:aspect-[4/5] md:w-56 lg:w-64"
+              loading="eager"
+            />
+          </div>
+          <div className="order-1 md:order-2 md:flex-1">{meta}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6">{meta}</div>
+          {banner ? (
+            <div className="mt-8 overflow-hidden rounded-3xl border border-border">
+              <img src={url} alt="" className="h-56 w-full object-cover md:h-72" />
             </div>
-          </div>
-        ) : coverKind === "banner" && url ? (
-          <div className="mb-8 overflow-hidden rounded-3xl border border-border">
-            <img src={url} alt="" className="h-56 w-full object-cover md:h-72" />
-          </div>
-        ) : (
-          <CoverFallback note={note} className="mb-8 h-56 w-full md:h-72" />
-        ))}
+          ) : loadingCover ? (
+            // Hold neutral space while measuring so a real cover doesn't flash the fallback icon.
+            <div className="mt-8 h-56 w-full rounded-3xl border border-border bg-card md:h-72" />
+          ) : (
+            showHero && <CoverFallback note={note} className="mt-8 h-56 w-full md:h-72" />
+          )}
+        </>
+      )}
+
       <div className="mt-8">
         {/* onPatch is owner-only (undefined on the public view), so the editable body block
             inside GenericNote stays read-only for shared notes. */}

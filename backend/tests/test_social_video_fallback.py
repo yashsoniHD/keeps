@@ -6,6 +6,7 @@ the caption) instead of letting the resolver drop through to the generic login-w
 import pytest
 
 import services.sources.social_video as sv
+from models.note import ContentBundle
 
 _OG_HTML = """
 <html><head>
@@ -123,6 +124,73 @@ async def test_apify_video_path_when_ytdlp_blocked(monkeypatch):
     assert bundle.video_uri == "gs://bucket/media/x.mp4"
     assert bundle.images == ["https://storage.googleapis.com/covers/abc.jpg"]
     assert bundle.metadata["caption"] == "Best 3 cafes in Lisbon"
+
+
+def test_caption_cap_is_4000():
+    """Listicle captions run long; the cap is 4000 (was 2000, which truncated later venues)."""
+    assert sv._CAPTION_MAX == 4000
+    meta = sv._metadata({"description": "x" * 5000, "title": "t"},
+                        "https://www.instagram.com/p/x/")
+    assert len(meta["caption"]) == 4000
+
+
+async def test_instagram_post_is_apify_first(monkeypatch):
+    """A non-reel IG post (/p/) tries Apify FIRST — its post scraper returns the caption + every
+    carousel slide, where yt-dlp on a mixed carousel only gets the video slide. yt-dlp must not
+    run at all when Apify succeeds."""
+    def _no_download(url):
+        raise AssertionError("yt-dlp must not run when Apify succeeds for a /p/ post")
+
+    async def fake_apify(url):
+        return ContentBundle(kind="text", text="10 cafes in Lisbon", strategy="apify_carousel",
+                             images=["https://cdn/1.jpg"], metadata={"platform": "instagram"})
+
+    monkeypatch.setattr(sv, "_download", _no_download)
+    monkeypatch.setattr(sv, "_acquire_via_apify", fake_apify)
+
+    bundle = await sv.acquire("https://www.instagram.com/p/DY6zt0_DE3v/")
+    assert bundle.strategy == "apify_carousel"
+    assert bundle.text == "10 cafes in Lisbon"
+
+
+async def test_instagram_reel_is_ytdlp_first(monkeypatch):
+    """Reels stay yt-dlp-first (cheaper, usually works): the download is attempted before Apify."""
+    order = []
+
+    def fake_download(url):
+        order.append("download")
+        raise RuntimeError("blocked")
+
+    async def fake_apify(url):
+        order.append("apify")
+        return None
+
+    monkeypatch.setattr(sv, "_download", fake_download)
+    monkeypatch.setattr(sv, "_acquire_via_apify", fake_apify)
+    monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
+
+    bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
+    assert order == ["download", "apify"]  # yt-dlp attempted before Apify
+    assert bundle.strategy == "social_og"
+
+
+async def test_instagram_post_apify_miss_falls_to_ytdlp_then_og(monkeypatch):
+    """When Apify-first misses on a /p/ post, fall through to yt-dlp, then og-caption — and don't
+    re-attempt the (paid) Apify scrape a second time."""
+    apify_calls = {"n": 0}
+
+    async def fake_apify(url):
+        apify_calls["n"] += 1
+        return None  # miss
+
+    monkeypatch.setattr(sv, "_acquire_via_apify", fake_apify)
+    monkeypatch.setattr(sv, "_download", _raise_download_block)  # yt-dlp blocked
+    monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
+
+    bundle = await sv.acquire("https://www.instagram.com/p/DY6zt0_DE3v/")
+    assert bundle.strategy == "social_og"
+    assert "Best 3 cafes in Lisbon" in bundle.text
+    assert apify_calls["n"] == 1  # tried once, not re-attempted in the ladder
 
 
 async def test_apify_cap_reached_falls_through_to_og(monkeypatch):

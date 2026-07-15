@@ -4,6 +4,7 @@ import { noteAccent } from "@/lib/note-meta";
 import { TripMap } from "@/components/shared/TripMap";
 import { PackingList } from "@/components/shared/PackingList";
 import { StatGrid, type Stat } from "../StatGrid";
+import { SectionHeader } from "../SectionHeader";
 
 interface ItineraryData {
   destination?: string;
@@ -25,21 +26,21 @@ export function ItineraryNote({ note }: { note: Note }) {
       { icon: Calendar, label: "Duration", value: data.duration },
       { icon: Wallet, label: "Budget", value: data.budget },
       { icon: Sun, label: "Best season", value: data.bestSeason },
-    ] as { icon: LucideIcon; label: string; value?: string }[]
+    ] as { icon?: LucideIcon; label: string; value?: string }[]
   ).filter((s): s is Stat => Boolean(s.value));
 
   return (
-    <div>
+    <div className="space-y-10">
       <StatGrid stats={stats} accent={accent} />
 
       {/* Live map of geocoded stops — renders nothing without a Maps key or coordinates. */}
       {(data.days?.length ?? 0) > 0 && (
-        <div className="mt-6">
+        <div>
           <TripMap days={data.days!} />
         </div>
       )}
 
-      <div className="mt-10 space-y-10">
+      <div className="space-y-10">
         {(data.days ?? []).map((day) => (
           <section key={day.day} className="relative">
             <div className="mb-5 flex items-baseline gap-3">
@@ -72,10 +73,10 @@ export function ItineraryNote({ note }: { note: Note }) {
       </div>
 
       {data.tips && data.tips.length > 0 && (
-        <section className="mt-10 rounded-2xl border border-border bg-card p-5">
-          <h2 className="inline-flex items-center gap-2 font-serif text-xl text-ink">
-            <Lightbulb className={`h-4 w-4 ${accent.text}`} /> Good to know
-          </h2>
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <SectionHeader icon={Lightbulb} iconClassName={accent.text}>
+            Good to know
+          </SectionHeader>
           <ul className="mt-3 space-y-2">
             {data.tips.map((tip, i) => (
               <li key={i} className="flex items-start gap-3 text-ink">

@@ -1,6 +1,8 @@
-import { BookOpen, Lightbulb, Users } from "lucide-react";
+import { BookOpen, Users } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
+import { SectionHeader } from "../SectionHeader";
+import { FactsBlock } from "../FactsBlock";
 
 // Matches the backend `book` schema (services/gemini.py TYPE_PROMPTS["book"]).
 interface BookData {
@@ -28,24 +30,13 @@ export function BookNote({ note }: { note: Note }) {
 
       {data.premise && <p className="text-lg leading-relaxed text-ink">{data.premise}</p>}
 
-      {data.facts && data.facts.length > 0 && (
-        <section className={`rounded-2xl border border-border p-5 ${accent.soft}`}>
-          <dl className="divide-y divide-border/60">
-            {data.facts.map((f, i) => (
-              <div key={i} className="flex items-baseline justify-between gap-4 py-2.5">
-                <dt className="text-sm text-ink-soft">{f.label}</dt>
-                <dd className="text-right text-sm font-medium text-ink">{f.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      )}
+      <FactsBlock facts={data.facts} accent={accent} />
 
       {data.keyIdeas && data.keyIdeas.length > 0 && (
         <section>
-          <h2 className="inline-flex items-center gap-2 font-serif text-2xl text-ink">
-            <BookOpen className={`h-5 w-5 ${accent.text}`} /> Key ideas
-          </h2>
+          <SectionHeader icon={BookOpen} iconClassName={accent.text}>
+            Key ideas
+          </SectionHeader>
           <ul className="mt-4 space-y-3">
             {data.keyIdeas.map((item, i) => (
               <li key={i} className="flex items-start gap-3 text-ink">
@@ -59,9 +50,9 @@ export function BookNote({ note }: { note: Note }) {
 
       {data.whoShouldRead && (
         <section className="rounded-2xl border border-border bg-card p-5">
-          <h2 className="inline-flex items-center gap-2 font-serif text-xl text-ink">
-            <Users className={`h-4 w-4 ${accent.text}`} /> Who should read it
-          </h2>
+          <SectionHeader icon={Users} iconClassName={accent.text}>
+            Who should read it
+          </SectionHeader>
           <p className="mt-2 leading-relaxed text-ink">{data.whoShouldRead}</p>
         </section>
       )}

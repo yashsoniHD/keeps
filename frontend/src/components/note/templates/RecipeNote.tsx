@@ -13,6 +13,7 @@ import type { Note } from "@/lib/types";
 import { pillClasses } from "@/components/shared/PillButton";
 import { noteAccent } from "@/lib/note-meta";
 import { StatGrid, type Stat } from "../StatGrid";
+import { SectionHeader } from "../SectionHeader";
 
 interface RecipeData {
   totalTime?: string;
@@ -64,19 +65,19 @@ export function RecipeNote({ note }: { note: Note }) {
       { icon: Gauge, label: "Effort", value: data.difficulty },
       { icon: Globe, label: "Cuisine", value: data.cuisine },
       { icon: Zap, label: "Calories", value: data.calories },
-    ] as { icon: LucideIcon; label: string; value?: string }[]
+    ] as { icon?: LucideIcon; label: string; value?: string }[]
   ).filter((s): s is Stat => Boolean(s.value));
 
   // No stats extracted: StatGrid renders nothing and the note opens straight into
   // Ingredients/Method (hasContent guarantees those exist).
 
   return (
-    <div>
+    <div className="space-y-10">
       <StatGrid stats={stats} accent={accent} capitalize />
 
-      <div className="mt-10 grid gap-10 md:grid-cols-[1fr_1.4fr]">
+      <div className="grid gap-10 md:grid-cols-[1fr_1.4fr]">
         <section>
-          <h2 className="font-serif text-2xl text-ink">Ingredients</h2>
+          <SectionHeader>Ingredients</SectionHeader>
           <div className="mt-4 space-y-5">
             {(data.ingredients ?? []).map((group, gi) => (
               <div key={gi}>
@@ -99,7 +100,7 @@ export function RecipeNote({ note }: { note: Note }) {
         </section>
 
         <section>
-          <h2 className="font-serif text-2xl text-ink">Method</h2>
+          <SectionHeader>Method</SectionHeader>
           <ol className="mt-4 space-y-5 border-l border-border pl-5">
             {(data.steps ?? []).map((step, i) => (
               <li key={i} className="flex gap-4 text-ink">
@@ -116,10 +117,10 @@ export function RecipeNote({ note }: { note: Note }) {
       </div>
 
       {data.tips && data.tips.length > 0 && (
-        <section className="mt-10 rounded-2xl border border-border bg-card p-5">
-          <h2 className="inline-flex items-center gap-2 font-serif text-xl text-ink">
-            <Lightbulb className={`h-4 w-4 ${accent.text}`} /> Tips
-          </h2>
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <SectionHeader icon={Lightbulb} iconClassName={accent.text}>
+            Tips
+          </SectionHeader>
           <ul className="mt-3 space-y-2">
             {data.tips.map((tip, i) => (
               <li key={i} className="flex items-start gap-3 text-ink">

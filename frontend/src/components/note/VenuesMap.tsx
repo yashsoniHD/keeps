@@ -26,30 +26,36 @@ function hasCoords(v: MappableVenue): v is Pinned {
   return typeof v.lat === "number" && typeof v.lng === "number" && !!v.name;
 }
 
-// A live Google map of a place note's venues. Renders nothing when no venue resolved to
-// coordinates (the venue list below always renders); shows the shared fallback when a browser
-// Maps key is missing or the API fails to load.
+// A live Google map of a place note's venues. Pins are numbered by each venue's position in
+// the full list (gaps preserved when a venue lacks coordinates, so a pin's number matches the
+// numbered article above). Renders nothing when fewer than two venues resolved to coordinates —
+// a single-venue note gets no map (its Directions action covers it). Shows the shared fallback
+// when a browser Maps key is missing or the API fails to load.
 export function VenuesMap({
   venues,
-  heightClass = "h-[40vh]",
+  heightClass = "h-64 md:h-72",
 }: {
   venues: MappableVenue[];
   heightClass?: string;
 }) {
-  const pins = useMemo<MapPin<Pinned>[]>(
-    () =>
-      venues.filter(hasCoords).map((v, i) => ({
+  const pins = useMemo<MapPin<Pinned>[]>(() => {
+    const out: MapPin<Pinned>[] = [];
+    venues.forEach((v, i) => {
+      if (!hasCoords(v)) return;
+      out.push({
         key: `${v.name}-${i}`,
         lat: v.lat,
         lng: v.lng,
         title: v.name,
         background: VENUE_PIN_COLOR,
+        glyph: String(i + 1), // list index — matches the numbered venue above
         data: v,
-      })),
-    [venues],
-  );
+      });
+    });
+    return out;
+  }, [venues]);
 
-  if (!pins.length) return null;
+  if (pins.length < 2) return null;
 
   return (
     <MapView

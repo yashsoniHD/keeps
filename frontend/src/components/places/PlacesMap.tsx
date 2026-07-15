@@ -35,7 +35,7 @@ export function PlacesMap({
         lng: i.lng,
         title: i.name,
         background: PLACE_STATUS_PIN[i.place_status].background,
-        glyph: PLACE_STATUS_PIN[i.place_status].glyph,
+        glyphColor: PLACE_STATUS_PIN[i.place_status].glyph,
         data: i,
       })),
     [items],

@@ -8,7 +8,8 @@ from google.cloud.firestore_v1.vector import Vector
 from pydantic import BaseModel, Field
 
 from config import settings
-from routers.ingest import _enforce_cost_caps
+from models.note import IngestRequest
+from routers.ingest import _create_job, _enforce_cost_caps
 from services import search_index
 from services.auth_dep import require_user
 from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
@@ -268,6 +269,31 @@ async def augment_note(note_id: str, body: AugmentNoteIn, user_id: str = Depends
     except Exception as e:  # noqa: BLE001 — re-index is best-effort, never fail the augment.
         log.warning("augment re-embed failed (%s): %s: %s", note_id, type(e).__name__, e)
     return {"ok": True, "id": note_id}
+
+
+@router.post("/notes/{note_id}/reextract")
+async def reextract_note(note_id: str, user_id: str = Depends(require_user)):
+    """Re-run the full extraction pipeline over a note's original source_url and overwrite the
+    note in place (its created_at is preserved). Heals notes captured before an extraction fix
+    (e.g. a listicle whose later venues came back bare) and is the real "Retry" behind salvage
+    bookmarks. Owner-only; counts against the per-user daily ingest cap. A now-dead source fails
+    the job WITHOUT clobbering the existing note (guarded in the worker).
+
+    Returns {job_id} so the client can watch the job doc and refresh the note in place."""
+    db = get_db()
+    snap = await db.collection("notes").document(note_id).get()
+    note = snap.to_dict() if snap.exists else None
+    if not note:
+        raise HTTPException(404, "Note not found")
+    if note.get("user_id") != user_id:
+        raise HTTPException(403, "Not your note")
+    source_url = note.get("source_url") or ""
+    if not source_url.startswith(("http://", "https://")):
+        # Typed/uploaded/AI notes have no web source to re-fetch.
+        raise HTTPException(400, "This note has no source URL to re-extract from.")
+    body = IngestRequest(input_type="url", url=source_url, source=note.get("source") or "web")
+    job = await _create_job(db, user_id, body, target_note_id=note_id)
+    return {"job_id": job.job_id}
 
 
 @router.post("/notes/{note_id}/share")

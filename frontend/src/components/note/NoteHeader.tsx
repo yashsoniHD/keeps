@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Pencil, Sparkles } from "lucide-react";
+import { ArrowLeft, Pencil, RefreshCw, Sparkles } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { formatDate } from "@/lib/note-meta";
 import { updateNote } from "@/lib/api";
@@ -103,14 +103,66 @@ function EditableTitle({
   );
 }
 
-export function NoteHeader({
+// Two-tap re-extract, mirroring DeleteButton's confirm pattern: the first tap arms it, the
+// second fires. Re-runs the source through the pipeline to heal a sparse or stale note in place.
+// Disabled + spinning from the moment the job starts until it completes or fails, so a repeat
+// click can't queue a second job (each one burns a daily ingest-cap slot).
+function ReextractButton({
+  onReextract,
+  running,
+}: {
+  onReextract: () => void;
+  running?: boolean;
+}) {
+  const [confirm, setConfirm] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  return (
+    <button
+      type="button"
+      aria-label={running ? "Re-extracting" : confirm ? "Confirm re-extract" : "Re-extract note"}
+      title="Re-extract from the source"
+      disabled={running}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (running) return;
+        if (!confirm) {
+          setConfirm(true);
+          timerRef.current = setTimeout(() => setConfirm(false), 2500);
+          return;
+        }
+        clearTimeout(timerRef.current);
+        setConfirm(false);
+        onReextract();
+      }}
+      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border text-sm transition-colors disabled:opacity-60 ${
+        confirm || running
+          ? "border-ink bg-ink px-3 text-paper"
+          : "w-9 border-border bg-card text-ink-soft hover:text-ink"
+      }`}
+    >
+      <RefreshCw className={`h-4 w-4 ${running ? "animate-spin" : ""}`} />
+      {running ? "Re-extracting" : confirm && "Sure?"}
+    </button>
+  );
+}
+
+// The top action row of the owner note view (Back · Ask · Re-extract · Share · Delete). Kept
+// separate from the meta/title block so NoteContent can hold it full-width above a side-by-side
+// portrait-cover hero while the pills + title move into the hero's right column.
+export function NoteActions({
   note,
   onDelete,
-  onPatch,
+  onReextract,
+  reextracting,
 }: {
   note: Note;
   onDelete?: () => void;
-  onPatch?: (patch: Partial<Note>) => void;
+  onReextract?: () => void;
+  reextracting?: boolean;
 }) {
   const router = useRouter();
   const canGoBack = useCanGoBack();
@@ -125,38 +177,52 @@ export function NoteHeader({
   };
 
   return (
-    <header className="mb-8 flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between">
+      <button
+        type="button"
+        onClick={goBack}
+        className="inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
+      <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={goBack}
-          className="inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
+          onClick={() => openChat()}
+          aria-label="Ask about this note"
+          title="Ask about this note"
+          className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
         >
-          <ArrowLeft className="h-4 w-4" />
-          Back
+          <Sparkles className="h-4 w-4 text-summary" aria-hidden />
         </button>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => openChat()}
-            aria-label="Ask about this note"
-            title="Ask about this note"
-            className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-          >
-            <Sparkles className="h-4 w-4 text-summary" aria-hidden />
-          </button>
-          <ShareButton note={note} />
-          {onDelete && <DeleteButton onDelete={onDelete} />}
-        </div>
+        {onReextract && note.source_url && (
+          <ReextractButton onReextract={onReextract} running={reextracting} />
+        )}
+        <ShareButton note={note} />
+        {onDelete && <DeleteButton onDelete={onDelete} />}
       </div>
+    </div>
+  );
+}
 
+// The pill row (category · source · date) + editable title. Shared between the stacked header
+// and the side-by-side portrait hero so the title behaves identically in both layouts.
+export function NoteMeta({
+  note,
+  onPatch,
+}: {
+  note: Note;
+  onPatch?: (patch: Partial<Note>) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2">
         <CategoryEditor type={note.content_type} noteId={note.id} onPatch={onPatch} />
         <SourcePill domain={note.source_domain} url={note.source_url} />
         <span className="text-xs text-ink-soft">{formatDate(note.created_at)}</span>
       </div>
-
       <EditableTitle note={note} onPatch={onPatch} />
-    </header>
+    </div>
   );
 }

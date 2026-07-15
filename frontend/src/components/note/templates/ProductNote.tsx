@@ -30,11 +30,11 @@ export function ProductNote({ note }: { note: Note }) {
     <div>
       <div className="grid gap-8 md:grid-cols-[1.1fr_1fr] md:gap-12">
         {note.cover_image_url && (
-          <div className={`overflow-hidden rounded-3xl border border-border ${accent.soft}`}>
+          <div className="rounded-3xl border border-border bg-card p-6">
             <img
               src={note.cover_image_url}
               alt={note.title}
-              className="h-80 w-full object-contain p-4 md:h-[28rem]"
+              className="max-h-80 w-full object-contain md:max-h-[26rem]"
             />
           </div>
         )}

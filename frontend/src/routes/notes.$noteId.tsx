@@ -2,8 +2,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ClipLoader } from "@/components/ClipMark";
-import { getNote, getAnnotation } from "@/lib/firestore";
-import { deleteNote } from "@/lib/api";
+import { getNote, getAnnotation, watchJob } from "@/lib/firestore";
+import { deleteNote, reextractNote, ApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { useAsk } from "@/contexts/ask-context";
 import { useCategoryMeta } from "@/contexts/category-meta";
@@ -64,6 +64,47 @@ function NoteDetail() {
     if (note) setFocalNote({ id: note.id, title: note.title });
     return () => setFocalNote(null);
   }, [note, setFocalNote]);
+
+  // Re-extract: re-run the note's source through the pipeline (owner-only). The worker
+  // overwrites this same note in place, so we watch the job and refetch on completion. Also
+  // the real "Retry" behind salvage notes (FallbackBanner). "failed" here is the backend's
+  // DELIBERATE outcome for a dead source (the note is left untouched, not a bug) — surfaced
+  // to the user via reextractError rather than silently dropped.
+  const GENERIC_REEXTRACT_FAILURE = "Re-extract failed. Your note was left unchanged.";
+  const [reextracting, setReextracting] = useState(false);
+  const [reextractError, setReextractError] = useState<string | null>(null);
+  const reextractUnsub = useRef<null | (() => void)>(null);
+  const onReextract = useCallback(async () => {
+    // Guard against a second job from a repeat click (header button + salvage retry both call
+    // this) — each job burns a daily ingest-cap slot.
+    if (!user || reextracting) return;
+    setReextracting(true);
+    setReextractError(null);
+    try {
+      const { job_id } = await reextractNote(noteId);
+      reextractUnsub.current?.(); // drop any prior watcher
+      reextractUnsub.current = watchJob(job_id, async (job) => {
+        if (job.status !== "completed" && job.status !== "failed") return;
+        reextractUnsub.current?.();
+        reextractUnsub.current = null;
+        setReextracting(false);
+        if (job.status === "completed") {
+          const n = await getNote(noteId).catch(() => null);
+          if (n && n.user_id === user.uid) {
+            const userNote = await getAnnotation(noteId).catch(() => "");
+            setNote({ ...n, user_note: userNote });
+          }
+        } else {
+          setReextractError(GENERIC_REEXTRACT_FAILURE);
+        }
+      });
+    } catch (err) {
+      setReextracting(false);
+      setReextractError(err instanceof ApiError ? err.message : GENERIC_REEXTRACT_FAILURE);
+    }
+  }, [user, noteId, reextracting]);
+
+  useEffect(() => () => reextractUnsub.current?.(), []);
 
   // Swipe / arrow between notes in the feed order the user came from (all or a category). The
   // feed stashes its visible order; we read this note's neighbours. `replace` navigation keeps
@@ -136,6 +177,10 @@ function NoteDetail() {
         <NoteContent
           note={note}
           onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
+          onReextract={onReextract}
+          reextracting={reextracting}
+          reextractError={reextractError}
+          onDismissReextractError={() => setReextractError(null)}
           onDelete={async () => {
             await deleteNote(note.id);
             navigate({ to: "/" });
@@ -143,28 +188,42 @@ function NoteDetail() {
         />
       </div>
 
-      {/* Desktop prev/next affordances; mobile pages by swiping. */}
-      {prev && (
-        <button
-          type="button"
-          onClick={() => go(prev)}
-          aria-label="Previous note"
-          title="Previous note"
-          className={`fixed left-3 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-ink-soft shadow-md backdrop-blur transition-colors hover:text-ink lg:flex ${FOCUS_RING}`}
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-      )}
-      {next && (
-        <button
-          type="button"
-          onClick={() => go(next)}
-          aria-label="Next note"
-          title="Next note"
-          className={`fixed right-3 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-ink-soft shadow-md backdrop-blur transition-colors hover:text-ink lg:flex ${FOCUS_RING}`}
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
+      {/* In-flow footer nav to the neighbouring notes in the feed order the user came from.
+          The feed only stashes ids (not titles), so the cards use plain labels. Mobile still
+          pages by swiping. */}
+      {(prev || next) && (
+        <nav className="mx-auto grid max-w-4xl grid-cols-2 gap-3 px-5 pb-10 md:px-8">
+          {prev ? (
+            <button
+              type="button"
+              onClick={() => go(prev)}
+              className={`flex flex-col gap-1 rounded-2xl border border-border bg-card p-4 text-left transition-shadow hover:shadow-md ${FOCUS_RING}`}
+            >
+              <span className="inline-flex items-center gap-1 text-xs uppercase tracking-wider text-ink-soft">
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Previous
+              </span>
+              <span className="line-clamp-2 font-serif text-lg text-ink">Previous note</span>
+            </button>
+          ) : (
+            <div />
+          )}
+          {next ? (
+            <button
+              type="button"
+              onClick={() => go(next)}
+              className={`flex flex-col items-end gap-1 rounded-2xl border border-border bg-card p-4 text-right transition-shadow hover:shadow-md ${FOCUS_RING}`}
+            >
+              <span className="inline-flex items-center gap-1 text-xs uppercase tracking-wider text-ink-soft">
+                Next
+                <ChevronRight className="h-3.5 w-3.5" />
+              </span>
+              <span className="line-clamp-2 font-serif text-lg text-ink">Next note</span>
+            </button>
+          ) : (
+            <div />
+          )}
+        </nav>
       )}
     </AppShell>
   );

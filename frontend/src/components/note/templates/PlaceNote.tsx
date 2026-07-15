@@ -1,9 +1,23 @@
-import { MapPin, Star, Clock, Wallet, Sparkles, Lightbulb, Utensils, ChevronDown } from "lucide-react";
+import {
+  MapPin,
+  Map as MapIcon,
+  Star,
+  Clock,
+  Wallet,
+  Sparkles,
+  Lightbulb,
+  Utensils,
+  ChevronDown,
+} from "lucide-react";
 import type { Note, PlaceAction } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
+import { FOCUS_RING } from "@/lib/ui";
 import { ActionRow } from "@/components/shared/ActionRow";
 import { VenuesMap } from "../VenuesMap";
-import { useImageAspect, orientationOf } from "../useImageAspect";
+import { SmartImage } from "../SmartImage";
+import { SectionHeader } from "../SectionHeader";
+import { FactsBlock } from "../FactsBlock";
+import { DataTable } from "../DataTable";
 
 // One venue in a place note. camelCase fields match the backend `place` venues[] schema
 // (services/gemini.py TYPE_PROMPTS["place"] — what the source said); snake_case fields are
@@ -43,6 +57,10 @@ interface Venue {
 interface PlaceData {
   venues?: Venue[];
   listTheme?: string;
+  // note-level at-a-glance facts about the list itself (multi-venue roundups); rendered at the
+  // top. Also the legacy single-venue facts field — folded into the single venue below.
+  facts?: { label: string; value: string }[];
+  table?: import("../DataTable").TableData;
   // legacy single-venue fields
   name?: string;
   location?: string;
@@ -50,46 +68,11 @@ interface PlaceData {
   priceRange?: string;
   rating?: string;
   timings?: string;
-  facts?: { label: string; value: string }[];
   highlights?: string[];
   tips?: string[];
 }
 
 type Accent = ReturnType<typeof noteAccent>;
-
-// A venue photo, laid out by its own aspect so it never gets brutally center-cropped and
-// never dominates the venue card. Landscape → a modest banner (a mild crop reads as
-// intentional); portrait/square → a contained image centered on the note's accent wash,
-// shown in full. We measure off-screen first so the layout doesn't flash; a banner-shaped
-// box holds the space meanwhile.
-function VenuePhoto({ url, alt, accent }: { url: string; alt: string; accent: Accent }) {
-  const { status, ratio } = useImageAspect(url);
-
-  if (status === "loading") {
-    return <div className={`h-48 w-full rounded-2xl border border-border sm:h-56 ${accent.soft}`} />;
-  }
-  if (status === "none") return null;
-
-  if (orientationOf(ratio) === "landscape") {
-    return (
-      <div className="overflow-hidden rounded-2xl border border-border">
-        <img src={url} alt={alt} loading="lazy" className="h-48 w-full object-cover sm:h-56" />
-      </div>
-    );
-  }
-  // Portrait / square: contained at its own aspect so nothing gets cut off.
-  return (
-    <div className={`flex justify-center rounded-2xl border border-border p-3 ${accent.soft}`}>
-      <img
-        src={url}
-        alt={alt}
-        loading="lazy"
-        style={{ aspectRatio: ratio }}
-        className="max-h-80 w-auto max-w-full rounded-xl object-cover"
-      />
-    </div>
-  );
-}
 
 // Google's opening_hours weekday lines look like "Friday: 9:00 AM – 11:00 PM". Pull out
 // today's hours for the compact disclosure summary; null when the format doesn't match.
@@ -101,7 +84,17 @@ function todaysHours(hours: string[]): string | null {
   return rest || null;
 }
 
-function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showName: boolean }) {
+function VenueBlock({
+  v,
+  accent,
+  showName,
+  index,
+}: {
+  v: Venue;
+  accent: Accent;
+  showName: boolean;
+  index?: number;
+}) {
   // Compact inline rating: star glyph + "4.6 (188)". Google's numeric rating gets its review
   // count; a source-said string renders as-is. Sits beside the name (multi-venue) or leads
   // the meta line (single venue, where the note title is already the venue name).
@@ -130,12 +123,31 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
       (v.timings && !liveHours),
   );
 
+  const number =
+    showName && typeof index === "number" ? (
+      <span className={`font-serif text-4xl leading-none md:text-5xl ${accent.text}`}>
+        {String(index + 1).padStart(2, "0")}
+      </span>
+    ) : null;
+
   return (
     <div className="space-y-5">
       {showName && v.name && (
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h2 className="min-w-0 font-serif text-2xl text-ink">{v.name}</h2>
-          {rating}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
+            {number}
+            <h2 className="min-w-0 font-serif text-2xl text-ink">{v.name}</h2>
+            {rating}
+          </div>
+          {/* Fixed thumbnail beside the header on sm+; a full-width crop shows on mobile below. */}
+          {v.photo_url && (
+            <img
+              src={v.photo_url}
+              alt={v.name}
+              loading="lazy"
+              className="hidden h-24 w-32 shrink-0 rounded-xl border border-border object-cover sm:block md:h-28 md:w-40"
+            />
+          )}
         </div>
       )}
 
@@ -167,7 +179,24 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
         </div>
       )}
 
-      {v.photo_url && <VenuePhoto url={v.photo_url} alt={v.name ?? ""} accent={accent} />}
+      {/* Multi-venue: full-width photo on mobile (the sm+ thumbnail sits beside the header). */}
+      {showName && v.photo_url && (
+        <img
+          src={v.photo_url}
+          alt={v.name ?? ""}
+          loading="lazy"
+          className="aspect-[16/9] w-full rounded-xl border border-border object-cover sm:hidden"
+        />
+      )}
+
+      {/* Single-venue: a generous photo laid out by its own aspect (blur-fill for portraits). */}
+      {!showName && v.photo_url && (
+        <SmartImage
+          src={v.photo_url}
+          alt={v.name ?? ""}
+          frameClass="aspect-[4/3] rounded-2xl border border-border sm:aspect-[3/2]"
+        />
+      )}
 
       {/* Region-aware actions built by backend enrichment (Directions / Reserve / Order / …). */}
       <ActionRow actions={v.action_links} />
@@ -189,18 +218,7 @@ function VenueBlock({ v, accent, showName }: { v: Venue; accent: Accent; showNam
         </details>
       )}
 
-      {v.facts && v.facts.length > 0 && (
-        <section className={`rounded-2xl border border-border p-5 ${accent.soft}`}>
-          <dl className="divide-y divide-border/60">
-            {v.facts.map((f, i) => (
-              <div key={i} className="flex items-baseline justify-between gap-4 py-2.5">
-                <dt className="text-sm text-ink-soft">{f.label}</dt>
-                <dd className="text-right text-sm font-medium text-ink">{f.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      )}
+      <FactsBlock facts={v.facts} accent={accent} />
 
       {v.mustTry && v.mustTry.length > 0 && (
         <section>
@@ -290,18 +308,78 @@ export function PlaceNote({ note }: { note: Note }) {
 
   const multi = venues.length > 1;
 
+  // Compact "category · rating" line for the jump-to index rows (mirrors VenueBlock's rating).
+  const venueMeta = (v: Venue): string => {
+    const cat = v.category || v.cuisine;
+    const ratingText =
+      v.rating != null && v.rating !== ""
+        ? typeof v.rating === "number" && v.user_rating_count
+          ? `${v.rating} (${v.user_rating_count.toLocaleString()})`
+          : String(v.rating)
+        : null;
+    return [cat, ratingText].filter(Boolean).join(" · ");
+  };
+
+  const geocoded = venues.filter(
+    (v) => typeof v.lat === "number" && typeof v.lng === "number",
+  ).length;
+
   return (
-    <div className="space-y-12">
+    <div className="space-y-10">
       {data.listTheme && multi && (
         <p className="text-sm uppercase tracking-wider text-ink-soft">{data.listTheme}</p>
       )}
-      {/* Live map of enriched venues — renders nothing without a Maps key or coordinates. */}
-      <VenuesMap venues={venues} heightClass={multi ? "h-[40vh]" : "h-56"} />
+
+      {/* Note-level at-a-glance facts about the list itself (multi-venue roundups only; a lone
+          venue's own facts render inside its block). */}
+      {multi && <FactsBlock facts={data.facts} accent={accent} />}
+      {multi && data.table && <DataTable table={data.table} accent={accent} />}
+
+      {/* Jump-to index for a roundup: tap a row to scroll to that venue. */}
+      {venues.length >= 3 && (
+        <nav className="rounded-2xl border border-border bg-card p-2">
+          {venues.map((v, i) => {
+            const meta = venueMeta(v);
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() =>
+                  document.getElementById(`venue-${i + 1}`)?.scrollIntoView({ behavior: "smooth" })
+                }
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted/50 ${FOCUS_RING}`}
+              >
+                <span className={`w-7 shrink-0 text-center font-serif text-lg ${accent.text}`}>
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium text-ink">{v.name}</span>
+                {meta && <span className="shrink-0 text-sm text-ink-soft">{meta}</span>}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       {venues.map((v, i) => (
-        <div key={i} className={i > 0 ? "border-t border-border pt-10" : ""}>
-          <VenueBlock v={v} accent={accent} showName={multi} />
+        <div
+          key={i}
+          id={`venue-${i + 1}`}
+          className={`scroll-mt-24 ${i > 0 ? "border-t border-border pt-10" : ""}`}
+        >
+          <VenueBlock v={v} accent={accent} showName={multi} index={i} />
         </div>
       ))}
+
+      {/* Map below the list so its numbered pins reference venues already read; hidden unless
+          at least two venues geocoded (a single venue leans on its Directions action instead). */}
+      {geocoded >= 2 && (
+        <section className="space-y-4">
+          <SectionHeader icon={MapIcon} iconClassName={accent.text}>
+            On the map
+          </SectionHeader>
+          <VenuesMap venues={venues} heightClass="h-64 md:h-72" />
+        </section>
+      )}
     </div>
   );
 }

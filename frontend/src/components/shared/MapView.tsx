@@ -15,7 +15,8 @@ export interface MapPin<T = unknown> {
   lng: number;
   title?: string;
   background: string;
-  glyph?: string;
+  glyphColor?: string; // pin glyph colour (hex); the Maps API can't read CSS custom properties
+  glyph?: string; // a real glyph drawn inside the pin (e.g. a venue's list number)
   data: T;
 }
 
@@ -70,7 +71,12 @@ export function MapView<T>({
                 title={p.title}
                 onClick={canOpen ? () => setOpenKey(p.key) : undefined}
               >
-                <Pin background={p.background} borderColor={p.background} glyphColor={p.glyph ?? "#ffffff"} />
+                <Pin
+                  background={p.background}
+                  borderColor={p.background}
+                  glyphColor={p.glyphColor ?? "#ffffff"}
+                  glyph={p.glyph}
+                />
               </AdvancedMarker>
             ))}
 
