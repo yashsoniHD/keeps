@@ -53,7 +53,9 @@ async def _embed_with_retry(text: str) -> Vector | None:
         except Exception as e:  # noqa: BLE001 — quota/transient errors get one retry.
             log.warning("embed attempt %d failed: %s: %s", attempt + 1, type(e).__name__, e)
             if attempt == 0:
-                await asyncio.sleep(2.0)
+                # The embed quota is a per-MINUTE bucket (5/min for this base model), so a
+                # short retry just burns another request against an empty bucket.
+                await asyncio.sleep(30.0)
     return None
 
 
