@@ -45,7 +45,7 @@ Hard rules: **don't skip Phase 0; don't launch publicly before Phase 3.**
 | GCP Project ID | `weekly-updates-automation` (shared project — user's choice; Firestore + Firebase Auth were pre-enabled) |
 | GCP Region | `us-central1` (legacy infra, being torn down) — Firebase/Firestore only after cutover |
 | Firebase Project | `weekly-updates-automation` |
-| Backend host | Vercel Hobby container (project to be created in Phase F; root `backend`, `Dockerfile.vercel`). Production URL placeholder `https://clip-note-api.vercel.app`. Deploy notes: `infra/vercel.md` |
+| Backend host | Vercel Hobby container (project to be created in Phase F; root `backend`, `Dockerfile.vercel`). Production URL placeholder `https://clip-note-api-yashsoni102-progs-projects.vercel.app`. Deploy notes: `infra/vercel.md` |
 | Job dispatch | Synchronous self-POST to `/api/process/{id}` (`X-Worker-Secret`) + in-process retry + daily cron sweep (`GET /api/process/sweep`) |
 | Firebase Hosting URL | https://weekly-updates-automation.web.app |
 | Legacy Cloud Run URL | https://clip-note-api-674775099277.us-central1.run.app (rollback only; torn down after soak) |
