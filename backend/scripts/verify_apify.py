@@ -45,7 +45,7 @@ async def check(url: str) -> None:
 
     endpoint = apify._RUN_SYNC.format(actor=actor.actor_id)
     with httpx.Client(timeout=180.0) as client:
-        resp = client.post(endpoint, params={"token": settings.APIFY_TOKEN}, json=payload)
+        resp = client.post(endpoint, headers={"Authorization": f"Bearer {settings.APIFY_TOKEN}"}, json=payload)
     items = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
     print(f"  http        : {resp.status_code}  items={len(items) if isinstance(items, list) else 'n/a'}")
     if resp.status_code >= 300:  # run-sync returns 201 on success

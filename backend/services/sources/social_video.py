@@ -225,18 +225,17 @@ async def _caption_fallback(url: str) -> ContentBundle:
 async def _download_media(media_url: str, workdir: str | None = None) -> str | None:
     """Stream a media URL (a CDN URL or an Apify-hosted `downloadedVideo`) to a temp file —
     size-capped and net-guarded like every other outbound fetch. Apify key-value-store URLs
-    need the API token appended. Returns the path, or None on any failure."""
-    if "api.apify.com" in media_url and settings.APIFY_TOKEN and "token=" not in media_url:
-        sep = "&" if "?" in media_url else "?"
-        media_url = f"{media_url}{sep}token={settings.APIFY_TOKEN}"
+    need the API token, sent as a header (never in the URL, which httpx logs). Returns the path, or None on any failure."""
+    headers = {"User-Agent": _CRAWLER_UA}
+    if "api.apify.com" in media_url and settings.APIFY_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.APIFY_TOKEN}"
     dest = os.path.join(workdir or settings.TEMP_DOWNLOAD_DIR, f"{uuid.uuid4()}.mp4")
     ok = False
     cap = settings.MAX_MEDIA_DOWNLOAD_MB * 1024 * 1024
     written = 0
     try:
         async with guarded_async_client(timeout=60.0, follow_redirects=True) as client:
-            async with client.stream("GET", media_url,
-                                     headers={"User-Agent": _CRAWLER_UA}) as resp:
+            async with client.stream("GET", media_url, headers=headers) as resp:
                 resp.raise_for_status()
                 with open(dest, "wb") as f:
                     async for chunk in resp.aiter_bytes(65536):

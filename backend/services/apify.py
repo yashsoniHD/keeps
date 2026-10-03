@@ -236,7 +236,7 @@ def _run(actor: _Actor, url: str) -> dict | None:
     # Apify cold-starts the actor; allow generous time. The sync endpoint returns the
     # dataset items directly, so no polling loop is needed.
     with httpx.Client(timeout=75.0) as client:
-        resp = client.post(endpoint, params={"token": settings.APIFY_TOKEN},
+        resp = client.post(endpoint, headers={"Authorization": f"Bearer {settings.APIFY_TOKEN}"},
                            json=actor.build_input(url))
     resp.raise_for_status()
     items = resp.json()

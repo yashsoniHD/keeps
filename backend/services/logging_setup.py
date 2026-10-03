@@ -42,3 +42,6 @@ def setup_logging() -> None:
     for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
         logging.getLogger(name).handlers[:] = []
         logging.getLogger(name).propagate = True
+    # httpx logs full request URLs at INFO; keep them out of production logs.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
