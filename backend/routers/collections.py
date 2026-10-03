@@ -244,7 +244,7 @@ async def digest(collection_id: str, body: DigestRequest | None = None,
         "coverage": coverage,
         "source_note_ids": member_ids,
         "generated_at": datetime.now(timezone.utc),
-        "model": settings.GEMINI_MODEL,
+        "model": settings.TEXT_MODEL,
         "prompt_version": settings.DIGEST_PROMPT_VERSION,
     }
     # merge=True writes only the `digest` key — sibling top-level fields (notably `updated_at`,

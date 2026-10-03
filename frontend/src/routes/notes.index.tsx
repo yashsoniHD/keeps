@@ -28,7 +28,7 @@ import {
   getOnboardingDone,
   setOnboardingDone,
 } from "@/lib/firestore";
-import { ingest, ingestMedia, ingestText, ingestVoice } from "@/lib/api";
+import { ingest, ingestText } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
@@ -372,25 +372,6 @@ export function Feed({
     }
   };
 
-  // Image/PDF capture: the multipart upload to GCS takes a beat, so AddSheet shows its own
-  // "Adding…" state and awaits this; we only surface errors here.
-  const handleUploadFile = async (file: File, kind: "image" | "pdf" | "video" | "voice") => {
-    setIngestError(null);
-    await ingestMedia(file, kind, file.name);
-    analytics.noteSaved();
-    setShowAdd(false);
-  };
-
-  // Voice capture: the recorder hands us an audio Blob; upload it (multipart, like a file)
-  // and let the worker transcribe + structure it. AddSheet awaits this and shows its own
-  // "Saving…" state; errors surface in the feed.
-  const handleUploadVoice = async (blob: Blob) => {
-    setIngestError(null);
-    await ingestVoice(blob);
-    analytics.noteSaved();
-    setShowAdd(false);
-  };
-
   // Browse view: the live feed filtered only by the category chips. Free-text search now
   // lives on its own route (/search) over the whole corpus, so the feed no longer filters by
   // a query — it's purely the chip-filtered stream. (The old source filter is gone: the
@@ -689,8 +670,6 @@ export function Feed({
             onCancel={() => setShowAdd(false)}
             onSubmit={handleCapture}
             onSubmitText={handleCaptureText}
-            onUploadFile={handleUploadFile}
-            onUploadVoice={handleUploadVoice}
           />
         )}
       </AppShell>

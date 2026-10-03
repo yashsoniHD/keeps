@@ -1,9 +1,8 @@
-"""Structured JSON logging for Cloud Run.
+"""Structured JSON logging: one JSON object per stdout line.
 
-Cloud Run's log agent parses one-JSON-object-per-line stdout: `severity` and
-`message` map onto Cloud Logging fields automatically, and everything else
-becomes queryable jsonPayload fields — so alerts can filter on e.g.
-jsonPayload.job_id or severity>=ERROR without regex-scraping text logs.
+`severity` and `message` are always present and everything else passed via `extra=` (job_id,
+user_id, url, ...) becomes a top-level JSON field. On Vercel these show up in the runtime
+logs (per-instance, not per-request), so job_id on every line is what ties a job together.
 
 Usage:
     log = logging.getLogger("clipnote.sources")

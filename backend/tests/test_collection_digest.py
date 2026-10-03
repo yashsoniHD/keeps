@@ -335,9 +335,7 @@ async def test_legacy_scalar_tagged_note_included_in_digest(fake_db, monkeypatch
 
 # --- Gemini-level: out-of-set note_id entries dropped ----------------------------------------------
 
-class _FakeResp:
-    def __init__(self, text):
-        self.text = text
+from conftest import chat_resp as _FakeResp  # noqa: E402
 
 
 def test_build_digest_drops_entries_citing_ids_outside_fed_set(monkeypatch):
@@ -360,7 +358,7 @@ def test_build_digest_drops_entries_citing_ids_outside_fed_set(monkeypatch):
     def fake_generate(*args, **kwargs):
         return _FakeResp(_json.dumps(payload))
 
-    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gemini_service.client.chat.completions, "create", fake_generate)
 
     digest = gemini_service._build_digest("Trip", "", [
         {"id": "n1", "content_type": "place", "title": "Cafe", "source_domain": "x.com",
@@ -395,7 +393,7 @@ def test_build_digest_keeps_body_only_section_with_no_items(monkeypatch):
     def fake_generate(*args, **kwargs):
         return _FakeResp(_json.dumps(payload))
 
-    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gemini_service.client.chat.completions, "create", fake_generate)
 
     digest = gemini_service._build_digest("Trip", "", [
         {"id": "n1", "content_type": "business-advice", "title": "Prompts", "source_domain": "x.com",
@@ -425,7 +423,7 @@ def test_build_digest_returns_none_after_retry_exhausted(monkeypatch):
     def fake_generate(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gemini_service.client.chat.completions, "create", fake_generate)
     monkeypatch.setattr("services.gemini.time.sleep", lambda *_: None)
 
     digest = gemini_service._build_digest("Trip", "", [
@@ -452,7 +450,7 @@ def test_build_digest_note_serialization_error_returns_none(monkeypatch):
     def fake_generate(*args, **kwargs):
         raise AssertionError("generate_content should not be called")
 
-    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gemini_service.client.chat.completions, "create", fake_generate)
 
     digest = gemini_service._build_digest("Trip", "", [
         {"id": "n1", "content_type": "place", "title": "Cafe", "source_domain": "x.com",

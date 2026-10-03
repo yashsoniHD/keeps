@@ -2,14 +2,14 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { ingest, ingestMedia, ingestText } from "@/lib/api";
+import { ingest, ingestText } from "@/lib/api";
 import { enqueueCapture, isQueueableError } from "@/lib/capture-queue";
 
-// PWA share-sheet target (manifest.json share_target, POST multipart). The service worker
+// PWA share-sheet target (manifest.json share_target, POST). The service worker
 // catches the POST, stashes the payload in the Cache, and redirects here with ?shared=<id>.
 // Legacy GET shares (url/text/title in the query) are still honored for older installs.
 interface ShareSearch {
-  shared?: string; // SW stash id (POST shares: files and/or text)
+  shared?: string; // SW stash id (POST shares)
   url?: string;
   text?: string;
   title?: string;
@@ -19,7 +19,6 @@ interface SharedMeta {
   url: string;
   text: string;
   title: string;
-  files: { key: string; type: string; name: string }[];
 }
 
 export const Route = createFileRoute("/share")({
@@ -51,23 +50,6 @@ async function loadShared(id: string): Promise<SharedMeta | null> {
   }
 }
 
-async function fileFromCache(key: string, type: string, name: string): Promise<File | null> {
-  try {
-    const res = await fetch(key);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return new File([blob], name || "shared", { type: type || blob.type });
-  } catch {
-    return null;
-  }
-}
-
-function kindOf(type: string): "image" | "pdf" | null {
-  if (type.startsWith("image/")) return "image";
-  if (type === "application/pdf") return "pdf";
-  return null;
-}
-
 function SharePage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -77,7 +59,7 @@ function SharePage() {
 
   useEffect(() => {
     // Carry the share payload through login so the capture still fires after sign-in. The
-    // files live in the Cache keyed by ?shared, so they survive the round-trip.
+    // payload lives in the Cache keyed by ?shared, so it survives the round-trip.
     if (!loading && !user) {
       navigate({
         to: "/login",
@@ -96,21 +78,9 @@ function SharePage() {
       try {
         if (search.shared) {
           const meta = await loadShared(search.shared);
-          if (meta?.files?.length) {
-            // One job per shared file (usually exactly one).
-            for (const f of meta.files) {
-              const kind = kindOf(f.type);
-              if (!kind) continue;
-              const file = await fileFromCache(f.key, f.type, f.name);
-              if (file) await ingestMedia(file, kind, file.name);
-            }
-          } else {
-            // No files → fall back to the shared link/text the SW also stashed.
-            const link = urlFrom(meta?.url, meta?.text, meta?.title);
-            if (link) await ingest(link);
-            else if (meta?.text?.trim())
-              await ingestText(meta.text.trim(), meta.title || undefined);
-          }
+          const link = urlFrom(meta?.url, meta?.text, meta?.title);
+          if (link) await ingest(link);
+          else if (meta?.text?.trim()) await ingestText(meta.text.trim(), meta.title || undefined);
         } else {
           // Legacy GET share (url/text/title in the query).
           const link = urlFrom(search.url, search.text, search.title);

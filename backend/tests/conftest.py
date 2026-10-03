@@ -1,4 +1,6 @@
 """Minimal in-memory Firestore double — just the surface the code under test touches."""
+from types import SimpleNamespace
+
 import pytest
 
 try:
@@ -25,6 +27,13 @@ def _resolve_transforms(base: dict, data: dict) -> dict:
             if isinstance(v, _Increment):
                 out[k] = (base.get(k) or 0) + v.value
     return out
+
+
+def chat_resp(text: str, usage=None):
+    """Shared fake for an OpenAI/OpenRouter chat completion (what `client.chat.completions.create`
+    returns). usage=None → record_usage no-ops."""
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+                           usage=usage)
 
 
 class FakeSnap:

@@ -1,23 +1,24 @@
-"""Instagram reels/posts, Facebook video, TikTok: download via yt-dlp → GCS → gs:// URI.
+"""Instagram reels/posts, Facebook video, TikTok: a cheap-first cascade, never whole video.
 
-These platforms cannot be analyzed by Gemini directly (unlike YouTube), so the video is
-downloaded at ≤480p, uploaded to Cloud Storage, and handed to Gemini by gs:// URI —
-never inline bytes (the ~20 MB inline cap fails most videos).
-
-Acquisition ladder (cookies deliberately NOT used — Instagram/Facebook block cookie-less
-yt-dlp from datacenter IPs with a "rate-limit reached or login required" wall):
-  1. yt-dlp download → GCS → gs:// URI (works locally and for reels that slip past the wall)
-  2. Apify per-platform scraper (`services/apify.py`, gated on APIFY_TOKEN) — residential
-     proxies + accounts; fetch its returned mp4 → GCS → gs:// URI
-  3. `_caption_fallback` — the post's public og: tags (og:description IS the caption, what
-     powers link previews), so the resolver never drops through to the generic scraper,
-     which only ever sees the logged-out login page.
+Tiers (escalate only when the extracted note is incomplete — see routers/process.py):
+  1. caption + comments: yt-dlp metadata (no download); if the caption is thin, one Apify call
+     (caption, latestComments, media url). Free / ~$0.003. Strategy `reel_caption`.
+  2. audio transcript: ONE ≤360p download -> ffmpeg mp3 -> Whisper via OpenRouter.
+     Strategy `reel_transcript`.
+  3. ≤8 frames from the same file -> vision model. Strategy `reel_frames`.
+  Nothing usable (login wall, empty og) -> `private_or_blocked`.
+Instagram non-reel posts (/p/, carousels) are Apify-first: caption + every slide as vision.
+Cookies are deliberately NOT used — Instagram/Facebook block cookie-less yt-dlp from
+datacenter IPs, so `_caption_fallback` (og tags, tokenless oEmbed) is the last free rung.
 """
 import asyncio
 import glob
 import logging
 import os
+import shutil
+import tempfile
 import uuid
+from urllib.parse import quote
 
 import yt_dlp
 from bs4 import BeautifulSoup
@@ -58,30 +59,37 @@ def _platform(url: str) -> str:
     return "facebook"
 
 
-def _ydl_opts(download: bool) -> dict:
+def _ydl_opts(download: bool, workdir: str | None = None) -> dict:
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
-        "format": "bestvideo[height<=480]+bestaudio/best[height<=480]/worst",
-        "outtmpl": os.path.join(settings.TEMP_DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+        "format": "best[height<=360]/bestvideo[height<=360]+bestaudio/worst",
+        "outtmpl": os.path.join(workdir or settings.TEMP_DOWNLOAD_DIR, "%(id)s.%(ext)s"),
         "merge_output_format": "mp4",
         "overwrites": True,
         "skip_download": not download,
         "max_filesize": settings.MAX_MEDIA_DOWNLOAD_MB * 1024 * 1024,
-        # yt-dlp has no default socket timeout — an unresponsive host would otherwise pin
-        # the worker thread until the Cloud Run deadline (a 5xx → paid Cloud Tasks retry).
+        # yt-dlp has no default socket timeout, and asyncio.wait_for cannot kill the thread —
+        # socket_timeout is what actually frees it.
         "socket_timeout": 30,
     }
     return opts
 
 
-# Wall-clock budget for a full social-video download. On expiry the capture walks the same
-# fallback ladder as a blocked download (Apify → og-caption), so nothing is lost.
-DOWNLOAD_TIMEOUT_SECONDS = 240
+# Wall-clock budgets (s). Download + metadata expiry just ends that tier; nothing is lost.
+DOWNLOAD_TIMEOUT_SECONDS = 30
+META_TIMEOUT_SECONDS = 25
+FFMPEG_TIMEOUT_SECONDS = 20
+TRANSCRIBE_TIMEOUT_SECONDS = 60
+# A caption + title shorter than this is "thin" (process.py uses it for the pre-classify gate).
+THIN_CHARS = 120
+# ponytail: Whisper hallucinates on silence/music; under this many words counts as no speech.
+MIN_SPEECH_WORDS = 15
+_FRAMES = 8
 
 
-def _download(url: str) -> tuple[str | None, dict]:
-    with yt_dlp.YoutubeDL(_ydl_opts(download=True)) as ydl:
+def _download(url: str, workdir: str | None = None) -> tuple[str | None, dict]:
+    with yt_dlp.YoutubeDL(_ydl_opts(download=True, workdir=workdir)) as ydl:
         info = ydl.extract_info(url, download=True)
         if not info:
             return None, {}
@@ -100,15 +108,6 @@ def _download(url: str) -> tuple[str | None, dict]:
             file_path = (filename if os.path.exists(filename) else
                          stray[0] if stray else None)
         return file_path, info
-
-
-def _upload_to_gcs(file_path: str) -> str:
-    from google.cloud import storage
-    client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
-    bucket = client.bucket(settings.CLOUD_STORAGE_BUCKET)
-    blob_name = f"media/{uuid.uuid4()}{os.path.splitext(file_path)[1]}"
-    bucket.blob(blob_name).upload_from_filename(file_path)
-    return f"gs://{settings.CLOUD_STORAGE_BUCKET}/{blob_name}"
 
 
 def _metadata(info: dict, url: str) -> dict:
@@ -148,16 +147,32 @@ async def _fetch_image_parts(urls: list[str], *, cap_mb: int = 8) -> list[dict]:
     return parts
 
 
-async def _caption_fallback(url: str) -> ContentBundle:
-    """Build a note from the post's public og: tags when the media download is blocked.
+# The generic title Instagram/Facebook/TikTok serve to link-preview crawlers on a login wall.
+_BLOCKED_OG_TITLES = {"instagram", "login • instagram", "instagram • login", "facebook",
+                      "log in to facebook", "tiktok", "tiktok - make your day"}
+# Login-wall copy served as og:description to link-preview crawlers (substring, lowercased).
+_BLOCKED_OG_DESCRIPTIONS = ("log in to facebook", "log in to instagram",
+                            "see photos and videos from friends",
+                            "create an account or log in")
 
-    Instagram/Facebook/TikTok serve og:title, og:description (the caption), and og:image to
-    logged-out link-preview crawlers for public posts — far richer than the login-wall HTML
-    the generic scraper would otherwise see. Best-effort: a fetch failure yields a URL-only
-    bundle and the pipeline salvages a bookmark from there.
+
+def _blocked_bundle(url: str, platform: str) -> ContentBundle:
+    return ContentBundle(kind="metadata_only", text=None,
+                         metadata={"title": platform, "platform": platform},
+                         strategy="private_or_blocked")
+
+
+async def _caption_fallback(url: str) -> ContentBundle:
+    """Build a note from the post's public og: tags when every richer tier is blocked.
+
+    Link-preview crawlers get og:title/og:description (the caption)/og:image for public posts;
+    Instagram also has a tokenless oEmbed endpoint. If neither yields real text (a login wall
+    serves only the generic site title) the result is `private_or_blocked` — NEVER `text=url`,
+    which would let the model hallucinate a whole note from the URL slug.
     """
     platform = _platform(url)
     title = caption = image = None
+    via = "og"
     try:
         async with guarded_async_client(timeout=12.0, follow_redirects=True) as client:
             resp = await client.get(url, headers={"User-Agent": _CRAWLER_UA,
@@ -172,54 +187,50 @@ async def _caption_fallback(url: str) -> ContentBundle:
             image = im.get("content")
     except Exception as e:
         log.info("caption fallback fetch failed for %s: %s", url, str(e)[:160])
+    if title and title.strip().lower() in _BLOCKED_OG_TITLES:
+        title = caption = image = None  # login wall: its description/logo are wall copy too
+    if caption and any(p in caption.lower() for p in _BLOCKED_OG_DESCRIPTIONS):
+        caption = image = None
+    if not caption and platform == "instagram":
+        try:
+            async with guarded_async_client(timeout=10.0, follow_redirects=True) as client:
+                r = await client.get(
+                    "https://graph.facebook.com/v25.0/instagram_oembed?omitscript=true&url="
+                    + quote(url, safe=""), headers={"User-Agent": _CRAWLER_UA})
+            r.raise_for_status()
+            oe = r.json()
+            caption = oe.get("title") or None
+            title = title or oe.get("author_name")
+            image = image or oe.get("thumbnail_url")
+            via = "oembed" if caption else via
+        except Exception as e:
+            log.info("instagram oembed failed for %s: %s", url, str(e)[:160])
 
     text = "\n\n".join(p for p in (title, caption) if p).strip()
-    # Hand the one og:image to Gemini as vision input too — for an image post that's the
-    # actual content, not just a cover. (og: only exposes the first slide of a carousel.)
+    if not caption:  # a title or generic logo alone is not content
+        return _blocked_bundle(url, platform)
+    # The one og:image goes to the vision model too: for an image post that IS the content.
     image_parts = await _fetch_image_parts([image]) if image else []
     return ContentBundle(
         kind="text",
-        text=text or url,
+        text=text or None,
         images=[image] if image else [],
         image_parts=image_parts,
-        metadata={"title": title or platform, "platform": platform, "caption": caption or ""},
+        metadata={"title": title or platform, "platform": platform, "caption": caption or "",
+                  "via": via},
         strategy="social_og",
     )
 
 
-async def _video_bundle_from_file(file_path: str, meta: dict, *, thumbnail: str | None,
-                                  strategy: str) -> ContentBundle:
-    """Frame-extract a durable cover, upload the video to GCS, and build the video_uri
-    bundle. Shared by the yt-dlp and Apify paths. With no bucket configured, degrade to a
-    caption/metadata text bundle (there's no gs:// URI to hand Gemini)."""
-    images: list[str] = []
-    # Durable cover from local bytes — the platform CDN thumbnail is referer-gated,
-    # datacenter-IP blocked, and time-signed (expires in days). A frame from the file we
-    # already have is reliable and permanent.
-    from services.covers import extract_video_frame
-    frame_url = await extract_video_frame(file_path)
-    if frame_url:
-        images = [frame_url]
-    if not images and thumbnail:
-        images = [thumbnail]
-
-    if settings.CLOUD_STORAGE_BUCKET:
-        gcs_uri = await asyncio.to_thread(_upload_to_gcs, file_path)
-        return ContentBundle(kind="video_uri", video_uri=gcs_uri,
-                             text=meta.get("caption") or None, images=images,
-                             metadata=meta, strategy=strategy)
-    return ContentBundle(kind="text", text=meta.get("caption") or meta.get("title"),
-                         images=images, metadata=meta, strategy="social_caption")
-
-
-async def _download_media(media_url: str) -> str | None:
+async def _download_media(media_url: str, workdir: str | None = None) -> str | None:
     """Stream a media URL (a CDN URL or an Apify-hosted `downloadedVideo`) to a temp file —
     size-capped and net-guarded like every other outbound fetch. Apify key-value-store URLs
     need the API token appended. Returns the path, or None on any failure."""
     if "api.apify.com" in media_url and settings.APIFY_TOKEN and "token=" not in media_url:
         sep = "&" if "?" in media_url else "?"
         media_url = f"{media_url}{sep}token={settings.APIFY_TOKEN}"
-    dest = os.path.join(settings.TEMP_DOWNLOAD_DIR, f"{uuid.uuid4()}.mp4")
+    dest = os.path.join(workdir or settings.TEMP_DOWNLOAD_DIR, f"{uuid.uuid4()}.mp4")
+    ok = False
     cap = settings.MAX_MEDIA_DOWNLOAD_MB * 1024 * 1024
     written = 0
     try:
@@ -233,33 +244,45 @@ async def _download_media(media_url: str) -> str | None:
                         if written > cap:
                             raise ValueError(f"media exceeds {settings.MAX_MEDIA_DOWNLOAD_MB} MB cap")
                         f.write(chunk)
+        ok = True
         return dest
     except Exception as e:
         log.warning("apify media download failed: %s: %s", type(e).__name__, str(e)[:160])
-        if os.path.exists(dest):
+        return None
+    finally:  # also runs on CancelledError (wait_for timeout), which `except Exception` misses
+        if not ok and os.path.exists(dest):
             try:
                 os.remove(dest)
             except OSError:
                 pass
-        return None
 
 
-async def _acquire_via_apify(url: str) -> ContentBundle | None:
-    """Paid third-party scrape: a per-platform Apify actor (residential proxies + accounts)
-    returns the media URL + caption; we fetch the video and route it through the normal
-    GCS → Gemini path. Returns None to fall through to the free og-caption path — no token,
-    no actor for this URL, daily cap hit, empty result, or any error."""
+async def _meta_ytdlp(url: str) -> dict:
+    """yt-dlp metadata only (skip_download). {} on any failure/timeout."""
+    def _go() -> dict:
+        with yt_dlp.YoutubeDL(_ydl_opts(download=False)) as ydl:
+            return ydl.extract_info(url, download=False) or {}
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_go), timeout=META_TIMEOUT_SECONDS)
+    except Exception as e:
+        log.info("yt-dlp metadata failed for %s (%s): %s", _platform(url), url, str(e)[:160])
+        return {}
+
+
+async def _apify_tier(url: str) -> ContentBundle | None:
+    """Paid third-party scrape (residential proxies + accounts): caption, latestComments, media
+    url, carousel slides. Returns None to fall through — no token/actor, daily cap hit, empty
+    result, or any error. A video post becomes a `reel_caption` bundle carrying `media_url` for
+    the later transcript/frame tiers; a carousel/image post keeps `apify_carousel/_caption`."""
     from services import apify
     from services.firebase import reserve_apify_slot
 
     # Cheap pre-checks before reserving a (paid) slot: token set and an actor exists.
     if not settings.APIFY_TOKEN or apify.actor_kind(url) is None:
         return None
-
     if not await reserve_apify_slot():
         log.info("apify daily cap reached; og-caption fallback for %s", url)
         return None
-
     result = await apify.fetch(url)
     if not result:
         return None
@@ -270,78 +293,168 @@ async def _acquire_via_apify(url: str) -> ContentBundle | None:
         "platform": _platform(url),
         "duration": result.get("duration") or 0,
         "caption": (result.get("caption") or "")[:_CAPTION_MAX],
+        "via": "apify",
     }
-
-    video_url = result.get("video_url")
-    if video_url and settings.CLOUD_STORAGE_BUCKET:
-        tmp = await _download_media(video_url)
-        if tmp:
-            try:
-                return await _video_bundle_from_file(
-                    tmp, meta, thumbnail=result.get("thumbnail"), strategy="apify_gcs")
-            finally:
-                if os.path.exists(tmp):
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
-
-    # Image / carousel post (or the video fetch failed): caption + EVERY slide as vision
-    # input, so the note reflects the whole carousel — not just slide 1 + the caption.
     image_urls = result.get("images") or (
         [result["thumbnail"]] if result.get("thumbnail") else [])
-    image_parts = await _fetch_image_parts(image_urls)
+    is_video = bool(result.get("video_url")) and len(image_urls) <= 1
+    # A reel's thumbnail is only a cover — do not route a video post to the vision model on it.
+    image_parts = [] if is_video else await _fetch_image_parts(image_urls)
     text = "\n\n".join(p for p in (result.get("title"), meta["caption"]) if p).strip()
+    if comments := result.get("comments"):
+        meta["comments"] = len(comments)
+        text += "\n\nTop comments (may contain the full recipe):\n" + "\n".join(
+            f"- {c}" for c in comments)
+        text = text.strip()
     if not text and not image_parts:
         return None  # nothing usable; let og-caption try
     meta["slides"] = len(image_parts)
+    if is_video:
+        meta.update(media_url=result["video_url"], tier="caption")
+        strategy = "reel_caption"
+    else:
+        strategy = "apify_carousel" if len(image_parts) > 1 else "apify_caption"
     return ContentBundle(
         kind="text", text=text or None,
         images=image_urls[:1] if image_urls else [],   # cover = first slide
-        image_parts=image_parts,
-        metadata=meta,
-        strategy="apify_carousel" if len(image_parts) > 1 else "apify_caption",
+        image_parts=image_parts, metadata=meta, strategy=strategy,
     )
 
 
 async def acquire(url: str) -> ContentBundle:
-    file_path = None
+    """Tier 1 (caption + comments), also non-reel posts / TikTok / FB. Never raises for a
+    blocked source — the last rung returns `private_or_blocked`."""
     # Instagram non-reel posts (/p/, /tv/) are Apify-first: the post scraper returns the caption
-    # + EVERY carousel slide as vision input, where yt-dlp on a mixed carousel only ever gets the
-    # single video slide (dropping every image-only venue). Reels/TikTok/FB stay yt-dlp-first
-    # (cheaper, usually works). Bounded by APIFY_DAILY_GLOBAL_CAP.
+    # + EVERY carousel slide as vision input, where yt-dlp on a mixed carousel only gets the
+    # single video slide. Reels/TikTok/FB stay yt-dlp-first (free). Bounded by APIFY_DAILY_GLOBAL_CAP.
     apify_first = _platform(url) == "instagram" and "/reel" not in url.lower()
     apify_tried = False
-    try:
-        if apify_first:
-            apify_tried = True
-            apify_bundle = await _acquire_via_apify(url)
-            if apify_bundle is not None:
-                return apify_bundle
+    if apify_first:
+        apify_tried = True
+        if (b := await _apify_tier(url)) is not None:
+            return b
 
-        try:
-            file_path, info = await asyncio.wait_for(asyncio.to_thread(_download, url),
-                                                     timeout=DOWNLOAD_TIMEOUT_SECONDS)
-        except Exception as e:
-            # Download blocked (Instagram's "login required / rate-limit reached" wall is
-            # routine from datacenter IPs without cookies). Don't let it raise to the
-            # resolver — its generic fallback only sees the login page. Walk the ladder:
-            # paid Apify scrape (if configured) → free og-caption.
-            log.info("yt-dlp download failed for %s (%s); trying fallback ladder: %s",
-                     _platform(url), url, str(e)[:160])
-            file_path, info = None, None
-
-        if not file_path or not info:
-            # Skip a second (paid) Apify attempt if it already missed above.
-            apify_bundle = None if apify_tried else await _acquire_via_apify(url)
-            return apify_bundle if apify_bundle is not None else await _caption_fallback(url)
-
+    info = await _meta_ytdlp(url)
+    ytdlp_bundle = None
+    if info:
         meta = _metadata(info, url)
-        return await _video_bundle_from_file(
-            file_path, meta, thumbnail=info.get("thumbnail"), strategy="ytdlp_gcs")
-    finally:
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except OSError:
-                pass
+        meta.update(via="ytdlp", tier="caption")
+        thumb = info.get("thumbnail")
+        ytdlp_bundle = ContentBundle(
+            kind="text", text=meta["caption"] or None,
+            images=[thumb] if thumb else [], metadata=meta, strategy="reel_caption")
+        if len(meta["caption"]) >= THIN_CHARS:
+            return ytdlp_bundle   # T1 passes: free caption is enough to try extraction
+
+    # Caption thin or yt-dlp blocked: one Apify call (comments often hold the recipe).
+    if not apify_tried and (b := await _apify_tier(url)) is not None:
+        return b
+    # Captionless: text=None (never yt-dlp's "Video by <user>" title) so process.py's gate
+    # escalates to transcript/frames and fails the job if those yield nothing either.
+    if ytdlp_bundle is not None:
+        return ytdlp_bundle
+    return await _caption_fallback(url)
+
+
+# ---------- escalation tiers (T2 transcript, T3 frames) ----------
+
+async def _ffmpeg(*args: str) -> bool:
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=FFMPEG_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return False
+    return proc.returncode == 0
+
+
+async def _fetch_media(url: str, bundle: ContentBundle) -> str | None:
+    """ONE ≤360p ≤25 MB download per job, cached on the bundle (a failure is cached too).
+    Apify's media url when we have it (fetchable from any IP), else yt-dlp."""
+    m = bundle.metadata
+    if "media_path" in m:
+        return m["media_path"] or None
+    m["media_path"] = ""
+    if (m.get("duration") or 0) > settings.MAX_VIDEO_SECONDS:
+        return None
+    # Everything lands in the per-job workdir so cleanup() removes partial/orphaned files.
+    workdir = m.get("workdir") or tempfile.mkdtemp(dir=settings.TEMP_DOWNLOAD_DIR)
+    m["workdir"] = workdir
+    try:
+        if m.get("media_url"):
+            path = await asyncio.wait_for(_download_media(m["media_url"], workdir),
+                                          timeout=DOWNLOAD_TIMEOUT_SECONDS)
+        else:
+            path, _ = await asyncio.wait_for(asyncio.to_thread(_download, url, workdir),
+                                             timeout=DOWNLOAD_TIMEOUT_SECONDS)
+    except Exception as e:
+        log.info("media download failed for %s: %s", url, str(e)[:160])
+        return None
+    if not path or not os.path.exists(path):
+        return None
+    dest = os.path.join(workdir, "in.mp4")
+    shutil.move(path, dest)
+    m["media_path"] = dest
+    return dest
+
+
+async def _audio_transcript(path: str, duration_s: int = 0) -> str | None:
+    from services.gemini import gemini_service
+
+    mp3 = os.path.join(os.path.dirname(path), "a.mp3")
+    if not await _ffmpeg("-y", "-i", path, "-vn", "-ac", "1", "-ar", "16000",
+                         "-c:a", "libmp3lame", "-b:a", "32k", mp3):
+        return None
+    try:
+        text = await asyncio.wait_for(asyncio.to_thread(gemini_service.transcribe, mp3, duration_s),
+                                      timeout=TRANSCRIBE_TIMEOUT_SECONDS)
+    except Exception as e:
+        log.info("transcription failed: %s: %s", type(e).__name__, str(e)[:160])
+        return None
+    return text or None
+
+
+async def _frames(path: str, duration: int) -> list[dict]:
+    """≤8 frames, duration-aware (fps = min(1/2, 8/duration)), 768 px so overlay text reads."""
+    fps = min(0.5, _FRAMES / duration) if duration else 0.5
+    out = os.path.join(os.path.dirname(path), "f_%02d.jpg")
+    await _ffmpeg("-y", "-i", path, "-vf", f"fps={fps:.4f},scale=768:-2",
+                  "-frames:v", str(_FRAMES), "-q:v", "5", out)
+    parts = []
+    for f in sorted(glob.glob(os.path.join(os.path.dirname(path), "f_*.jpg")))[:_FRAMES]:
+        with open(f, "rb") as fh:
+            parts.append({"mime_type": "image/jpeg", "data": fh.read()})
+    return parts
+
+
+async def escalate(url: str, bundle: ContentBundle) -> ContentBundle | None:
+    """Next tier for a `reel_*` bundle, reusing the one cached download. Returns None when
+    there is nothing further to try (the caller keeps what it has)."""
+    tier = bundle.metadata.get("tier", "caption")
+    if tier == "frames":
+        return None
+    path = await _fetch_media(url, bundle)
+    if not path:
+        bundle.metadata["tier"] = "frames"
+        return None
+    text = bundle.text or ""
+    if tier == "caption":
+        bundle.metadata["tier"] = "transcript"
+        tr = await _audio_transcript(path, int(bundle.metadata.get("duration") or 0))
+        if tr and len(tr.split()) >= MIN_SPEECH_WORDS:
+            text = (text + "\n\nSpoken transcript:\n" + tr).strip()
+            return bundle.model_copy(update={"text": text, "strategy": "reel_transcript"})
+    bundle.metadata["tier"] = "frames"
+    frames = await _frames(path, int(bundle.metadata.get("duration") or 0))
+    if not frames:
+        return None
+    return bundle.model_copy(update={"text": text, "image_parts": frames,
+                                     "strategy": "reel_frames"})
+
+
+def cleanup(bundle: ContentBundle | None) -> None:
+    """Remove the job's temp dir (downloaded media, mp3, frames)."""
+    if bundle and (d := bundle.metadata.get("workdir")):
+        shutil.rmtree(d, ignore_errors=True)

@@ -4,33 +4,20 @@
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-// Where a shared payload (files + url/text/title) is parked between the POST share and the
-// /share page reading it. A POST share_target can't deliver files to a page directly, so the
-// SW catches the POST, stashes the payload in the Cache, and redirects to a GET the page can
-// read. Cache (not an in-memory map) so the payload survives if the SW restarts or the user
-// has to sign in first.
+// Where a shared payload (url/text/title) is parked between the POST share and the /share
+// page reading it. The SW catches the POST, stashes the payload in the Cache, and redirects to
+// a GET the page can read. Cache (not an in-memory map) so the payload survives if the SW
+// restarts or the user has to sign in first.
 const SHARE_CACHE = "clipnote-shared";
 
 async function stashShare(request) {
   const form = await request.formData();
-  const files = form.getAll("files").filter((f) => f && typeof f === "object" && f.size);
   const id = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
   const cache = await caches.open(SHARE_CACHE);
-  const fileMeta = [];
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    const key = `/__shared/${id}/${i}`;
-    await cache.put(
-      new Request(key),
-      new Response(f, { headers: { "Content-Type": f.type || "application/octet-stream" } }),
-    );
-    fileMeta.push({ key, type: f.type || "", name: f.name || `file-${i}` });
-  }
   const meta = {
     url: form.get("url") || "",
     text: form.get("text") || "",
     title: form.get("title") || "",
-    files: fileMeta,
   };
   await cache.put(
     new Request(`/__shared/${id}/meta`),
@@ -47,7 +34,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(stashShare(event.request));
     return;
   }
-  // The /share page reads its stashed payload (meta + file blobs) back out of the Cache.
+  // The /share page reads its stashed payload (meta) back out of the Cache.
   if (url.pathname.startsWith("/__shared/")) {
     event.respondWith(
       caches

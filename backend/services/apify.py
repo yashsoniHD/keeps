@@ -34,6 +34,45 @@ _CAPTION_FIELDS = ("caption", "text", "title", "description")
 _THUMB_FIELDS = ("displayUrl", "coverUrl", "thumbnailUrl", "imageUrl")
 _AUTHOR_FIELDS = ("ownerFullName", "ownerUsername", "authorMeta", "author", "channelName")
 _DURATION_FIELDS = ("videoDuration", "duration")
+MAX_COMMENTS = 10
+
+
+def _comments(item: dict) -> list[str]:
+    """Top comments (creators often pin the full recipe there). Defensive: `latestComments`
+    may be missing, null, strings, or dicts with text/ownerUsername."""
+    raw = item.get("latestComments")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for c in raw:
+        text = c if isinstance(c, str) else (c.get("text") if isinstance(c, dict) else None)
+        if isinstance(text, str) and text.strip():
+            out.append(text.strip()[:500])
+        if len(out) >= MAX_COMMENTS:
+            break
+    return out
+
+
+def _subtitles_text(item: dict) -> str:
+    """Plain text of a YouTube item's `subtitles` (list of {language, srt/plaintext/text} or
+    str). Defensive: actor output shape is only loosely documented."""
+    subs = item.get("subtitles")
+    if isinstance(subs, str):
+        return subs.strip()
+    if not isinstance(subs, list):
+        return ""
+    parts = []
+    for s in subs:
+        if isinstance(s, str):
+            parts.append(s)
+        elif isinstance(s, dict):
+            parts.append(next((s[k] for k in ("plaintext", "text", "srt", "vtt")
+                               if isinstance(s.get(k), str) and s[k]), ""))
+        if parts and parts[-1]:
+            break  # one language track is enough
+    text = " ".join(ln.strip() for ln in "\n".join(parts).splitlines()
+                    if ln.strip() and "-->" not in ln and not ln.strip().isdigit())
+    return text[:28000]
 # Carousel/sidecar posts: the instagram-post-scraper returns every slide either as a flat
 # `images` URL array or as `childPosts` objects each carrying their own `displayUrl`.
 _IMAGES_FIELDS = ("images", "imageUrls")
@@ -106,7 +145,10 @@ def _youtube_input(url: str) -> dict:
     # Verified live: this actor returns metadata + `subtitles` + `text` (description) but NO
     # downloadable video URL — so the YT fallback is transcript/text, not video. When the
     # trigger is built it needs YT-specific normalization (real `title` field, parse subtitles).
-    return {"startUrls": [{"url": url}], "maxResults": 1}
+    # ponytail: subtitle keys are unverified — confirm with scripts/verify_apify.py on first
+    # live run; without them `subtitles` never arrives while the paid slot is still consumed.
+    return {"startUrls": [{"url": url}], "maxResults": 1, "downloadSubtitles": True,
+            "subtitlesLanguage": "en", "subtitlesFormat": "plaintext"}
 
 
 def _registry() -> dict[str, _Actor]:
@@ -182,6 +224,8 @@ def _normalize(item: dict) -> dict:
                  or _first(item, _AUTHOR_FIELDS),
         "thumbnail": thumb or (images[0] if images else None),
         "images": images,        # every carousel slide (≥1 for image posts), [] for video
+        "comments": _comments(item),
+        "subtitles": _subtitles_text(item),
         "author": _first(item, _AUTHOR_FIELDS),
         "duration": int(float(dur)) if dur and str(dur).replace(".", "").isdigit() else 0,
     }
@@ -191,7 +235,7 @@ def _run(actor: _Actor, url: str) -> dict | None:
     endpoint = _RUN_SYNC.format(actor=actor.actor_id)
     # Apify cold-starts the actor; allow generous time. The sync endpoint returns the
     # dataset items directly, so no polling loop is needed.
-    with httpx.Client(timeout=120.0) as client:
+    with httpx.Client(timeout=75.0) as client:
         resp = client.post(endpoint, params={"token": settings.APIFY_TOKEN},
                            json=actor.build_input(url))
     resp.raise_for_status()

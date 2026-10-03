@@ -25,12 +25,12 @@ from models.ask import AskRequest, AskResponse, Citation
 from models.note import JobStatus
 from services.agent_tools import AgentContext, run_agent
 from services.auth_dep import require_user
-from services.cloud_tasks import enqueue_process_job
+from services.dispatch import enqueue_process_job
 from services.conversations import persist_exchange
 from services.firebase import flush_usage, get_db, get_user_categories, touch_user_activity
 from services.gemini import gemini_service
 from services.net_guard import BlockedURLError, assert_public_url_async
-from routers.ingest import _enforce_cost_caps
+from routers.ingest import _enforce_cost_caps, _run_inline
 from services import note_retrieval as nr
 # Retrieval lives in services.note_retrieval (shared with the agent). The endpoint calls it
 # through the `nr` module so a test patching `nr.<fn>` affects both the endpoint and the
@@ -71,7 +71,7 @@ async def _save_link_from_chat(db, user_id: str, save_url: str,
     """Validate, enqueue, and poll a save_link job initiated from Clip AI chat.
 
     Returns {"note_id": str, "title": str} on success, or raises HTTPException.
-    Polls Firestore every 1.5 s for up to 45 s — enough for the Cloud Tasks worker
+    Polls Firestore every 1.5 s for up to 45 s — enough for the worker
     to complete even on first-attempt transient retries.
     """
     if not save_url.startswith(("http://", "https://")):
@@ -98,7 +98,7 @@ async def _save_link_from_chat(db, user_id: str, save_url: str,
         "created_at": now,
         "updated_at": now,
     })
-    enqueue_process_job(job_id)
+    await _dispatch_job(db, job_id)
 
     # Poll until completed/failed, or timeout.
     for _ in range(30):
@@ -150,6 +150,26 @@ async def _general_answer(question: str, history: list[dict]) -> str:
     except Exception as e:
         log.error("ask chat stage failed: %s: %s", type(e).__name__, e)
         return "Sorry — I couldn't put together an answer just now. Please try again."
+
+
+async def _dispatch_job(db, job_id: str, path: str = "/api/process") -> bool:
+    """Kick the worker like ingest does: inline in dev (no WORKER_SECRET), else dispatch off-loop.
+    A dispatch failure marks the job failed instead of 500ing. Returns False on failure."""
+    if not settings.WORKER_SECRET and path == "/api/process":
+        # ponytail: the deep-agent worker has no inline entry point, so dev agent jobs fail fast
+        # below instead of running; add one in process.py if local deep-agent runs are needed.
+        asyncio.create_task(_run_inline(job_id))
+        return True
+    try:
+        await asyncio.to_thread(enqueue_process_job, job_id, path)
+        return True
+    except Exception as e:  # noqa: BLE001 — any enqueue failure is terminal for this job
+        log.error("enqueue failed, marking job failed: %s: %s", type(e).__name__, e,
+                  extra={"job_id": job_id})
+        await db.collection("jobs").document(job_id).update({
+            "status": "failed", "error": "dispatch_failed",
+            "updated_at": datetime.now(timezone.utc)})
+        return False
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -436,7 +456,7 @@ async def _enforce_deep_caps(db, user_id: str) -> None:
 @router.post("/ask/deep", response_model=JobStatus)
 async def ask_deep(body: AskRequest, user_id: str = Depends(require_user)):
     """Enqueue a heavy, long-running agent task (e.g. "compile a PRD from all my startup
-    notes"). Returns a job_id immediately; the Cloud Tasks worker runs the agent headlessly
+    notes"). Returns a job_id immediately; the worker runs the agent headlessly
     and writes the result note, which the frontend surfaces via the existing job-watch."""
     db = get_db()
     await _enforce_deep_caps(db, user_id)
@@ -461,5 +481,5 @@ async def ask_deep(body: AskRequest, user_id: str = Depends(require_user)):
         "created_at": now,
         "updated_at": now,
     })
-    enqueue_process_job(job_id, path="/api/process-agent")
-    return JobStatus(job_id=job_id, status="pending")
+    ok = await _dispatch_job(db, job_id, "/api/process-agent")
+    return JobStatus(job_id=job_id, status="pending" if ok else "failed")

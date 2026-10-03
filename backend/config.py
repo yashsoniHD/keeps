@@ -3,6 +3,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Vercel has no ADC: the service-account key arrives as a JSON env var. Write it to a 0600 file
+# and point Google's client libraries (firebase-admin, Firestore, google.auth) at it. Skipped
+# when unset (local ADC, tests).
+if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
+    _fd = os.open("/tmp/sa.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(_fd, "w") as _f:
+        _f.write(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/sa.json"
+
 
 class Settings:
     PROJECT_NAME = "Clip Note API"
@@ -10,40 +19,35 @@ class Settings:
 
     GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "weekly-updates-automation")
     GOOGLE_CLOUD_LOCATION: str = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-    # Gemini 3.x models are served from the `global` endpoint only (404 on us-central1);
-    # infra (Cloud Tasks, GCS, Firestore) stays regional.
-    GEMINI_LOCATION: str = os.getenv("GEMINI_LOCATION", "global")
 
-    # Verified against the live Vertex AI catalog at Phase 0 (see phase0/REPORT.md).
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-    GEMINI_LITE_MODEL: str = os.getenv("GEMINI_LITE_MODEL", "gemini-3.1-flash-lite")
-    IMAGEN_MODEL: str = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
-
-    # Semantic search embeddings (Firestore Vector Search). text-embedding-005 is a
-    # REGIONAL model (us-central1) — unlike the 3.x chat models it is NOT on the global
-    # endpoint, so it uses GOOGLE_CLOUD_LOCATION. 768 dims = its native size; the vector
-    # index dimension in infra MUST match this exactly.
-    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "text-embedding-005")
-    EMBED_LOCATION: str = os.getenv("EMBED_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"))
+    # --- AI via OpenRouter (OpenAI-compatible API). Model ids verified against the live
+    # catalog (GET https://openrouter.ai/api/v1/models) on 2026-10-03.
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    # extraction (text/structured), ask answers/synthesis/create, digests, agent orchestrator
+    TEXT_MODEL: str = os.getenv("TEXT_MODEL", "deepseek/deepseek-v3.2")
+    # classify, plan_ask, backfill helpers, collection-query expansion (text-only model)
+    LITE_MODEL: str = os.getenv("LITE_MODEL", "qwen/qwen3-30b-a3b-instruct-2507")
+    # carousel images / video frames
+    VISION_MODEL: str = os.getenv("VISION_MODEL", "qwen/qwen3-vl-30b-a3b-instruct")
+    # YouTube URL direct analysis — pinned to the Google AI Studio provider (accepts YouTube URLs)
+    YOUTUBE_MODEL: str = os.getenv("YOUTUBE_MODEL", "google/gemini-2.5-flash-lite")
+    # reel audio -> transcript (tier 2 of the reel cascade); OpenRouter /audio/transcriptions
+    TRANSCRIBE_MODEL: str = os.getenv("TRANSCRIBE_MODEL", "openai/whisper-large-v3-turbo")
+    # Note-search embeddings. The vector index dimension in infra MUST match EMBED_DIM exactly.
+    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "qwen/qwen3-embedding-8b")
     EMBED_DIM: int = int(os.getenv("EMBED_DIM", "768"))
     # Top-K notes returned by a semantic search.
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "20"))
     # Per-user daily cap on /api/search — each search embeds the query (a paid Vertex call,
     # tiny but previously unbounded). Generous: real usage is a handful of searches a day.
     MAX_SEARCHES_PER_USER_PER_DAY: int = int(os.getenv("MAX_SEARCHES_PER_USER_PER_DAY", "500"))
-    CLOUD_TASKS_QUEUE: str = os.getenv("CLOUD_TASKS_QUEUE", "clip-note-jobs")
-    CLOUD_TASKS_LOCATION: str = os.getenv("CLOUD_TASKS_LOCATION", "us-central1")
-    CLOUD_TASKS_WORKER_URL: str = os.getenv("CLOUD_TASKS_WORKER_URL", "http://localhost:8080")
-    # OIDC, not a shared secret: tasks are signed by this SA; the worker validates the token.
-    CLOUD_TASKS_SA_EMAIL: str = os.getenv("CLOUD_TASKS_SA_EMAIL", "")
+    # Self-dispatch to the worker route (replaces Cloud Tasks). WORKER_SECRET authenticates
+    # /api/process; CRON_SECRET is the Vercel cron bearer for the sweep route.
+    WORKER_URL: str = os.getenv("WORKER_URL", "")
+    WORKER_SECRET: str = os.getenv("WORKER_SECRET", "")
+    CRON_SECRET: str = os.getenv("CRON_SECRET", "")
 
     APP_BASE_URL: str = os.getenv("APP_BASE_URL", "https://clipnote.web.app")
-
-    CLOUD_STORAGE_BUCKET: str = os.getenv("CLOUD_STORAGE_BUCKET", "")
-    # Public-read bucket for note cover images. Kept separate from the media bucket
-    # (which holds private video downloads) so covers can be served to the browser by
-    # https URL — persisting them here fixes expiring/hot-linked source thumbnails.
-    COVERS_BUCKET: str = os.getenv("COVERS_BUCKET", "")
 
     # Public-facing app origin — used to build shareable note links (/p/{id}).
     PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", "https://clipnote.web.app")
@@ -191,33 +195,17 @@ class Settings:
     MAX_CONVERSATION_MESSAGES: int = int(os.getenv("MAX_CONVERSATION_MESSAGES", "100"))
     CONVERSATION_TTL_DAYS: int = int(os.getenv("CONVERSATION_TTL_DAYS", "30"))
 
-    # Direct-URI video analysis cap. YouTube videos longer than this fall back to the
-    # transcript path instead of being sent to Gemini whole.
-    MAX_VIDEO_SECONDS: int = int(os.getenv("MAX_VIDEO_SECONDS", "1800"))  # 30 min
+    # YouTube direct-URL analysis cap: longer videos without a transcript go to Apify subtitles
+    # / description-only instead of being sent to the model whole.
+    MAX_VIDEO_SECONDS: int = int(os.getenv("MAX_VIDEO_SECONDS", "900"))  # 15 min
 
-    # Max size for downloaded social media files we upload to GCS for analysis.
-    MAX_MEDIA_DOWNLOAD_MB: int = int(os.getenv("MAX_MEDIA_DOWNLOAD_MB", "100"))
-
-    # Direct user uploads (screenshot / image / PDF / voice via /api/ingest/upload).
-    # A per-input ceiling bounds both the GCS object and the Gemini token cost of a single
-    # capture — the cheapest safe equivalent of a page cap for PDFs (we don't parse pages).
-    MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
-    # Video is its own (larger) ceiling — a clip is far bigger than a screenshot, but the
-    # cap still bounds a single capture's Gemini token cost (analyzed at low media resolution).
-    MAX_VIDEO_UPLOAD_MB: int = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "100"))
-    ALLOWED_UPLOAD_MIME: dict[str, set[str]] = {
-        "image": {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/gif"},
-        "pdf": {"application/pdf"},
-        "voice": {"audio/mpeg", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
-                  "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"},
-        "video": {"video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
-                  "video/x-msvideo", "video/mpeg", "video/3gpp"},
-    }
+    # Max size of a downloaded social media file (local temp only).
+    MAX_MEDIA_DOWNLOAD_MB: int = int(os.getenv("MAX_MEDIA_DOWNLOAD_MB", "25"))
 
     # Optional paid fallback for Instagram/TikTok when yt-dlp is IP-blocked from Cloud Run
     # (datacenter IPs hit a login/rate-limit wall cookie-less). Apify owns the proxies +
     # accounts; we pay per scrape. Dormant until APIFY_TOKEN is set — the og-caption
-    # fallback covers the no-token case. Metered cost line, like Imagen.
+    # fallback covers the no-token case. Metered cost line.
     APIFY_TOKEN: str = os.getenv("APIFY_TOKEN", "")
     # Per-platform actors (built + maintained by Apify/clockworks). Each is env-overridable
     # so you can swap an actor without a redeploy. API paths use `~`, not `/`, between the
@@ -235,12 +223,12 @@ class Settings:
     # (private/age/region-gated); invoked from the extraction-failure path, not the resolver.
     APIFY_YOUTUBE_ACTOR: str = os.getenv("APIFY_YOUTUBE_ACTOR", "streamers~youtube-scraper")
     # Hard ceiling so a runaway/abuse spike can't drain the budget via paid scrapes.
-    APIFY_DAILY_GLOBAL_CAP: int = int(os.getenv("APIFY_DAILY_GLOBAL_CAP", "200"))
+    APIFY_DAILY_GLOBAL_CAP: int = int(os.getenv("APIFY_DAILY_GLOBAL_CAP", "50"))
 
     # --- Watchlist mini-app (TMDB enrichment) ---
     # TMDB v4 Read Access Token (sent as `Authorization: Bearer`). When empty, enrichment is a
     # graceful no-op: entertainment notes still save and their titles render unenriched.
-    # TMDB is free for this use, so no per-user cost cap (unlike Gemini/Imagen).
+    # TMDB is free for this use, so no per-user cost cap (unlike the AI calls).
     TMDB_BEARER: str = os.getenv("TMDB_BEARER", "")
     TMDB_API_BASE: str = os.getenv("TMDB_API_BASE", "https://api.themoviedb.org/3")
     TMDB_IMAGE_BASE: str = os.getenv("TMDB_IMAGE_BASE", "https://image.tmdb.org/t/p")
@@ -272,20 +260,8 @@ class Settings:
     # their text and are simply absent from the detail map.
     TRIP_MAX_GEOCODED_STOPS: int = int(os.getenv("TRIP_MAX_GEOCODED_STOPS", "40"))
 
-    # Optional Firecrawl API key for bot-protected product pages (tier 2 fallback).
-    FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY", "")
     # Optional Jina Reader key (r.jina.ai works keyless at low volume; key raises limits).
     JINA_API_KEY: str = os.getenv("JINA_API_KEY", "")
-
-    # AI-generated covers (Imagen). Off by default — a real cost line. When on, a note
-    # that would otherwise be coverless gets one generated image (the frontend gradient
-    # hero is the fallback when off / failed / capped). Daily caps mirror the note caps;
-    # price is USD per generated image (verify against live Vertex pricing before enabling).
-    ENABLE_IMAGEN: bool = os.getenv("ENABLE_IMAGEN", "false").lower() == "true"
-    VISUAL_CONTENT_TYPES: set[str] = {"recipe", "product", "itinerary", "travel", "place", "fashion", "workout"}
-    MAX_IMAGES_PER_USER_PER_DAY: int = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "20"))
-    DAILY_GLOBAL_IMAGE_CAP: int = int(os.getenv("DAILY_GLOBAL_IMAGE_CAP", "200"))
-    IMAGEN_PRICE_PER_IMAGE: float = float(os.getenv("IMAGEN_PRICE_PER_IMAGE", "0.04"))
 
     # --- Admin dashboard ---
     # Emails allowed to read /api/admin/stats (comma-separated). Gating is by verified
@@ -297,26 +273,16 @@ class Settings:
         if e.strip()
     }
 
-    # Vertex AI Gemini token pricing, USD per 1,000,000 tokens. We store raw token
-    # counts (immutable facts) and derive cost at read-time from these, so a price
-    # change re-prices history correctly. Paid-tier Standard rates (confirmed against
-    # the live pricing page, 2026-06-12); output includes thinking tokens. Lite input
-    # uses the text/image/video rate ($0.25).
-    GEMINI_PRICE_IN: float = float(os.getenv("GEMINI_PRICE_IN", "1.50"))
-    GEMINI_PRICE_OUT: float = float(os.getenv("GEMINI_PRICE_OUT", "9.00"))
-    # Audio input bills ~2× text on the 3.x flash tier. The usage meter can now track an
-    # audio-input subtotal separately (record_usage's `modality="audio"` hint) and
-    # admin._cost_usd prices that subtotal at this rate instead of GEMINI_PRICE_IN.
-    # DEFERRED: gemini.py's voice/media call sites don't yet pass modality="audio", and
-    # flush_usage doesn't yet persist the audio subtotal (lifetime_tokens_in_audio_main),
-    # so today ALL main input still meters at the text rate — voice cost is still slightly
-    # under-reported. This constant + the meter API are the forward-compatible scaffolding
-    # so finishing that wiring needs no further price/schema change.
-    GEMINI_PRICE_IN_AUDIO: float = float(os.getenv("GEMINI_PRICE_IN_AUDIO", "3.00"))
-    GEMINI_LITE_PRICE_IN: float = float(os.getenv("GEMINI_LITE_PRICE_IN", "0.25"))
-    GEMINI_LITE_PRICE_OUT: float = float(os.getenv("GEMINI_LITE_PRICE_OUT", "1.50"))
-    # text-embedding-005 on Vertex AI: ~$0.025/1M tokens (input only; no output).
-    EMBED_PRICE_IN: float = float(os.getenv("EMBED_PRICE_IN", "0.025"))
+    # Fallback token pricing, USD per 1,000,000 tokens — used only when a response carries no
+    # OpenRouter `usage.cost` (and for pre-cutover token counters). Main = TEXT/VISION/YOUTUBE
+    # models (priced at TEXT_MODEL rates), lite = LITE_MODEL, embed = EMBED_MODEL (input only).
+    # Live catalog rates 2026-10-03: deepseek-v3.2 $0.28/$0.42, qwen3-30b-a3b-instruct-2507
+    # $0.048/$0.193, qwen3-embedding-8b $0.01.
+    PRICE_MAIN_IN: float = float(os.getenv("PRICE_MAIN_IN", "0.28"))
+    PRICE_MAIN_OUT: float = float(os.getenv("PRICE_MAIN_OUT", "0.42"))
+    PRICE_LITE_IN: float = float(os.getenv("PRICE_LITE_IN", "0.05"))
+    PRICE_LITE_OUT: float = float(os.getenv("PRICE_LITE_OUT", "0.20"))
+    PRICE_EMBED_IN: float = float(os.getenv("PRICE_EMBED_IN", "0.01"))
     USD_TO_INR: float = float(os.getenv("USD_TO_INR", "84.0"))
 
 

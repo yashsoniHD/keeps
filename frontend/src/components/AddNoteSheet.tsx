@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkle, Paperclip, Mic, ArrowUp, Link2, X } from "lucide-react";
-import { VoiceRecorder } from "@/components/VoiceRecorder";
+import { Sparkle, Paperclip, ArrowUp, Link2, X } from "lucide-react";
 import { FOCUS_RING } from "@/lib/ui";
 import { PillButton } from "@/components/shared/PillButton";
 import type { CaptureMode } from "@/components/AppShell";
@@ -16,7 +15,7 @@ function looksLikeUrl(s: string): boolean {
 }
 
 // Unified capture composer used by both the Notes feed and the Library home. One field takes a
-// link OR free text (auto-detected); attach + voice sit inline. Purely presentational — the
+// link OR free text (auto-detected); attach (text files) sits inline. Purely presentational — the
 // caller supplies the ingest handlers, so each screen wires its own optimistic/confirm behaviour.
 export function AddNoteSheet({
   url,
@@ -24,8 +23,6 @@ export function AddNoteSheet({
   onCancel,
   onSubmit,
   onSubmitText,
-  onUploadFile,
-  onUploadVoice,
 }: {
   url: string;
   setUrl: (v: string) => void; // kept for API compatibility; the composer holds its own draft
@@ -34,8 +31,6 @@ export function AddNoteSheet({
   onCancel: () => void;
   onSubmit: (u: string) => void;
   onSubmitText: (text: string, title?: string, processAI?: boolean) => void;
-  onUploadFile: (file: File, kind: "image" | "pdf" | "video" | "voice") => Promise<void>;
-  onUploadVoice: (blob: Blob) => Promise<void>;
 }) {
   // Seed the draft from any pre-filled URL (PWA share target / paste), then own it locally.
   const [content, setContent] = useState(url);
@@ -43,7 +38,6 @@ export function AddNoteSheet({
   // Whether a typed note is structured by Clip AI (default) or saved verbatim. Links are always
   // structured, so the toggle only shows in text mode.
   const [processAI, setProcessAI] = useState(true);
-  const [voiceOpen, setVoiceOpen] = useState(initialMode === "voice");
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -51,10 +45,9 @@ export function AddNoteSheet({
 
   // Quick-action chips open the sheet already set up: Link/Note focus the field (the user
   // explicitly chose to type, so springing the keyboard is right — unlike the neutral open,
-  // which deliberately doesn't autofocus); Photo goes straight to the file picker.
+  // which deliberately doesn't autofocus).
   useEffect(() => {
-    if (initialMode === "file") fileRef.current?.click();
-    else if (initialMode === "link" || initialMode === "text") textRef.current?.focus();
+    if (initialMode === "link" || initialMode === "text") textRef.current?.focus();
   }, [initialMode]);
 
   const isUrl = looksLikeUrl(content);
@@ -87,27 +80,7 @@ export function AddNoteSheet({
       }
       return;
     }
-    const kind: "image" | "pdf" | "video" | "voice" | null = file.type.startsWith("image/")
-      ? "image"
-      : file.type === "application/pdf"
-        ? "pdf"
-        : file.type.startsWith("video/")
-          ? "video"
-          : file.type.startsWith("audio/")
-            ? "voice"
-            : null;
-    if (!kind) {
-      setFileError("Pick an image, video, audio file, PDF, or text file.");
-      return;
-    }
-    setFileError(null);
-    setUploading(true);
-    try {
-      await onUploadFile(file, kind); // closes the sheet on success
-    } catch (e) {
-      setUploading(false);
-      setFileError(e instanceof Error ? e.message : "Couldn't add that file.");
-    }
+    setFileError("Pick a text file (.txt or .md).");
   };
 
   const iconBtn = `inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-paper text-ink-soft transition-colors hover:text-ink hover:bg-accent disabled:opacity-50 ${FOCUS_RING}`;
@@ -122,7 +95,7 @@ export function AddNoteSheet({
         <input
           ref={fileRef}
           type="file"
-          accept="image/*,application/pdf,video/*,audio/*,text/plain,text/markdown,.txt,.md,.markdown"
+          accept="text/plain,text/markdown,.txt,.md,.markdown"
           className="hidden"
           onChange={(e) => onFilePicked(e.target.files?.[0])}
         />
@@ -130,7 +103,7 @@ export function AddNoteSheet({
         <div className="flex items-start justify-between">
           <div>
             <h2 className="font-serif text-3xl text-ink">New note</h2>
-            <p className="mt-1 text-sm text-ink-soft">Paste a link, write, upload, or record.</p>
+            <p className="mt-1 text-sm text-ink-soft">Paste a link or write a note.</p>
           </div>
           <button
             type="button"
@@ -213,38 +186,20 @@ export function AddNoteSheet({
           </button>
         )}
 
-        {/* Inline voice recorder — expands in place; saving it ingests + closes the sheet. */}
-        {voiceOpen && (
-          <div className="mt-3 rounded-2xl border border-border bg-paper p-4">
-            <VoiceRecorder onSave={onUploadVoice} />
-          </div>
-        )}
-
         {fileError && <p className="mt-3 text-sm text-destructive">{fileError}</p>}
 
-        {/* Actions: attach + voice on the left, submit on the right. */}
+        {/* Actions: attach on the left, submit on the right. */}
         <div className="mt-4 flex items-center gap-2">
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             aria-label="Attach a file"
-            title="Attach an image, video, audio, PDF, or text file"
+            title="Attach a text file"
             className={iconBtn}
           >
             <Paperclip className="h-4.5 w-4.5" />
           </button>
-          <button
-            type="button"
-            onClick={() => setVoiceOpen((v) => !v)}
-            aria-pressed={voiceOpen}
-            aria-label="Record a voice note"
-            title="Record a voice note"
-            className={`${iconBtn} ${voiceOpen ? "border-transparent bg-health-soft text-health-chip" : ""}`}
-          >
-            <Mic className="h-4.5 w-4.5" />
-          </button>
-
           <PillButton
             type="button"
             onClick={submit}

@@ -40,9 +40,9 @@ def patch_ingest(fake_db, monkeypatch):
     fake_db.transaction = lambda: FakeTransaction(fake_db)
     monkeypatch.setattr(ingest_mod, "get_db", lambda: fake_db)
     monkeypatch.setattr(ingest_mod.fs, "async_transactional", lambda f: f)
-    # A configured SA email means the normal Cloud Tasks enqueue path (not the dev inline path)
+    # A configured WORKER_SECRET means the normal dispatch path (not the dev inline path)
     # runs by default; the inline-path test overrides this back to "".
-    monkeypatch.setattr(settings, "CLOUD_TASKS_SA_EMAIL", "sa@example.com")
+    monkeypatch.setattr(settings, "WORKER_SECRET", "s3cret", raising=False)
     calls = []
     monkeypatch.setattr(ingest_mod, "enqueue_process_job", lambda job_id: calls.append(job_id))
 
@@ -112,7 +112,7 @@ async def test_ingest_route_defers_on_global_cap(fake_db, patch_ingest):
     )
     assert res.status == "deferred"
     assert fake_db.docs[("jobs", res.job_id)]["status"] == "deferred"
-    assert patch_ingest == []  # parked — nothing enqueued to Cloud Tasks
+    assert patch_ingest == []  # parked — nothing dispatched
 
 
 async def test_ingest_route_enqueues_when_clear(fake_db, patch_ingest):
@@ -124,7 +124,7 @@ async def test_ingest_route_enqueues_when_clear(fake_db, patch_ingest):
 
 
 async def test_enqueue_failure_marks_job_failed(fake_db, patch_ingest, monkeypatch):
-    """A Cloud Tasks enqueue failure must not 500 or orphan a 'pending' job: the job goes
+    """A dispatch failure must not 500 or orphan a 'pending' job: the job goes
     terminal ('failed') so the client stops showing an eternal 'Saving…' card."""
     def boom(job_id):
         raise RuntimeError("cloud tasks unavailable")
@@ -141,8 +141,8 @@ async def test_enqueue_failure_marks_job_failed(fake_db, patch_ingest, monkeypat
 
 
 async def test_empty_sa_email_runs_inline(fake_db, patch_ingest, monkeypatch):
-    """With no Cloud Tasks SA (local dev) the worker runs inline instead of enqueuing."""
-    monkeypatch.setattr(settings, "CLOUD_TASKS_SA_EMAIL", "")
+    """With no WORKER_SECRET (local dev) the worker runs inline instead of enqueuing."""
+    monkeypatch.setattr(settings, "WORKER_SECRET", "", raising=False)
     ran = []
 
     async def fake_process(job_id):
@@ -156,6 +156,6 @@ async def test_empty_sa_email_runs_inline(fake_db, patch_ingest, monkeypatch):
         FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u"
     )
     assert res.status == "pending"
-    assert patch_ingest == []          # nothing enqueued to Cloud Tasks
+    assert patch_ingest == []          # nothing dispatched
     await asyncio.sleep(0)             # let the scheduled inline task run
     assert ran == [res.job_id]

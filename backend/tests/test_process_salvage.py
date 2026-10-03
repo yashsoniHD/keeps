@@ -1,12 +1,12 @@
 """Salvage ladder: a capture always produces a note — unless the URL is blocked.
 
-Transient failures re-raise (Cloud Tasks retries) below the attempt cap; everything
+Transient failures re-raise (process_job retries in-process) below the attempt cap; everything
 else salvages a minimal bookmark note instead of marking the job failed.
 """
 import httpx
 import pytest
 from fastapi import HTTPException
-from google.genai import errors as genai_errors
+import openai
 
 import routers.process as process
 from models.note import ContentBundle, NoteExtraction
@@ -69,7 +69,7 @@ def patch_pipeline(monkeypatch, *, acquire_exc=None, extract_exc=None, extractio
     async def fake_classify(url, bundle, existing, note_hint=None):
         return "summary"
 
-    async def fake_extract(url, bundle, content_type, note_hint=None):
+    async def fake_extract(url, bundle, content_type, note_hint=None, **_):
         if extract_exc:
             raise extract_exc
         return extraction
@@ -119,9 +119,10 @@ async def test_empty_extraction_salvages(fake_db, monkeypatch):
 
 
 async def test_transient_below_cap_reraises_for_retry(fake_db, monkeypatch):
-    """Network-ish failures on early attempts → 500 so Cloud Tasks retries. No note."""
+    """Network-ish failures on early attempts → 500 so the caller can retry. No note."""
     seed_job(fake_db, attempts=0)
     patch_pipeline(monkeypatch, extract_exc=httpx.ConnectTimeout("connect timed out"))
+    monkeypatch.setattr(process, "JOB_DEADLINE_S", 0)   # out of retry budget → surfaces the 500
 
     with pytest.raises(HTTPException) as exc:
         await process.process_job("job-1", DummyRequest())
@@ -227,10 +228,55 @@ async def test_salvage_write_failure_marks_failed(fake_db, monkeypatch):
     assert fake_db.docs[("jobs", "job-1")]["status"] == "failed"
 
 
+def _status_err(code):
+    resp = httpx.Response(code, request=httpx.Request("POST", "http://x"))
+    return openai.APIStatusError("x", response=resp, body=None)
+
+
 def test_is_transient_classification():
-    assert process._is_transient(genai_errors.APIError(503, {"error": {"message": "x"}}))
-    assert process._is_transient(genai_errors.APIError(429, {"error": {"message": "x"}}))
-    assert not process._is_transient(genai_errors.APIError(404, {"error": {"message": "x"}}))
+    assert process._is_transient(_status_err(503))
+    assert process._is_transient(_status_err(429))
+    assert not process._is_transient(_status_err(404))
+    assert process._is_transient(openai.APIConnectionError(request=httpx.Request("POST", "http://x")))
     assert process._is_transient(httpx.ConnectError("dns broke"))
     assert process._is_transient(httpx.ReadTimeout("slow origin"))
     assert not process._is_transient(ValueError("empty extraction"))
+
+
+async def test_inline_retry_then_success(fake_db, monkeypatch):
+    """One transient failure is retried in-process (after a sleep) and then succeeds."""
+    seed_job(fake_db, attempts=0)
+    patch_pipeline(monkeypatch, extract_exc=httpx.ConnectTimeout("connect timed out"))
+    sleeps = []
+
+    async def fake_sleep(d):
+        sleeps.append(d)
+        # the "model" recovers: swap in a working extractor before the retry
+        patch_pipeline(monkeypatch, extraction=NoteExtraction(
+            content_type="summary", title="t", ai_summary="s", cover_image_prompt="",
+            data={"tldr": "enough real content here", "keyPoints": ["a", "b"]}))
+
+    monkeypatch.setattr(process.asyncio, "sleep", fake_sleep)
+
+    result = await process.process_job("job-1", DummyRequest())
+
+    assert sleeps == [5]
+    assert result["status"] == "completed"
+    assert fake_db.docs[("jobs", "job-1")]["status"] == "completed"
+    assert fake_db.docs[("jobs", "job-1")]["attempt_count"] == 2
+
+
+async def test_near_expired_deadline_skips_outer_retry(fake_db, monkeypatch):
+    """With < MIN_RETRY_S left of JOB_DEADLINE_S the transient 500 is raised, not retried."""
+    seed_job(fake_db, attempts=0)
+    patch_pipeline(monkeypatch, extract_exc=httpx.ConnectTimeout("connect timed out"))
+    monkeypatch.setattr(process, "JOB_DEADLINE_S", process.MIN_RETRY_S - 1)
+    sleeps = []
+
+    async def fake_sleep(d):
+        sleeps.append(d)
+
+    monkeypatch.setattr(process.asyncio, "sleep", fake_sleep)
+    with pytest.raises(HTTPException) as ei:
+        await process.process_job("job-1", DummyRequest())
+    assert ei.value.status_code == 500 and sleeps == []

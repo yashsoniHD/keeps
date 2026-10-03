@@ -15,9 +15,7 @@ from models.note import ContentBundle
 from services.gemini import CATEGORY_CAP_RULE, closest_existing, gemini_service
 
 
-class _FakeResp:
-    def __init__(self, text: str):
-        self.text = text
+from conftest import chat_resp as _FakeResp  # noqa: E402
 
 
 def _bundle():
@@ -34,10 +32,10 @@ def _patch_model(monkeypatch, returned_slug):
     seen: dict = {}
 
     def fake_generate(*args, **kwargs):
-        seen["config"] = kwargs.get("config")
+        seen["kwargs"] = kwargs
         return _FakeResp('{"content_type": "%s"}' % returned_slug)
 
-    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gemini_service.client.chat.completions, "create", fake_generate)
     return seen
 
 
@@ -76,7 +74,7 @@ async def test_at_cap_snaps_new_slug_to_existing(monkeypatch):
     assert slug == "recipe"          # snapped, not appended
     assert slug in existing          # taxonomy never grows
     # the model was also TOLD the list is full
-    assert CATEGORY_CAP_RULE in (seen["config"].system_instruction or "")
+    assert CATEGORY_CAP_RULE in seen["kwargs"]["messages"][0]["content"]
 
 
 async def test_at_cap_reuses_exact_existing(monkeypatch):
@@ -91,7 +89,7 @@ async def test_under_cap_allows_new_slug(monkeypatch):
     existing = ["recipe"]            # well under the cap
     slug = await gemini_service.classify("http://x", _bundle(), existing)
     assert slug == "home-decor"      # a genuinely new category is still minted
-    assert CATEGORY_CAP_RULE not in (seen["config"].system_instruction or "")
+    assert CATEGORY_CAP_RULE not in seen["kwargs"]["messages"][0]["content"]
 
 
 async def test_cap_boundary_is_inclusive(monkeypatch):
