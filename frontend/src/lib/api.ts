@@ -11,12 +11,12 @@ import type {
 
 // The fallback must be environment-aware: a production build must NEVER point at localhost
 // (Vite loads .env*.local in all modes, so a stray VITE_API_URL could otherwise ship). When
-// the var is unset, dev talks to the local backend and prod talks to the live Cloud Run API.
+// the var is unset, dev talks to the local backend and prod talks to the live Vercel API.
 const API_URL =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.DEV
     ? "http://localhost:8080"
-    : "https://clip-note-api-674775099277.us-central1.run.app");
+    : "https://clip-note-api.vercel.app"); // must match the Vercel project's production alias (Phase F sets the real one)
 
 // All API calls go through this: a 401 usually means the cached Firebase token
 // expired while the tab was backgrounded — retry exactly once with a forced refresh.
@@ -86,47 +86,6 @@ export async function ingestText(
     );
   }
   return res.json();
-}
-
-// Save a screenshot/image or PDF. Multipart so the bytes go straight to GCS; the backend
-// returns a job_id the same way the URL path does. Do NOT set Content-Type — the browser
-// adds the multipart boundary itself.
-export async function ingestMedia(
-  file: File,
-  inputType: "image" | "pdf" | "voice" | "video",
-  title?: string,
-): Promise<{ job_id: string; status: string }> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("input_type", inputType);
-  form.append("source", "upload");
-  if (title) form.append("title", title);
-  const res = await apiFetch("/api/ingest/upload", { method: "POST", body: form });
-  if (!res.ok) {
-    throw new ApiError(
-      await errorDetail(res, "Couldn't add that file. Please try again."),
-      res.status,
-    );
-  }
-  return res.json();
-}
-
-// Save a voice memo: the recorder hands us an audio Blob, which we wrap as a File and push
-// through the same multipart upload path as images/PDFs. The worker transcribes it with
-// Gemini and structures the result into a note.
-export async function ingestVoice(
-  blob: Blob,
-  title?: string,
-): Promise<{ job_id: string; status: string }> {
-  const ext = blob.type.includes("mp4")
-    ? "m4a"
-    : blob.type.includes("ogg")
-      ? "ogg"
-      : blob.type.includes("wav")
-        ? "wav"
-        : "webm";
-  const file = new File([blob], `voice.${ext}`, { type: blob.type || "audio/webm" });
-  return ingestMedia(file, "voice", title);
 }
 
 // Re-run a note's source through the extraction pipeline, overwriting the note in place

@@ -20,6 +20,12 @@ import { SaveSnap } from "@/components/ClipMark";
 // One debounced window-resize notifier shared by every card. Card width only changes when
 // the viewport does (the responsive column count), so a lone resize listener replaces the
 // previous per-card ResizeObserver — dozens of live observers doing layout work on a full feed.
+// Backend job error codes -> user-facing copy.
+const JOB_ERRORS: Record<string, string> = {
+  private_or_blocked:
+    "This post is private or Instagram blocked access. Try sharing a public link.",
+};
+
 const resizeCallbacks = new Set<() => void>();
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 if (typeof window !== "undefined") {
@@ -618,7 +624,7 @@ export function FailedCard({
 
       <p className="mt-3 break-all text-sm font-medium text-ink line-clamp-2">{job.url}</p>
       <p className="mt-1.5 text-xs text-ink-soft line-clamp-2">
-        {job.error || "Something went wrong while processing this link."}
+        {JOB_ERRORS[job.error ?? ""] ?? (job.error || "Something went wrong while processing this link.")}
       </p>
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-4">

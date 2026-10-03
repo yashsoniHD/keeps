@@ -10,7 +10,7 @@ knows which words are proper nouns ("Lisbon", "iPhone", "Sony WH-1000XM5") and m
 capitalized. Titles are batched per call to keep cost and latency low. Idempotent: a title
 already in sentence case comes back unchanged and is skipped.
 
-Usage (from backend/, with ADC pointing at the project):
+Usage (from backend/, with ADC for Firestore and OPENROUTER_API_KEY set):
     python -m scripts.backfill_title_case --dry-run
     python -m scripts.backfill_title_case --limit 20 --dry-run
     python -m scripts.backfill_title_case
@@ -20,12 +20,9 @@ import asyncio
 import json
 import logging
 
-from google import genai
-from google.genai import types
-
 from config import settings
 from services.firebase import get_db
-from services.gemini import _strip_code_fences
+from services.gemini import _strip_code_fences, gemini_service
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("clipnote.backfill")
@@ -36,23 +33,16 @@ SYSTEM = (
     "You convert note titles to sentence case. Capitalize ONLY the first word and genuine "
     "proper nouns: people, places, brands, product/model names, and acronyms (iPhone, Lisbon, "
     "Sony WH-1000XM5, NASA). Lowercase every other word. Do NOT reword, translate, add, remove, "
-    "or re-punctuate — change letter case only. Return a JSON array of strings, the re-cased "
-    "titles in the SAME ORDER and SAME COUNT as the input array, nothing else."
+    "or re-punctuate — change letter case only. Return a JSON object {\"titles\": [...]} whose "
+    "array holds the re-cased titles in the SAME ORDER and SAME COUNT as the input, nothing else."
 )
 
 
-def recase_batch(client: genai.Client, titles: list[str]) -> list[str] | None:
+def recase_batch(titles: list[str]) -> list[str] | None:
     prompt = "Re-case these titles to sentence case:\n" + json.dumps(titles, ensure_ascii=False)
-    resp = client.models.generate_content(
-        model=settings.GEMINI_LITE_MODEL,
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            system_instruction=SYSTEM,
-        ),
-    )
     try:
-        out = json.loads(_strip_code_fences(resp.text))
+        out = json.loads(_strip_code_fences(
+            gemini_service._chat(settings.LITE_MODEL, SYSTEM, prompt))).get("titles")
     except (json.JSONDecodeError, AttributeError, TypeError):
         log.warning("batch parse failed; skipping %d titles", len(titles))
         return None
@@ -65,11 +55,6 @@ def recase_batch(client: genai.Client, titles: list[str]) -> list[str] | None:
 
 async def run(dry_run: bool, limit: int | None) -> None:
     db = get_db()
-    client = genai.Client(
-        vertexai=True,
-        project=settings.GOOGLE_CLOUD_PROJECT,
-        location=settings.GEMINI_LOCATION,
-    )
 
     items: list[tuple[str, str]] = []  # (doc_id, title)
     async for doc in db.collection("notes").stream():
@@ -84,7 +69,7 @@ async def run(dry_run: bool, limit: int | None) -> None:
 
     for i in range(0, len(items), BATCH):
         chunk = items[i:i + BATCH]
-        recased = await asyncio.to_thread(recase_batch, client, [t for _, t in chunk])
+        recased = await asyncio.to_thread(recase_batch, [t for _, t in chunk])
         if recased is None:
             continue
         for (doc_id, old), new in zip(chunk, recased):

@@ -49,4 +49,4 @@ def test_datetime_values_in_data_do_not_crash():
 
 
 def test_version_constant_is_current():
-    assert EMBED_TEXT_VERSION == 2
+    assert EMBED_TEXT_VERSION == 3

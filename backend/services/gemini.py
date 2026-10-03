@@ -1,4 +1,4 @@
-"""Two-step, per-user-aware, anti-generic Gemini pipeline.
+"""Two-step, per-user-aware, anti-generic note pipeline (OpenRouter models).
 
 Step 1 (lite model): categorize against the user's existing categories — prefer the most
 specific applicable type; `summary` only for genuinely prose content; `general` banned.
@@ -8,18 +8,23 @@ only that type's schema with field-level guidance. Unknown/invented slugs get th
 prompt: rich building blocks (facts/sections/steps/table/checklist/quotes) that GenericNote
 renders with template-grade styling — never a wall of bullets.
 
-Note on structured output: `data` is intentionally open-shaped (AI-invented types), and
-Vertex controlled generation rejects object schemas without fixed properties — so we use
-JSON mode (response_mime_type) and validate with Pydantic afterwards instead of response_schema.
+Note on structured output: `data` is intentionally open-shaped (AI-invented types), so we use
+JSON-object mode and validate with Pydantic afterwards instead of a strict JSON schema.
+
+Module/class names keep "gemini" for import stability; models are routed through OpenRouter
+(see config: TEXT/LITE/VISION/YOUTUBE_MODEL). Only YouTube videos go to a Gemini model.
 """
 import asyncio
+import base64
+import contextvars
 import json
 import logging
 import re
 import time
+from types import SimpleNamespace
+from urllib.parse import urlparse
 
-from google import genai
-from google.genai import types
+from openai import AsyncOpenAI, OpenAI
 
 from config import settings
 from models.ask import ArtifactNote, AskPlan, CollectionDigest, GroundedAnswer, SynthAnswer
@@ -275,7 +280,6 @@ Output is STRUCTURED JSON ONLY — no HTML, no markdown, no styling. Shape:
   "content_type": "<echo the slug you were given — do not change it>",
   "title": "concise, specific note title in SENTENCE CASE (capitalize only the first word and proper nouns/brand names/acronyms, e.g. 'Easy weeknight paneer butter masala', 'A weekend in Lisbon', 'Sony WH-1000XM5 review')",
   "ai_summary": "ONE concise, specific sentence (~15-25 words) capturing the single most useful takeaway from THIS content (mention an actual detail)",
-  "cover_image_prompt": "a vivid visual scene for a cover image",
   "data": { ...per the schema below... }
 }
 
@@ -756,13 +760,101 @@ def _strip_code_fences(text: str) -> str:
     return t
 
 
+# JSON-object mode on some providers (DeepSeek) requires the word "json" in the prompt, and
+# several system prompts (COMPOSER_PROMPT, CATEGORY_CAP_RULE, …) don't contain it.
+JSON_SUFFIX = "\nRespond with a single JSON object."
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _youtube_uri(bundle: ContentBundle) -> str | None:
+    """The bundle's video URI when it is a YouTube URL (the only video a model reads directly).
+    A legacy gs:// video_uri is treated as absent → the note is extracted from text."""
+    uri = bundle.video_uri or ""
+    host = (urlparse(uri).hostname or "").lower()
+    if host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com"):
+        return uri
+    return None
+
+
+# Absolute time.monotonic() deadline of the current request (set by process_job); extract()
+# falls back to it when no explicit `deadline` is passed. None = unbounded.
+job_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "job_deadline", default=None)
+
+
+# USD/s of audio, from OpenRouter's sample $0.000508 / 9.2 s.
+WHISPER_PRICE_PER_SEC = 0.0000553
+
+
 class GeminiService:
     def __init__(self):
-        self.client = genai.Client(
-            vertexai=True,
-            project=settings.GOOGLE_CLOUD_PROJECT,
-            location=settings.GEMINI_LOCATION,
-        )
+        key = settings.OPENROUTER_API_KEY or "unset"  # SDK refuses an empty key at import time
+        # SDK retries off: every call site already has its own retry loop — don't stack them.
+        self.client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=key, max_retries=0, timeout=120)
+        self.aclient = AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=key, max_retries=0,
+                                   timeout=120)  # streaming agent only (agent_tools)
+
+    def _chat(self, model: str, system: str, text: str, *, json: bool = True,
+              temperature: float | None = None, images=(), video_url: str | None = None,
+              web: bool = False, timeout: float | None = None) -> str:
+        """One chat completion → the reply text ("" when empty). Meters usage.
+
+        json      → JSON-object mode + JSON_SUFFIX + only providers honouring response_format
+        images    → bundle.image_parts dicts ({mime_type, data: bytes}) sent as data URLs
+        video_url → a YouTube URL; pinned to Google AI Studio (the provider that fetches it)
+        web       → OpenRouter web-search plugin (replaces Gemini google_search grounding)
+        """
+        if video_url or images:
+            content: str | list = [{"type": "video_url", "video_url": {"url": video_url}}] if video_url else []
+            content.append({"type": "text", "text": text})
+            for img in images:
+                b64 = base64.b64encode(img["data"]).decode()
+                content.append({"type": "image_url", "image_url": {
+                    "url": f"data:{img.get('mime_type', 'image/jpeg')};base64,{b64}"}})
+        else:
+            content = text
+        extra: dict = {}
+        # ponytail: the Qwen instruct defaults (LITE/VISION) have no reasoning mode and none of
+        # their providers list `reasoning`, so sending it alongside require_parameters could
+        # leave zero providers. Upgrade path: drop this check if LITE/VISION move to reasoners.
+        if model not in (settings.LITE_MODEL, settings.VISION_MODEL):
+            extra["reasoning"] = {"enabled": False}
+        provider: dict = {}
+        if json:
+            provider["require_parameters"] = True
+        if video_url:
+            provider.update(order=["google-ai-studio"], allow_fallbacks=False)
+        if provider:
+            extra["provider"] = provider
+        if web:
+            extra["plugins"] = [{"id": "web", "max_results": 3}]
+        kwargs: dict = {
+            "model": model,
+            "messages": ([{"role": "system", "content": system + (JSON_SUFFIX if json else "")}]
+                         if system or json else []) + [{"role": "user", "content": content}],
+            "extra_body": extra,
+        }
+        if json:
+            kwargs["response_format"] = {"type": "json_object"}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if timeout is not None:
+            kwargs["timeout"] = timeout  # per-call override of the client's 120 s
+        resp = self.client.chat.completions.create(**kwargs)
+        record_usage(model, resp)
+        return (resp.choices[0].message.content if resp.choices else None) or ""
+
+    def transcribe(self, path: str, duration_s: float = 0) -> str:
+        """Reel audio file -> transcript text via OpenRouter's Whisper endpoint ("" if empty)."""
+        with open(path, "rb") as f:
+            resp = self.client.audio.transcriptions.create(model=settings.TRANSCRIBE_MODEL, file=f)
+        if not isinstance(getattr(getattr(resp, "usage", None), "cost", None), (int, float)):
+            # Whisper bills per second and reports no tokens: always count the call, estimate $.
+            resp = SimpleNamespace(text=getattr(resp, "text", ""), usage=SimpleNamespace(
+                prompt_tokens=0, completion_tokens=0, cost=duration_s * WHISPER_PRICE_PER_SEC))
+        record_usage(settings.TRANSCRIBE_MODEL, resp)
+        return (getattr(resp, "text", "") or "").strip()
 
     # ---------- Step 1: categorization (lite model, ~50 output tokens) ----------
 
@@ -791,36 +883,10 @@ class GeminiService:
         )
         at_cap = len(existing_categories) >= settings.MAX_USER_CATEGORIES
         system = CATEGORY_SYSTEM + (CATEGORY_CAP_RULE if at_cap else "")
-        # An uploaded image/PDF often has no useful preview text — classify from the file
-        # itself (the lite model is multimodal). Video is left out: it's the expensive path
-        # and its title/description text is enough for categorization.
-        if bundle.media_uri or bundle.image_parts:
-            cat_parts: list = []
-            if bundle.media_uri:
-                cat_parts.append(types.Part(file_data=types.FileData(
-                    file_uri=bundle.media_uri,
-                    mime_type=bundle.media_mime or "application/octet-stream")))
-            for img in bundle.image_parts:
-                cat_parts.append(types.Part.from_bytes(
-                    data=img["data"], mime_type=img.get("mime_type", "image/jpeg")))
-            cat_parts.append(types.Part(text=prompt))
-            contents = [types.Content(role="user", parts=cat_parts)]
-        else:
-            contents = [prompt]
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
-            model=settings.GEMINI_LITE_MODEL,
-            contents=contents,
-            # No tight max_output_tokens: Gemini 3.x models think by default and a small
-            # cap gets consumed by thoughts, returning text=None (measured at Phase 0).
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                system_instruction=system,
-            ),
-        )
-        record_usage(settings.GEMINI_LITE_MODEL, response)
+        # Text only: LITE_MODEL is text-only. Images still reach `extract` (VISION_MODEL).
+        text = await asyncio.to_thread(self._chat, settings.LITE_MODEL, system, prompt)
         try:
-            parsed = json.loads(_strip_code_fences(response.text))
+            parsed = json.loads(_strip_code_fences(text))
             slug = parsed.get("content_type", "summary")
         except (json.JSONDecodeError, AttributeError):
             slug = "summary"
@@ -851,17 +917,9 @@ class GeminiService:
             f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
         )
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=settings.GEMINI_LITE_MODEL,
-                contents=[blob],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    system_instruction=TITLES_FROM_NOTE_SYSTEM,
-                ),
-            )
-            record_usage(settings.GEMINI_LITE_MODEL, response)
-            out = json.loads(_strip_code_fences(response.text))
+            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
+                                           TITLES_FROM_NOTE_SYSTEM, blob)
+            out = json.loads(_strip_code_fences(text))
             titles = out.get("titles", []) if isinstance(out, dict) else []
             return [t for t in titles if isinstance(t, dict) and t.get("title")]
         except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
@@ -877,16 +935,9 @@ class GeminiService:
         if description and description.strip().lower() != name.strip().lower():
             prompt += f"\nUser's description: {description}"
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=settings.GEMINI_LITE_MODEL,
-                contents=[prompt],
-                config=types.GenerateContentConfig(
-                    system_instruction=COLLECTION_QUERY_SYSTEM,
-                ),
-            )
-            record_usage(settings.GEMINI_LITE_MODEL, response)
-            return (response.text or "").strip()
+            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
+                                           COLLECTION_QUERY_SYSTEM, prompt, json=False)
+            return text.strip()
         except Exception as e:  # noqa: BLE001 — expansion is best-effort.
             log.warning("collection query expansion failed: %s: %s", type(e).__name__, e)
             return ""
@@ -902,17 +953,9 @@ class GeminiService:
             f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
         )
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=settings.GEMINI_LITE_MODEL,
-                contents=[blob],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    system_instruction=VENUES_FROM_NOTE_SYSTEM,
-                ),
-            )
-            record_usage(settings.GEMINI_LITE_MODEL, response)
-            out = json.loads(_strip_code_fences(response.text))
+            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
+                                           VENUES_FROM_NOTE_SYSTEM, blob)
+            out = json.loads(_strip_code_fences(text))
             venues = out.get("venues", []) if isinstance(out, dict) else []
             return [v for v in venues if isinstance(v, dict) and v.get("name")]
         except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
@@ -932,17 +975,9 @@ class GeminiService:
             f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
         )
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=settings.GEMINI_LITE_MODEL,
-                contents=[blob],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    system_instruction=DAYS_FROM_NOTE_SYSTEM,
-                ),
-            )
-            record_usage(settings.GEMINI_LITE_MODEL, response)
-            out = json.loads(_strip_code_fences(response.text))
+            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
+                                           DAYS_FROM_NOTE_SYSTEM, blob)
+            out = json.loads(_strip_code_fences(text))
             if not isinstance(out, dict):
                 return {"days": []}
             days = out.get("days")
@@ -964,42 +999,20 @@ class GeminiService:
             f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
         )
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=settings.GEMINI_LITE_MODEL,
-                contents=[blob],
-                config=types.GenerateContentConfig(
-                    system_instruction=SUMMARIZE_BACKFILL_SYSTEM,
-                ),
-            )
-            record_usage(settings.GEMINI_LITE_MODEL, response)
-            return _strip_code_fences((response.text or "").strip())
+            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
+                                           SUMMARIZE_BACKFILL_SYSTEM, blob, json=False)
+            return _strip_code_fences(text.strip())
         except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
             log.warning("summary backfill failed for %r: %s: %s", title, type(e).__name__, e)
             return ""
 
     # ---------- Step 2: type-focused extraction (main model) ----------
 
-    def _build_contents(self, url: str, bundle: ContentBundle, content_type: str,
-                        note_hint: str | None = None) -> list:
-        parts: list = []
-        if bundle.video_uri:
-            # YouTube URLs and gs:// URIs are both passed as FileData — Gemini ingests
-            # the video directly (visuals + audio). Never inline bytes. Vertex requires
-            # an explicit mimeType even for YouTube URLs (400 without it).
-            parts.append(types.Part(file_data=types.FileData(file_uri=bundle.video_uri,
-                                                             mime_type=bundle.media_mime or "video/mp4")))
-        if bundle.media_uri:
-            # A user-saved image / PDF (and later audio), read straight from gs:// — same
-            # FileData mechanism as video. Vertex requires the explicit mimeType.
-            parts.append(types.Part(file_data=types.FileData(
-                file_uri=bundle.media_uri, mime_type=bundle.media_mime or "application/octet-stream")))
-        # Inline image bytes (e.g. every slide of an Instagram carousel) so the model reads
-        # the actual post imagery, not just the caption. Small per-image, well under the
-        # ~20 MB inline ceiling at this slide count.
-        for img in bundle.image_parts:
-            parts.append(types.Part.from_bytes(data=img["data"],
-                                               mime_type=img.get("mime_type", "image/jpeg")))
+    def _build_prompt(self, url: str, bundle: ContentBundle, content_type: str,
+                      note_hint: str | None = None, video_url: str | None = None,
+                      images: bool = False) -> str:
+        """The extraction user prompt. The video (YouTube URL) and carousel images are attached
+        by `_chat`; `video_url`/`images` only say whether to tell the model about them."""
         text_prompt = [f"URL: {url}", f"content_type: {content_type}"]
         meta = bundle.metadata
         if meta.get("title"):
@@ -1015,7 +1028,7 @@ class GeminiService:
             )
         if bundle.text:
             text_prompt.append(f"Content:\n{bundle.text[:28000]}")
-        if bundle.video_uri:
+        if video_url:
             text_prompt.append(
                 "Analyze the attached video fully (visuals, on-screen text, and speech). "
                 + ("Also use the video description above — it may contain buy links, "
@@ -1023,7 +1036,7 @@ class GeminiService:
                    if meta.get("description") else "")
                 + "Extract all relevant information."
             )
-        if bundle.image_parts:
+        if images and bundle.image_parts:
             n = len(bundle.image_parts)
             text_prompt.append(
                 f"{n} images from the post are attached, in order — read the text and visuals "
@@ -1031,24 +1044,12 @@ class GeminiService:
                 "the first slide." if n > 1
                 else "An image from the post is attached — read its text and visuals."
             )
-        if bundle.media_uri:
-            mime = bundle.media_mime or ""
-            text_prompt.append(
-                "A PDF document is attached — read all of its text and any figures/tables, "
-                "and extract the structured information." if mime == "application/pdf"
-                else "An audio recording is attached — transcribe it and extract the key content."
-                if mime.startswith("audio/")
-                else "An image the user saved is attached — read all of its text and visuals "
-                "(it may be a screenshot of a recipe, product, post, or note) and extract "
-                "the structured information."
-            )
         if note_hint:
             text_prompt.append(f"User instruction for this note: {note_hint}")
-        parts.append(types.Part(text="\n\n".join(text_prompt)))
-        return [types.Content(role="user", parts=parts)]
+        return "\n\n".join(text_prompt)
 
     def extract(self, url: str, bundle: ContentBundle, content_type: str,
-                note_hint: str | None = None) -> NoteExtraction:
+                note_hint: str | None = None, deadline: float | None = None) -> NoteExtraction:
         # Exact known type → its schema; else a family slug → that family's schema
         # (entertainment titles / place venues); else the open composer.
         if content_type in TYPE_PROMPTS:
@@ -1059,45 +1060,56 @@ class GeminiService:
             system = TYPE_PROMPTS["place"]
         else:
             system = COMPOSER_PROMPT
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            system_instruction=system,
-            temperature=0.2,
-        )
-        if bundle.video_uri:
-            # Low media resolution: ~4x fewer video tokens; plenty for note extraction.
-            # INVARIANT: this only applies to video bundles (bundle.video_uri set). Carousel
-            # image_parts (Apify slides) ride the default resolution — MEDIA_RESOLUTION_LOW never
-            # downsamples them, so a listicle's slides keep their full detail for extraction.
-            try:
-                config.media_resolution = types.MediaResolution.MEDIA_RESOLUTION_LOW
-            except AttributeError:
-                pass  # older SDK without media_resolution — default is fine
-        # One retry: the global endpoint throws transient 5xx, and a flaky generation can
-        # return unparseable JSON — both deserve a second attempt before failing the job.
+        # Routing: YouTube → YOUTUBE_MODEL with the URL attached; carousel images →
+        # VISION_MODEL; everything else → TEXT_MODEL. No MEDIA_RESOLUTION_LOW equivalent on
+        # OpenRouter — watch YouTube `usage.cost` on first runs.
+        yt = _youtube_uri(bundle)
+        if yt:
+            route = (settings.YOUTUBE_MODEL, yt, ())
+        elif bundle.image_parts:
+            route = (settings.VISION_MODEL, None, bundle.image_parts)
+        else:
+            route = (settings.TEXT_MODEL, None, ())
+        # One retry: providers throw transient 5xx, and a flaky generation can return
+        # unparseable JSON — both deserve a second attempt before failing the job. A YouTube
+        # video the model still can't read gets one last text-only try from title + description.
+        attempts = [route, route]
+        if yt:
+            attempts.append((settings.TEXT_MODEL, None, ()))
         last_exc: Exception | None = None
-        for attempt in (1, 2):
+        for i, (model, video_url, images) in enumerate(attempts):
+            # Per-call timeout = min(120, remaining budget); under 15 s left, stop and raise.
+            timeout = None
+            if deadline is None:
+                deadline = job_deadline.get()
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining < 15 and last_exc is not None:
+                    break
+                timeout = min(120, max(15, remaining))
             try:
-                response = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=self._build_contents(url, bundle, content_type, note_hint),
-                    config=config,
+                text = self._chat(
+                    model, system,
+                    self._build_prompt(url, bundle, content_type, note_hint,
+                                       video_url=video_url, images=bool(images)),
+                    temperature=0.2, images=images, video_url=video_url, timeout=timeout,
                 )
-                record_usage(settings.GEMINI_MODEL, response)
-                parsed = NoteExtraction.model_validate_json(_strip_code_fences(response.text))
+                parsed = NoteExtraction.model_validate_json(_strip_code_fences(text))
                 parsed.content_type = content_type  # enforce Step 1's decision
                 return parsed
             except Exception as e:
                 last_exc = e
-                if attempt == 1:
-                    log.warning("extract attempt 1 failed, retrying: %s: %s",
-                                type(e).__name__, e, extra={"url": url})
+                if i < len(attempts) - 1:
+                    log.warning("extract attempt %d failed (%s), retrying: %s: %s",
+                                i + 1, model, type(e).__name__, e, extra={"url": url})
                     time.sleep(2)
         raise last_exc
 
     async def extract_async(self, url: str, bundle: ContentBundle, content_type: str,
-                            note_hint: str | None = None) -> NoteExtraction:
-        return await asyncio.to_thread(self.extract, url, bundle, content_type, note_hint)
+                            note_hint: str | None = None,
+                            deadline: float | None = None) -> NoteExtraction:
+        return await asyncio.to_thread(self.extract, url, bundle, content_type, note_hint,
+                                       deadline)
 
     # ---------- Ask AI: chat grounded in the user's saved notes ----------
 
@@ -1109,17 +1121,8 @@ class GeminiService:
         prompt_parts.append("Candidate note index (JSON):\n" + json.dumps(index, ensure_ascii=False))
         for attempt in (1, 2):
             try:
-                response = self.client.models.generate_content(
-                    model=settings.GEMINI_LITE_MODEL,
-                    contents=["\n\n".join(prompt_parts)],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        system_instruction=ASK_PLAN_SYSTEM,
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
-                    ),
-                )
-                record_usage(settings.GEMINI_LITE_MODEL, response)
-                return AskPlan.model_validate_json(_strip_code_fences(response.text))
+                text = self._chat(settings.LITE_MODEL, ASK_PLAN_SYSTEM, "\n\n".join(prompt_parts))
+                return AskPlan.model_validate_json(_strip_code_fences(text))
             except Exception as e:
                 if attempt == 1:
                     log.warning("plan_ask attempt 1 failed, retrying: %s: %s",
@@ -1141,17 +1144,9 @@ class GeminiService:
         last_exc: Exception | None = None
         for attempt in (1, 2):
             try:
-                response = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=["\n\n".join(prompt_parts)],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        system_instruction=ASK_CHAT_SYSTEM,
-                        temperature=0.4,
-                    ),
-                )
-                record_usage(settings.GEMINI_MODEL, response)
-                answer = GroundedAnswer.model_validate_json(_strip_code_fences(response.text))
+                text = self._chat(settings.TEXT_MODEL, ASK_CHAT_SYSTEM,
+                                  "\n\n".join(prompt_parts), temperature=0.4)
+                answer = GroundedAnswer.model_validate_json(_strip_code_fences(text))
                 answer.cited_note_ids = []  # chat mode never cites notes
                 return answer
             except Exception as e:
@@ -1183,17 +1178,9 @@ class GeminiService:
         last_exc: Exception | None = None
         for attempt in (1, 2):
             try:
-                response = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=["\n\n".join(prompt_parts)],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        system_instruction=ASK_ANSWER_NOTES_SYSTEM,
-                        temperature=0.3,
-                    ),
-                )
-                record_usage(settings.GEMINI_MODEL, response)
-                return GroundedAnswer.model_validate_json(_strip_code_fences(response.text))
+                text = self._chat(settings.TEXT_MODEL, ASK_ANSWER_NOTES_SYSTEM,
+                                  "\n\n".join(prompt_parts), temperature=0.3)
+                return GroundedAnswer.model_validate_json(_strip_code_fences(text))
             except Exception as e:
                 last_exc = e
                 if attempt == 1:
@@ -1229,17 +1216,9 @@ class GeminiService:
         last_exc: Exception | None = None
         for attempt in (1, 2):
             try:
-                response = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=["\n\n".join(prompt_parts)],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        system_instruction=ASK_SYNTH_SYSTEM,
-                        temperature=0.3,
-                    ),
-                )
-                record_usage(settings.GEMINI_MODEL, response)
-                synth = SynthAnswer.model_validate_json(_strip_code_fences(response.text))
+                text = self._chat(settings.TEXT_MODEL, ASK_SYNTH_SYSTEM,
+                                  "\n\n".join(prompt_parts), temperature=0.3)
+                synth = SynthAnswer.model_validate_json(_strip_code_fences(text))
                 # Final safety net: collapse case/space/plural variants to an existing category.
                 synth.artifact.content_type = match_existing(
                     synth.artifact.content_type, existing_categories
@@ -1293,17 +1272,9 @@ class GeminiService:
             last_exc: Exception | None = None
             for attempt in (1, 2):
                 try:
-                    response = self.client.models.generate_content(
-                        model=settings.GEMINI_MODEL,
-                        contents=["\n\n".join(prompt_parts)],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            system_instruction=system,
-                            temperature=0.5,
-                        ),
-                    )
-                    record_usage(settings.GEMINI_MODEL, response)
-                    digest = CollectionDigest.model_validate_json(_strip_code_fences(response.text))
+                    text = self._chat(settings.TEXT_MODEL, system,
+                                      "\n\n".join(prompt_parts), temperature=0.5)
+                    digest = CollectionDigest.model_validate_json(_strip_code_fences(text))
                     # Drop any entry the model cited that isn't actually one of the fed notes (a
                     # hallucinated/foreign id must never deep-link into someone else's note), then
                     # drop any section left with nothing at all — but a section can be body-only
@@ -1363,17 +1334,9 @@ class GeminiService:
         last_exc: Exception | None = None
         for attempt in (1, 2):
             try:
-                response = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=["\n\n".join(prompt_parts)],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        system_instruction=ASK_CREATE_SYSTEM,
-                        temperature=0.4,
-                    ),
-                )
-                record_usage(settings.GEMINI_MODEL, response)
-                artifact = ArtifactNote.model_validate_json(_strip_code_fences(response.text))
+                text = self._chat(settings.TEXT_MODEL, ASK_CREATE_SYSTEM,
+                                  "\n\n".join(prompt_parts), temperature=0.4)
+                artifact = ArtifactNote.model_validate_json(_strip_code_fences(text))
                 artifact.origin = "created"
                 # Final safety net: collapse case/space/plural variants to an existing category.
                 artifact.content_type = match_existing(artifact.content_type, existing_categories)
@@ -1394,30 +1357,23 @@ class GeminiService:
     # ---------- Search-grounded page lookup (for bot-blocked pages) ----------
 
     def _search_grounded_page(self, url: str, hint: str = "") -> str | None:
-        """Recover page facts via Google Search grounding when the page itself is
-        unreachable from datacenter IPs (Amazon blocks direct fetch, Jina, and even
-        Gemini's url_context — but its listings are fully indexed by Google Search).
+        """Recover page facts via web search (OpenRouter web plugin) when the page itself is
+        unreachable from datacenter IPs (Amazon blocks direct fetch and Jina — but its
+        listings are fully indexed by search engines).
         Returns grounded prose for the normal extraction pipeline, or None."""
         prompt = (
-            f"Use Google Search to find this exact page: {url}\n"
+            f"Search the web to find this exact page: {url}\n"
             + (f"Known hint about it: {hint}\n" if hint else "")
             + "Report ONLY facts you find about this exact page/product/item: full title, "
             "brand/author, current price, rating and review count, key features or specs, "
             "and a short factual description. Do not include facts about similar items. "
             "If you cannot find this exact page, reply with just: NOT_FOUND"
         )
-        for attempt in (1, 2):  # transient 5xx happen on the global endpoint
+        for attempt in (1, 2):  # transient provider 5xx
             try:
-                resp = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
-                        temperature=0.1,
-                    ),
-                )
-                record_usage(settings.GEMINI_MODEL, resp)
-                text = (resp.text or "").strip()
+                text = self._chat(settings.TEXT_MODEL, "", prompt, json=False,
+                                  temperature=0.1, web=True)
+                text = text.strip()
                 if not text or "NOT_FOUND" in text[:300]:
                     return None
                 return text
@@ -1432,29 +1388,22 @@ class GeminiService:
     # ---------- General web research (Ask AI agent: research_web tool) ----------
 
     def _web_research(self, query: str) -> str | None:
-        """General-purpose web research via Google Search grounding — current/external facts
+        """General-purpose web research via the OpenRouter web plugin — current/external facts
         the user's notes don't contain (prices, hours, recent papers, live FX). Distinct from
         `_search_grounded_page`, which hunts for ONE known URL. Returns concise sourced prose."""
         if not query.strip():
             return None
         prompt = (
-            "Use Google Search to answer this research request with CURRENT, factual information. "
+            "Search the web to answer this research request with CURRENT, factual information. "
             "Be concise and specific: report concrete facts (names, numbers, prices, dates, "
             "sources) — not filler. If you can't find reliable information, say so plainly.\n\n"
             f"Request: {query}"
         )
-        for attempt in (1, 2):  # transient 5xx happen on the global endpoint
+        for attempt in (1, 2):  # transient provider 5xx
             try:
-                resp = self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
-                        temperature=0.2,
-                    ),
-                )
-                record_usage(settings.GEMINI_MODEL, resp)
-                return (resp.text or "").strip() or None
+                text = self._chat(settings.TEXT_MODEL, "", prompt, json=False,
+                                  temperature=0.2, web=True)
+                return text.strip() or None
             except Exception as e:
                 if attempt == 2:
                     log.warning("web research failed: %s: %s", e, extra={"query": query[:120]})

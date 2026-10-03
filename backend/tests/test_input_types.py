@@ -1,8 +1,8 @@
-"""Input breadth: capture works for text / image / pdf, not just URLs.
+"""Input breadth: capture works for typed text, not just URLs.
 
 Two layers:
-  - /api/ingest (JSON) and /api/ingest/upload (multipart) accept the right shapes and
-    reject the wrong ones, writing a uniform job doc.
+  - /api/ingest (JSON) accepts the right shapes and rejects the wrong ones, writing a
+    uniform job doc.
   - the worker builds the correct ContentBundle per input_type and writes a note with
     no source link for non-URL captures.
 """
@@ -15,7 +15,7 @@ import routers.process as process
 from models.note import IngestRequest, NoteExtraction
 
 
-# ----------------------- ingest boundary (JSON + multipart) -----------------------
+# ----------------------- ingest boundary -----------------------
 
 class FakeRequest:
     def __init__(self, payload=None, headers=None):
@@ -24,15 +24,6 @@ class FakeRequest:
 
     async def body(self):
         return self._body
-
-
-class FakeUpload:
-    def __init__(self, data: bytes, content_type: str):
-        self._data = data
-        self.content_type = content_type
-
-    async def read(self):
-        return self._data
 
 
 @pytest.fixture(autouse=True)
@@ -93,32 +84,12 @@ async def test_save_as_is_does_not_promote_a_url_body(fake_db):
     assert job["text"] == "https://example.com/x"
 
 
-async def test_upload_video_creates_video_job(fake_db, monkeypatch):
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "media-bucket")
-
-    async def fake_store(input_type, data, mime):
-        return "gs://media-bucket/uploads/video/x.mp4", None  # private bucket, no cover
-
-    monkeypatch.setattr(ingest.uploads, "store_upload", fake_store)
-    res = await ingest.ingest_upload(
-        file=FakeUpload(b"fake video bytes", "video/mp4"),
-        input_type="video", title="Clip", source="upload", note_hint=None, user_id="u-1",
-    )
-    assert res.status == "pending"
-    job = only_job(fake_db)
-    assert job["input_type"] == "video"
-    assert job["media_gcs_uri"].startswith("gs://media-bucket/")
-    assert job["media_mime"] == "video/mp4"
-
-
-async def test_upload_rejects_unsupported_video_mime(fake_db, monkeypatch):
+async def test_binary_input_types_rejected(fake_db):
     from fastapi import HTTPException
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "b")
-    with pytest.raises(HTTPException) as exc:
-        await ingest.ingest_upload(file=FakeUpload(b"x", "video/x-flv"),
-                                   input_type="video", title=None, source="upload",
-                                   note_hint=None, user_id="u-1")
-    assert exc.value.status_code == 415
+    for t in ("image", "pdf", "voice", "video"):
+        with pytest.raises(HTTPException) as exc:
+            await ingest.ingest(FakeRequest({"input_type": t}), user_id="u-1")
+        assert exc.value.status_code == 400
 
 
 async def test_empty_text_rejected(fake_db):
@@ -143,93 +114,6 @@ async def test_text_that_is_a_url_is_promoted(fake_db):
     assert job["input_type"] == "url"
     assert job["url"] == "https://example.com/post"
 
-
-async def test_upload_image_creates_image_job(fake_db, monkeypatch):
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "covers-bucket")
-
-    async def fake_store(input_type, data, mime):
-        return "gs://covers-bucket/uploads/images/x.png", "https://storage.googleapis.com/covers-bucket/uploads/images/x.png"
-
-    monkeypatch.setattr(ingest.uploads, "store_upload", fake_store)
-
-    res = await ingest.ingest_upload(
-        file=FakeUpload(b"\x89PNG fake bytes", "image/png"),
-        input_type="image", title="Recipe screenshot", source="upload", note_hint=None,
-        user_id="u-1",
-    )
-    assert res.status == "pending"
-    job = only_job(fake_db)
-    assert job["input_type"] == "image"
-    assert job["media_gcs_uri"].startswith("gs://covers-bucket/")
-    assert job["media_mime"] == "image/png"
-    assert job["media_cover_url"].startswith("https://")
-    assert job["title"] == "Recipe screenshot"
-
-
-async def test_upload_rejects_unsupported_mime(fake_db, monkeypatch):
-    from fastapi import HTTPException
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "b")
-    with pytest.raises(HTTPException) as exc:
-        await ingest.ingest_upload(file=FakeUpload(b"hi", "text/plain"),
-                                   input_type="image", title=None, source="upload",
-                                   note_hint=None, user_id="u-1")
-    assert exc.value.status_code == 415
-
-
-async def test_upload_rejects_oversized(fake_db, monkeypatch):
-    from fastapi import HTTPException
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "b")
-    monkeypatch.setattr(ingest.settings, "MAX_UPLOAD_MB", 0)  # nothing fits
-    with pytest.raises(HTTPException) as exc:
-        await ingest.ingest_upload(file=FakeUpload(b"x" * 1024, "image/png"),
-                                   input_type="image", title=None, source="upload",
-                                   note_hint=None, user_id="u-1")
-    assert exc.value.status_code == 413
-
-
-async def test_upload_voice_creates_voice_job(fake_db, monkeypatch):
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "media-bucket")
-
-    async def fake_store(input_type, data, mime):
-        # Voice goes to the private media bucket — no public cover URL.
-        return "gs://media-bucket/uploads/audio/x.m4a", None
-
-    monkeypatch.setattr(ingest.uploads, "store_upload", fake_store)
-
-    res = await ingest.ingest_upload(
-        file=FakeUpload(b"fake audio bytes", "audio/mp4"),
-        input_type="voice", title=None, source="upload", note_hint=None,
-        user_id="u-1",
-    )
-    assert res.status == "pending"
-    job = only_job(fake_db)
-    assert job["input_type"] == "voice"
-    assert job["media_gcs_uri"].startswith("gs://media-bucket/")
-    assert job["media_mime"] == "audio/mp4"
-    assert job["media_cover_url"] is None
-
-
-async def test_upload_rejects_unsupported_voice_mime(fake_db, monkeypatch):
-    from fastapi import HTTPException
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: "b")
-    with pytest.raises(HTTPException) as exc:
-        await ingest.ingest_upload(file=FakeUpload(b"x", "audio/x-aiff"),
-                                   input_type="voice", title=None, source="upload",
-                                   note_hint=None, user_id="u-1")
-    assert exc.value.status_code == 415
-
-
-async def test_upload_503_when_bucket_unconfigured(fake_db, monkeypatch):
-    from fastapi import HTTPException
-    monkeypatch.setattr(ingest.uploads, "bucket_for", lambda t: None)
-    with pytest.raises(HTTPException) as exc:
-        await ingest.ingest_upload(file=FakeUpload(b"x", "image/png"),
-                                   input_type="image", title=None, source="upload",
-                                   note_hint=None, user_id="u-1")
-    assert exc.value.status_code == 503
-
-
-# ----------------------- worker: bundle construction per type -----------------------
 
 class DummyRequest:
     headers: dict = {}
@@ -297,63 +181,6 @@ async def test_worker_text_input(fake_db, capture_pipeline):
     assert note["input_type"] == "text"
     assert note["source_url"] == ""           # no web source → UI hides the link
     assert note["source_domain"] == ""
-
-
-async def test_worker_image_input(fake_db, capture_pipeline):
-    cover = "https://storage.googleapis.com/covers/uploads/images/x.png"
-    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u-1", "input_type": "image",
-                               "media_gcs_uri": "gs://covers/uploads/images/x.png",
-                               "media_mime": "image/png", "media_cover_url": cover,
-                               "title": "Screenshot"})
-    await process.process_job("j", DummyRequest())
-    bundle = capture_pipeline["bundle"]
-    assert bundle.kind == "image"
-    assert bundle.media_uri == "gs://covers/uploads/images/x.png"
-    assert bundle.media_mime == "image/png"
-    note = the_note(fake_db)
-    assert note["input_type"] == "image"
-    assert note["cover_image_url"] == cover    # the uploaded image is its own cover
-    assert note["source_url"] == ""
-
-
-async def test_worker_pdf_input(fake_db, capture_pipeline):
-    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u-1", "input_type": "pdf",
-                               "media_gcs_uri": "gs://media/uploads/docs/x.pdf",
-                               "media_mime": "application/pdf", "title": "Paper"})
-    await process.process_job("j", DummyRequest())
-    bundle = capture_pipeline["bundle"]
-    assert bundle.kind == "document"
-    assert bundle.media_uri == "gs://media/uploads/docs/x.pdf"
-    assert bundle.media_mime == "application/pdf"
-    assert the_note(fake_db)["input_type"] == "pdf"
-
-
-async def test_worker_voice_input(fake_db, capture_pipeline):
-    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u-1", "input_type": "voice",
-                               "media_gcs_uri": "gs://media/uploads/audio/x.m4a",
-                               "media_mime": "audio/mp4", "title": "Voice note"})
-    await process.process_job("j", DummyRequest())
-    bundle = capture_pipeline["bundle"]
-    assert bundle.kind == "document"          # audio rides the same gs:// FileData path
-    assert bundle.media_uri == "gs://media/uploads/audio/x.m4a"
-    assert bundle.media_mime == "audio/mp4"
-    assert bundle.strategy == "voice_upload"
-    note = the_note(fake_db)
-    assert note["input_type"] == "voice"
-    assert note["source_url"] == ""           # no web source for a recording
-
-
-async def test_worker_video_input(fake_db, capture_pipeline):
-    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u-1", "input_type": "video",
-                               "media_gcs_uri": "gs://media/uploads/video/x.mp4",
-                               "media_mime": "video/quicktime", "title": "Clip"})
-    await process.process_job("j", DummyRequest())
-    bundle = capture_pipeline["bundle"]
-    assert bundle.kind == "video_uri"          # rides the direct-video FileData path
-    assert bundle.video_uri == "gs://media/uploads/video/x.mp4"
-    assert bundle.media_mime == "video/quicktime"
-    assert bundle.strategy == "video_upload"
-    assert the_note(fake_db)["input_type"] == "video"
 
 
 async def test_worker_save_as_is_skips_gemini(fake_db, capture_pipeline):

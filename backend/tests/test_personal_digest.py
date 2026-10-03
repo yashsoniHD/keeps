@@ -349,9 +349,7 @@ async def test_unauthenticated_raises_401():
 
 # --- Gemini-level: items/source_note_ids outside fed set filtered via shared _run_digest ------
 
-class _FakeResp:
-    def __init__(self, text):
-        self.text = text
+from conftest import chat_resp as _FakeResp  # noqa: E402
 
 
 def test_build_personal_digest_drops_entries_and_ids_outside_fed_set(monkeypatch):
@@ -374,7 +372,7 @@ def test_build_personal_digest_drops_entries_and_ids_outside_fed_set(monkeypatch
     def fake_generate(*args, **kwargs):
         return _FakeResp(_json.dumps(payload))
 
-    monkeypatch.setattr(gemini_service.client.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gemini_service.client.chat.completions, "create", fake_generate)
 
     digest = gemini_service._build_personal_digest("Yash", "your latest saves", [
         {"id": "n1", "content_type": "recipe", "title": "Cake", "source_domain": "x.com",

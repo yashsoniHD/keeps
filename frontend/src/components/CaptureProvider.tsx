@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { AlertCircle, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { ingest, ingestMedia, ingestText, ingestVoice } from "@/lib/api";
+import { ingest, ingestText } from "@/lib/api";
 import { AddNoteSheet } from "@/components/AddNoteSheet";
 
 // App-wide capture, lifted above the router <Outlet /> so the bottom-nav's + button can open
@@ -54,18 +54,6 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
       setError(e instanceof Error ? e.message : "Couldn't save the note.");
     }
   };
-  const onUploadFile = async (file: File, kind: "image" | "pdf" | "video" | "voice") => {
-    setError(null);
-    await ingestMedia(file, kind, file.name); // AddNoteSheet surfaces its own upload error
-    setShowAdd(false);
-    goToFeed();
-  };
-  const onUploadVoice = async (blob: Blob) => {
-    setError(null);
-    await ingestVoice(blob);
-    setShowAdd(false);
-    goToFeed();
-  };
 
   return (
     <CaptureContext.Provider value={{ openCapture }}>
@@ -88,8 +76,6 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
           onCancel={() => setShowAdd(false)}
           onSubmit={onSubmitUrl}
           onSubmitText={onSubmitText}
-          onUploadFile={onUploadFile}
-          onUploadVoice={onUploadVoice}
         />
       )}
     </CaptureContext.Provider>

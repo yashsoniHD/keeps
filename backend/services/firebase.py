@@ -274,10 +274,10 @@ async def touch_user_activity(uid: str, *, first_note: bool = False) -> None:
 
 def _split_by_tier(meter: UsageMeter) -> tuple[int, int, int, int, int]:
     """Collapse per-model token totals into (main_in, main_out, lite_in, lite_out, embed_in).
-    Embed model is input-only (no candidates); anything else billed at main rates."""
+    Embed model is input-only; LITE_MODEL is lite; every other model (text/vision/YouTube) is main."""
     main_in = main_out = lite_in = lite_out = embed_in = 0
     for model, (tin, tout) in meter.by_model.items():
-        if model == settings.GEMINI_LITE_MODEL:
+        if model == settings.LITE_MODEL:
             lite_in += tin
             lite_out += tout
         elif model == settings.EMBED_MODEL:
@@ -289,7 +289,7 @@ def _split_by_tier(meter: UsageMeter) -> tuple[int, int, int, int, int]:
 
 
 async def flush_usage(user_id: str, meter: UsageMeter) -> None:
-    """Persist a request's Gemini token usage. Two writes:
+    """Persist a request's AI usage (tokens + USD). Two writes:
       - users/{uid}: lifetime counters (cheap single-doc read powers the dashboard)
       - system/usage-{date}: global daily token totals (powers 'cost today')
     Per-tier so cost can be computed from the two models' different prices. Best-effort:
@@ -304,6 +304,7 @@ async def flush_usage(user_id: str, meter: UsageMeter) -> None:
         "tokens_out_lite": Increment(lite_out),
         "tokens_in_embed": Increment(embed_in),
         "ai_calls": Increment(meter.calls),
+        "cost_usd": Increment(meter.cost_usd),  # → lifetime_cost_usd / tok_cost_usd
     }
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     db = get_db()
@@ -316,40 +317,6 @@ async def flush_usage(user_id: str, meter: UsageMeter) -> None:
         )
     except Exception as e:
         log.warning("usage flush failed for %s: %s: %s", user_id, type(e).__name__, e)
-
-
-async def reserve_image_slot(user_id: str) -> bool:
-    """Transactionally claim one AI-cover-generation slot for today, enforcing the
-    per-user and global daily caps. Returns True if claimed (caller may generate), False
-    if a cap is hit (caller keeps the gradient fallback). Never raises — a capped note
-    must still be created. The `image_count` it bumps powers both the caps and the admin
-    'images today' figure."""
-    from google.cloud import firestore as fs
-
-    db = get_db()
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
-
-    @fs.async_transactional
-    async def _claim(tx) -> bool:
-        user_ref = db.collection("usage").document(f"{user_id}-{today}")
-        global_ref = db.collection("system").document(f"usage-{today}")
-        user_snap = await user_ref.get(transaction=tx)
-        global_snap = await global_ref.get(transaction=tx)
-        user_n = (user_snap.to_dict() or {}).get("image_count", 0)
-        global_n = (global_snap.to_dict() or {}).get("image_count", 0)
-        if user_n >= settings.MAX_IMAGES_PER_USER_PER_DAY:
-            return False
-        if global_n >= settings.DAILY_GLOBAL_IMAGE_CAP:
-            return False
-        tx.set(user_ref, {"user_id": user_id, "date": today, "image_count": user_n + 1}, merge=True)
-        tx.set(global_ref, {"date": today, "image_count": global_n + 1}, merge=True)
-        return True
-
-    try:
-        return await _claim(db.transaction())
-    except Exception as e:  # noqa: BLE001 — capping is best-effort; never fail a note.
-        log.warning("image slot reservation failed for %s: %s: %s", user_id, type(e).__name__, e)
-        return False
 
 
 async def reserve_backfill_run(user_id: str, app: str) -> bool:
@@ -501,17 +468,6 @@ async def reserve_apify_slot() -> bool:
     except Exception as e:  # noqa: BLE001 — capping is best-effort; never fail a capture.
         log.warning("apify slot reservation failed: %s: %s", type(e).__name__, e)
         return False
-
-
-async def record_image_generated(user_id: str) -> None:
-    """Bump the per-user lifetime AI-cover count (powers the admin per-user cost column).
-    Best-effort — a metering write must never fail the underlying capture."""
-    try:
-        await get_db().collection("users").document(user_id).set(
-            {"lifetime_images": Increment(1)}, merge=True
-        )
-    except Exception as e:  # noqa: BLE001
-        log.warning("image meter write failed for %s: %s: %s", user_id, type(e).__name__, e)
 
 
 async def list_auth_users() -> list[dict]:

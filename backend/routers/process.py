@@ -1,19 +1,23 @@
-"""Cloud Tasks worker: the full URL → note pipeline.
+"""Worker: the full URL → note pipeline (self-dispatched by services/dispatch.py).
 
-Auth: Cloud Tasks OIDC token (signature + audience + SA email) — no shared secret.
+Auth: X-Worker-Secret (services/worker_auth.py); the sweep route also takes the cron bearer.
 Idempotent: a retry of a completed job is a no-op, and a concurrent duplicate delivery is
-rejected by a transactional claim (409 → Cloud Tasks redelivers after the winner finishes),
-so paid AI work never runs twice for one job.
+rejected by a transactional claim (409, dropped by the dispatcher), so paid AI work never
+runs twice for one job. Retries are in-process (see process_job); a job that outlives its
+budget stays "pending" and the sweep route / next ingest re-dispatches it.
 
 Failure ladder (a capture must always produce a note):
   - BlockedURLError (SSRF guard) → failed, no note, no retry. Permanent by design.
-  - Transient (Gemini 5xx/429, network timeouts) below MAX_TRANSIENT_ATTEMPTS →
-    re-raise as 500 so Cloud Tasks retries with its configured backoff.
+  - Transient (model 5xx/429, network timeouts) below MAX_TRANSIENT_ATTEMPTS →
+    re-raise as 500; process_job retries in-process (5 s, 10 s) within its time budget.
   - Everything else (and transient at the attempt cap) → salvage: a minimal
     "bookmark" note from whatever metadata is reachable. Only if even the
     salvage Firestore write fails does the job end up failed.
 """
+import asyncio
 import logging
+import re
+import time
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -23,7 +27,7 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
 from google.cloud import firestore as fs
 from google.cloud.firestore_v1.vector import Vector
-from google.genai import errors as genai_errors
+import openai
 
 from config import settings
 from models.note import ContentBundle, NoteExtraction
@@ -31,9 +35,7 @@ from services import note_retrieval as nr
 from services import search_index
 from services import sources
 from services.agent_tools import AgentContext, run_agent_collect
-from services.cloud_tasks import enqueue_process_job
 from services.collections import match_collections_by_embedding
-from services.covers import persist_cover
 from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
 from services.firebase import (
     add_user_category,
@@ -43,16 +45,15 @@ from services.firebase import (
     get_db,
     get_user_categories,
     get_user_collections,
-    record_image_generated,
-    reserve_image_slot,
     touch_user_activity,
 )
 from services.enrich import enrich_note_data
-from services.gemini import gemini_service, match_existing, normalize_slug
-from services.imagen import generate_cover
+from services.gemini import (gemini_service, job_deadline, is_itinerary, is_places, is_recipe,
+                             match_existing, normalize_slug)
 from services.item_reconcile import fan_out_note
 from services.net_guard import BlockedURLError, guarded_async_client
-from services.oidc import verify_oidc
+from services.worker_auth import verify_worker_secret
+from services.dispatch import enqueue_process_job
 from services.usage_meter import start_metering
 
 router = APIRouter(tags=["process"])
@@ -98,14 +99,25 @@ async def _match_collections(user_id: str, note_id: str,
         return []
     return match_collections_by_embedding(list(embedding), note_id, collections)
 
-# A transient failure below this many attempts re-raises as 500 (Cloud Tasks retries,
-# max-backoff 600s); at the cap it salvages instead — the user gets a note either way.
+# A transient failure below this many attempts re-raises as 500 (process_job retries it
+# in-process); at the cap it salvages instead — the user gets a note either way.
 MAX_TRANSIENT_ATTEMPTS = 3
 
+# Vercel hard-kills a request at 300 s. process_job stops retrying inside JOB_DEADLINE_S (below);
+# the job then stays "pending" for the sweep route to re-dispatch.
+RETRY_SLEEPS = (5, 10)
+MIN_RETRY_S = 60  # don't start another attempt with less than this left in JOB_DEADLINE_S
+
 # A "processing" claim whose heartbeat (updated_at) is older than this is treated as a dead
-# run (crashed instance) and may be re-claimed. Kept above the worst-case single-run wall
-# time so a live run is never double-claimed.
-CLAIM_STALE_SECONDS = 15 * 60
+# run (killed instance) and may be re-claimed. Must exceed the 300 s request kill so a live
+# run is never double-claimed.
+CLAIM_STALE_SECONDS = 6 * 60
+
+# Sweep thresholds: a "pending" job older than this was never picked up (dispatch lost);
+# jobs older than SWEEP_GIVE_UP_S or past SWEEP_MAX_ATTEMPTS are failed, not re-dispatched.
+PENDING_STALE_SECONDS = 120
+SWEEP_GIVE_UP_S = 24 * 3600
+SWEEP_MAX_ATTEMPTS = 5
 
 
 def _stable_id(kind: str, job_id: str) -> str:
@@ -115,21 +127,20 @@ def _stable_id(kind: str, job_id: str) -> str:
 
 
 async def _claim_job(db, job_ref):
-    """Transactionally claim a job for this delivery. Cloud Tasks is at-least-once and can
-    dispatch the same task twice concurrently (retry near the deadline) — without a claim both
+    """Transactionally claim a job for this delivery. Dispatch is at-least-once (retry,
+    sweep and per-user re-dispatch can overlap) — without a claim both
     runs pass the completed-check and each pays for classification + extraction.
 
     Returns (job_dict_with_bumped_attempt, None) when claimed, or (None, response) when the
     job is missing/already completed. A job actively claimed by another delivery raises 409 —
-    Cloud Tasks redelivers later, by which point the winner has completed (no-op) or died
-    (stale heartbeat, re-claimable)."""
+    the dispatcher drops it; the winner completes, or dies (stale heartbeat, re-claimable)."""
     transaction = db.transaction()
 
     @fs.async_transactional
     async def _tx(tx):
         snap = await job_ref.get(transaction=tx)
         if not snap.exists:
-            return None, {"status": "missing"}   # permanent — don't make Cloud Tasks retry
+            return None, {"status": "missing"}   # permanent — nothing to retry
         job = snap.to_dict()
         if job.get("status") == "completed":
             return None, {"status": "completed", "note_id": job.get("note_id")}
@@ -148,11 +159,13 @@ async def _claim_job(db, job_ref):
 
 
 def _is_transient(e: Exception) -> bool:
-    """Failures with a real chance of succeeding on a Cloud Tasks retry."""
+    """Failures with a real chance of succeeding on a retry."""
     if isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
         return True
-    if isinstance(e, genai_errors.APIError):
-        return e.code == 429 or e.code >= 500
+    if isinstance(e, openai.APIConnectionError):  # also covers openai timeouts
+        return True
+    if isinstance(e, openai.APIStatusError):
+        return e.status_code == 429 or e.status_code >= 500
     return False
 
 
@@ -246,7 +259,7 @@ async def _salvage_and_complete(db, job_ref, *, job_id: str, user_id: str, url: 
                                 error: str) -> dict:
     """Write an honest is_fallback bookmark and mark the job completed with it. Shared by the
     unreachable-source short-circuit and the extraction-failure ladder so both preserve the
-    capture identically (stable salvage id → idempotent on a Cloud Tasks retry)."""
+    capture identically (stable salvage id → idempotent on a retry)."""
     note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
                                   input_type=input_type, user_title=title,
                                   bundle=bundle, now=now,
@@ -272,17 +285,100 @@ async def _salvage_and_complete(db, job_ref, *, job_id: str, user_id: str, url: 
 async def _fail_reextract(job_ref, error: str) -> dict:
     """A re-extract job whose source can no longer be extracted: mark it failed WITHOUT touching
     the target note. Never salvage — a dead source (deleted IG post, expired page) must not turn a
-    good note into a bookmark. Returns 200 so Cloud Tasks doesn't retry a permanent failure."""
+    good note into a bookmark. Returns 200 so nothing retries a permanent failure."""
     await job_ref.update({"status": "failed", "error": error[:500],
                           "updated_at": datetime.now(timezone.utc)})
     return {"status": "failed", "error": error[:200]}
 
 
+async def _fail_job(job_ref, error: str) -> dict:
+    """Mark a job failed with a machine-readable code (the frontend maps it to a message)."""
+    await job_ref.update({"status": "failed", "error": error[:500],
+                          "updated_at": datetime.now(timezone.utc)})
+    return {"status": "failed", "error": error[:200]}
+
+
+# ---- completeness gate + escalation (reel cascade) ----
+# ponytail: Vercel kills a request at 300 s; leave 30 s of margin. Escalate only when the
+# elapsed time + that tier's cost + 45 s (extract/embed/write) still fits.
+JOB_DEADLINE_S = 270
+MAX_ESCALATIONS = 2
+_ESCALATE_COST_S = {"caption": 115, "transcript": 60}  # download+ffmpeg+Whisper / frames+vision
+_FINISH_MARGIN_S = 45
+_QTY = re.compile(r"\d|[½¼¾⅓⅔]|\b(?:one|two|three|half|dash|pinch|handful|cup|tbsp|tsp)\b", re.I)
+
+
+def _is_complete(extracted: NoteExtraction, content_type: str) -> bool:
+    """Pure heuristic: did extraction capture the substance? Never rejects a note — it only
+    decides whether a costlier acquisition tier is worth trying.
+    # ponytail: shape/threshold heuristics (recipe >=3 ingredients, >=50% with quantities,
+    # >=2 steps; place/itinerary >=1 named stop); tune against real reels, don't over-engineer."""
+    data = extracted.data or {}
+    if is_recipe(content_type) or "ingredients" in data:
+        items: list = []
+        for g in data.get("ingredients") or []:
+            items += (g.get("items") or []) if isinstance(g, dict) else [g]
+        items = [i if isinstance(i, str) else str(i) for i in items]
+        quantified = sum(1 for i in items if _QTY.search(i))
+        return (len(items) >= 3 and quantified * 2 >= len(items)
+                and len(data.get("steps") or []) >= 2)
+    if is_places(content_type) or "venues" in data:
+        return any(isinstance(v, dict) and v.get("name") for v in data.get("venues") or [])
+    if is_itinerary(content_type) or "days" in data:
+        return any(isinstance(st, dict) and st.get("place")
+                   for d in data.get("days") or [] if isinstance(d, dict)
+                   for st in d.get("stops") or [])
+    return bool((extracted.ai_summary or "").strip())
+
+
+def _can_escalate(bundle: ContentBundle, start: float, done: int) -> bool:
+    if done >= MAX_ESCALATIONS or not bundle.strategy.startswith("reel_"):
+        return False
+    cost = _ESCALATE_COST_S.get(bundle.metadata.get("tier", "caption"))
+    if cost is None:  # already at the last tier
+        return False
+    # Request-level deadline when set (survives in-process retries); else this attempt's start.
+    end = job_deadline.get() or start + JOB_DEADLINE_S
+    if time.monotonic() + cost + _FINISH_MARGIN_S >= end:
+        log.info("skipping escalation: over time budget", extra={"strategy": bundle.strategy})
+        return False
+    return True
+
+
+async def _escalate(url: str, bundle: ContentBundle, start: float, done: int) -> ContentBundle | None:
+    if not _can_escalate(bundle, start, done):
+        return None
+    try:
+        return await sources.escalate(url, bundle)
+    except Exception as e:  # noqa: BLE001 — a failed tier keeps the best partial
+        log.warning("escalation failed: %s: %s", type(e).__name__, e, extra={"url": url})
+        return None
+
+
+async def _extract_with_escalation(url: str, bundle: ContentBundle, content_type: str,
+                                   note_hint: str | None, start: float, done: int = 0):
+    """Extract; while the result is incomplete, climb the reel cascade and re-extract (same
+    content_type, extract only). Returns (extracted, bundle). The first extract may raise as
+    before; later ones never lose the earlier result."""
+    extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
+    while not _is_complete(extracted, content_type):
+        nb = await _escalate(url, bundle, start, done)
+        if nb is None:
+            break
+        done += 1
+        bundle = nb
+        try:
+            extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
+        except Exception as e:  # noqa: BLE001 — keep the best partial
+            log.warning("re-extract after escalation failed: %s: %s", type(e).__name__, e)
+            break
+    return extracted, bundle
+
+
 def _verify_oidc(request: Request) -> None:
-    """Validates the Cloud Tasks OIDC token: signature, audience (worker URL), SA email.
-    Thin wrapper over the shared verifier (kept as a module-level name so existing tests can
-    patch process._verify_oidc)."""
-    verify_oidc(request)
+    """Worker-secret gate. Thin wrapper (name kept so existing tests can patch
+    process._verify_oidc)."""
+    verify_worker_secret(request)
 
 
 def _raw_text_extraction(text: str, title: str | None) -> NoteExtraction:
@@ -299,16 +395,129 @@ def _raw_text_extraction(text: str, title: str | None) -> NoteExtraction:
                           cover_image_prompt="", data={"body": body})
 
 
+DRAIN_BATCH = 100  # max deferred jobs re-dispatched per drain pass
+
+
+async def _drain_deferred(db) -> dict:
+    """Re-dispatch captures parked by the global daily cap (status "deferred"), up to the
+    budget that has freed up. Bounded by the remaining global budget, so draining can never
+    itself bust the kill-switch."""
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    global_ref = db.collection("system").document(f"usage-{today}")
+    snap = await global_ref.get()
+    used = (snap.to_dict() or {}).get("note_count", 0)
+    budget = settings.DAILY_GLOBAL_NOTE_CAP - used
+    if budget <= 0:
+        return {"drained": 0, "reason": "no budget today"}
+
+    now = datetime.now(timezone.utc)
+    drained = 0
+    # ponytail: one pass handles at most DRAIN_BATCH jobs (sequential dispatch inside the 300 s
+    # request kill); the daily cron picks up the rest. Raise it only with concurrent dispatch.
+    q = db.collection("jobs").where("status", "==", "deferred").limit(min(budget, DRAIN_BATCH))
+    async for doc in q.stream():
+        try:
+            await doc.reference.update({"status": "pending", "updated_at": now})
+            await asyncio.to_thread(enqueue_process_job, doc.id)
+        except Exception as e:  # noqa: BLE001 — one bad dispatch must not stop the drain
+            log.error("drain dispatch failed: %s: %s", type(e).__name__, e,
+                      extra={"job_id": doc.id})
+            continue  # left "pending" -> the stale sweep re-dispatches it; not charged
+        drained += 1
+        # Charge per job (atomic) so a later failure/kill never loses the cap count.
+        await global_ref.set({"date": today, "note_count": fs.Increment(1)}, merge=True)
+    log.info("drained %d deferred captures (budget was %d)", drained, budget)
+    return {"drained": drained}
+
+
+async def redispatch_stale(docs) -> int:
+    """Re-dispatch (or give up on) stale jobs from `docs` (job snapshots). A job is stale when
+    "pending" > PENDING_STALE_SECONDS or "processing" > CLAIM_STALE_SECONDS since updated_at.
+    Jobs past SWEEP_GIVE_UP_S / SWEEP_MAX_ATTEMPTS are marked failed so "Saving…" never sticks.
+    Returns the number re-dispatched. Shared by the sweep route and ingest's per-user recovery."""
+    now = datetime.now(timezone.utc)
+    n = 0
+    for doc in docs:
+        job = doc.to_dict() or {}
+        status = job.get("status")
+        limit = {"pending": PENDING_STALE_SECONDS, "processing": CLAIM_STALE_SECONDS}.get(status)
+        updated, created = job.get("updated_at"), job.get("created_at")
+        if limit is None or updated is None or (now - updated).total_seconds() < limit:
+            continue
+        if ((created is not None and (now - created).total_seconds() > SWEEP_GIVE_UP_S)
+                or (job.get("attempt_count") or 0) >= SWEEP_MAX_ATTEMPTS):
+            await doc.reference.update({"status": "failed", "updated_at": now,
+                                        "error": job.get("error") or "Timed out before processing."})
+            continue
+        path = "/api/process-agent" if job.get("kind") == "agent_task" else "/api/process"
+        try:
+            await asyncio.to_thread(enqueue_process_job, doc.id, path)
+            n += 1
+        except Exception as e:  # noqa: BLE001 — one bad dispatch must not stop the sweep
+            log.error("sweep re-dispatch failed: %s: %s", type(e).__name__, e,
+                      extra={"job_id": doc.id})
+    return n
+
+
+async def _reclaim_stale(db) -> int:
+    """Stale pending/processing jobs, two single-field equality queries (no new index);
+    age filtering happens in Python."""
+    n = 0
+    for status in ("pending", "processing"):
+        docs = [d async for d in db.collection("jobs").where("status", "==", status)
+                .limit(100).stream()]
+        n += await redispatch_stale(docs)
+    return n
+
+
+# Static routes MUST be declared above /process/{job_id}: Starlette matches in order, and
+# the parametrised route would otherwise swallow "sweep" / "drain-deferred" as a job_id.
+@router.get("/process/sweep")
+async def sweep(request: Request):
+    """Daily Vercel cron: unpark deferred captures, then re-dispatch jobs whose worker died."""
+    verify_worker_secret(request, allow_cron=True)
+    db = get_db()
+    try:
+        drained = await _drain_deferred(db)
+    except Exception as e:  # noqa: BLE001 — never let a drain failure skip the stale reclaim
+        log.error("drain failed: %s: %s", type(e).__name__, e)
+        drained = {"drained": 0, "error": type(e).__name__}
+    reclaimed = await _reclaim_stale(db)
+    return {**drained, "redispatched": reclaimed}
+
+
+@router.post("/process/drain-deferred")
+async def drain_deferred(request: Request):
+    """Manual trigger for the deferred-capture drain (the sweep route also does this)."""
+    _verify_oidc(request)
+    return await _drain_deferred(get_db())
+
+
 @router.post("/process/{job_id}")
 async def process_job(job_id: str, request: Request):
     _verify_oidc(request)
-    return await _process_job(job_id)
+    # In-process retry (replaces Cloud Tasks'). Each attempt re-claims via _claim_job, which is
+    # idempotent. ponytail: fixed 270 s ceiling under Vercel's 300 s kill; out of budget →
+    # 500 and the job stays pending for the sweep / next ingest, upgrade to Vercel Queues
+    # if lost-job recovery latency matters.
+    start = time.monotonic()
+    # extract() reads this to cap each model call's timeout (a ContextVar keeps signatures).
+    job_deadline.set(start + JOB_DEADLINE_S)
+    for delay in (*RETRY_SLEEPS, None):
+        try:
+            return await _process_job(job_id)
+        except HTTPException as e:
+            # A retry needs room for sleep + a useful extract: skip it under MIN_RETRY_S left.
+            if (e.status_code != 500 or delay is None
+                    or start + JOB_DEADLINE_S - (time.monotonic() + delay) < MIN_RETRY_S):
+                raise
+        await asyncio.sleep(delay)
 
 
 async def _process_job(job_id: str) -> dict:
-    """The full URL→note pipeline, minus the OIDC gate. Split out so the dev inline path
-    (no Cloud Tasks) can invoke it directly, and so tests can drive it after stubbing
-    _verify_oidc. Idempotency + salvage semantics live here, unchanged."""
+    """The full URL→note pipeline, minus the auth gate. Split out so the dev inline path
+    can invoke it directly, and so tests can drive it after stubbing _verify_oidc.
+    Idempotency + salvage semantics live here, unchanged."""
     db = get_db()
     job_ref = db.collection("jobs").document(job_id)
     job, early = await _claim_job(db, job_ref)
@@ -320,9 +529,6 @@ async def _process_job(job_id: str) -> dict:
     url: str = job.get("url") or ""
     device_content: str | None = job.get("content")
     title: str | None = job.get("title")
-    media_uri: str | None = job.get("media_gcs_uri")
-    media_mime: str | None = job.get("media_mime")
-    media_cover_url: str | None = job.get("media_cover_url")
     source: str = job.get("source", "web")
     note_hint: str | None = job.get("note_hint")
     process_ai: bool = job.get("process_ai", True) is not False
@@ -339,40 +545,14 @@ async def _process_job(job_id: str) -> dict:
     # (a failed/salvaged job still incurred AI cost that must be attributed).
     meter = start_metering()
     bundle: ContentBundle | None = None
+    job_start = time.monotonic()
     try:
         # 1. Acquire content per input_type. URLs go through the source-aware resolver;
-        #    everything else is already in hand (typed text, or a file uploaded to GCS that
-        #    Gemini reads by gs:// URI — mirroring the video path, no byte round-trip here).
+        #    typed text is already in hand.
         if input_type == "text":
             bundle = ContentBundle(kind="text", text=(job.get("text") or "")[:30000],
                                    metadata={"title": title or "Note", "platform": source},
                                    strategy="text_input")
-        elif input_type == "image":
-            bundle = ContentBundle(kind="image", media_uri=media_uri,
-                                   media_mime=media_mime or "image/jpeg",
-                                   images=[media_cover_url] if media_cover_url else [],
-                                   metadata={"title": title or "Saved image", "platform": source},
-                                   strategy="image_upload")
-        elif input_type == "pdf":
-            bundle = ContentBundle(kind="document", media_uri=media_uri,
-                                   media_mime=media_mime or "application/pdf",
-                                   metadata={"title": title or "Document", "platform": source},
-                                   strategy="pdf_upload")
-        elif input_type == "voice":
-            # Audio reads through the same gs:// FileData path as images/PDFs; gemini.py
-            # branches on the audio/* mime and instructs the model to transcribe + structure it.
-            bundle = ContentBundle(kind="document", media_uri=media_uri,
-                                   media_mime=media_mime or "audio/webm",
-                                   metadata={"title": title or "Voice note", "platform": source},
-                                   strategy="voice_upload")
-        elif input_type == "video":
-            # An uploaded clip rides the same direct-video path as YouTube/social URLs:
-            # Gemini ingests it by gs:// FileData (visuals + speech), analyzed at low media
-            # resolution to keep token cost bounded.
-            bundle = ContentBundle(kind="video_uri", video_uri=media_uri,
-                                   media_mime=media_mime or "video/mp4",
-                                   metadata={"title": title or "Video", "platform": source},
-                                   strategy="video_upload")
         elif device_content:
             # Device-extracted text (PWA/shortcut) already bypassed any paywall/login.
             bundle = ContentBundle(kind="text", text=device_content[:30000],
@@ -380,6 +560,13 @@ async def _process_job(job_id: str) -> dict:
                                    strategy="device_content")
         else:
             bundle = await sources.acquire(url)
+
+        # Login-walled / private: nothing but a generic site title came back. Fail honestly —
+        # no note, nothing to hallucinate from (a re-extract must not touch the live note).
+        if bundle.strategy == "private_or_blocked":
+            log.warning("source private or blocked", extra={"job_id": job_id, "user_id": user_id, "url": url})
+            return await (_fail_reextract if target_note_id else _fail_job)(
+                job_ref, "private_or_blocked")
 
         # Unreachable source: every strategy failed and the resolver returned only a metadata
         # stub. Do NOT hand it to Gemini — it would confidently hallucinate a whole note from
@@ -409,10 +596,24 @@ async def _process_job(job_id: str) -> dict:
             # 2. Classify against this user's own categories (one lite call, content_type only —
             #    smart-collection membership is resolved later, by embedding match, not here).
             existing = await get_user_categories(user_id)
+            # Gate (a): a reel with a thin preview would be misclassified — climb one tier first.
+            escalations = 0
+            if (bundle.strategy.startswith("reel_") and not bundle.image_parts
+                    and len(bundle.text or "") < sources.social_video.THIN_CHARS):
+                if (nb := await _escalate(url, bundle, job_start, escalations)) is not None:
+                    bundle, escalations = nb, escalations + 1
+                elif not (bundle.text or "").strip() and not bundle.image_parts:
+                    # Nothing escalated and nothing usable: extracting would invent a note.
+                    log.warning("thin reel, escalation failed", extra={
+                        "job_id": job_id, "user_id": user_id, "url": url})
+                    return await (_fail_reextract if target_note_id else _fail_job)(
+                        job_ref, "private_or_blocked")
             content_type = await gemini_service.classify(url, bundle, existing, note_hint)
 
-            # 3. Type-focused extraction (structured data only — never HTML).
-            extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
+            # 3. Type-focused extraction (structured data only — never HTML); gate (b)
+            #    escalates the reel cascade when the result is incomplete.
+            extracted, bundle = await _extract_with_escalation(
+                url, bundle, content_type, note_hint, job_start, escalations)
 
             if not extracted.data or len(str(extracted.data)) < 40:
                 raise ValueError("Extraction produced empty or suspiciously short data")
@@ -426,16 +627,13 @@ async def _process_job(job_id: str) -> dict:
                 extracted.content_type = content_type
 
             cover_image_url = bundle.images[0] if bundle.images else None
-            # Re-host hot-linked source thumbnails (which expire) in our public covers bucket.
-            # Skip frames we already extracted (those are covers-bucket URLs).
-            if cover_image_url and settings.COVERS_BUCKET not in cover_image_url:
-                cover_image_url = await persist_cover(cover_image_url) or cover_image_url
-        # source_url/domain only describe URL captures; a typed note or uploaded file has
+        # source_url/domain only describe URL captures; a typed note has
         # no web source, so they stay "" (the same empty-source convention AI notes use) and
         # the UI omits the "View source" affordance.
-        source_url = url if input_type == "url" else ""
-        source_domain = (url.split("/")[2].replace("www.", "")
-                         if input_type == "url" and "://" in url else "")
+        canonical = bundle.metadata.get("canonical_url") or url
+        source_url = canonical if input_type == "url" else ""
+        source_domain = (canonical.split("/")[2].replace("www.", "")
+                         if input_type == "url" and "://" in canonical else "")
 
         # Enrich the note's own data per its content family (TMDB providers, Places
         # photos/coords + action links, stop geocoding, price parsing). Best-effort: a miss
@@ -445,16 +643,6 @@ async def _process_job(job_id: str) -> dict:
             extracted.data, cover_override = await enrich_note_data(
                 user_id, extracted.content_type, extracted.data, cover_image_url)
             cover_image_url = cover_override or cover_image_url
-            # Last resort: generate a cover with Imagen (gated, capped). Only when the note is
-            # still coverless after source imagery AND enrichment posters/photos. A miss (off,
-            # capped, RAI-filtered, error) leaves it None → frontend renders the gradient hero.
-            if not cover_image_url and settings.ENABLE_IMAGEN and extracted.cover_image_prompt:
-                if await reserve_image_slot(user_id):
-                    cover_image_url = await generate_cover(
-                        extracted.cover_image_prompt, extracted.content_type
-                    )
-                    if cover_image_url:
-                        await record_image_generated(user_id)
 
         # Every capture is a note. A re-extract targets the existing note (overwrite in place)
         # and must preserve owner-set state — created_at plus any flag the owner toggled through
@@ -548,15 +736,14 @@ async def _process_job(job_id: str) -> dict:
 
     except Exception as e:
         if _is_transient(e) and attempt < MAX_TRANSIENT_ATTEMPTS:
-            # Let Cloud Tasks retry with its configured backoff. Status returns to
-            # "pending" so the feed keeps showing the in-flight card, not a failure.
+            # process_job retries in-process. Status returns to "pending" so the feed keeps showing the in-flight card, not a failure.
             log.warning("transient failure (attempt %d/%d), re-raising for retry: %s: %s",
                         attempt, MAX_TRANSIENT_ATTEMPTS, type(e).__name__, e,
                         extra={"job_id": job_id, "user_id": user_id, "url": url})
             await job_ref.update({"status": "pending",
                                   "error": f"transient: {type(e).__name__}: {e}"[:500],
                                   "updated_at": datetime.now(timezone.utc)})
-            raise HTTPException(500, "Transient failure — Cloud Tasks will retry")
+            raise HTTPException(500, "Transient failure — will retry")
 
         # A re-extract that failed permanently must NOT salvage — that would replace the
         # existing note with a bookmark. Fail the job and leave the note untouched.
@@ -585,44 +772,15 @@ async def _process_job(job_id: str) -> dict:
             return {"status": "failed", "error": str(e)[:200]}
 
     finally:
-        # Attribute token spend even when the job re-raised for a Cloud Tasks retry.
+        sources.cleanup(bundle)
+        # Attribute token spend even when the job re-raised for a retry.
         await flush_usage(user_id, meter)
-
-
-@router.post("/process/drain-deferred")
-async def drain_deferred(request: Request):
-    """Re-enqueue captures parked by the global daily cap (status "deferred"), up to the
-    budget that has freed up — e.g. after the daily counter rolls over. Triggered by Cloud
-    Scheduler (OIDC-authed with the same SA as Cloud Tasks). The batch is bounded by the
-    remaining global budget, so draining can never itself bust the kill-switch."""
-    _verify_oidc(request)
-    db = get_db()
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
-    global_ref = db.collection("system").document(f"usage-{today}")
-    snap = await global_ref.get()
-    used = (snap.to_dict() or {}).get("note_count", 0)
-    budget = settings.DAILY_GLOBAL_NOTE_CAP - used
-    if budget <= 0:
-        return {"drained": 0, "reason": "no budget today"}
-
-    now = datetime.now(timezone.utc)
-    drained = 0
-    q = db.collection("jobs").where("status", "==", "deferred").limit(budget)
-    async for doc in q.stream():
-        await doc.reference.update({"status": "pending", "updated_at": now})
-        enqueue_process_job(doc.id)
-        drained += 1
-    if drained:
-        # Atomic so concurrent live ingests can't double-spend the same budget slot.
-        await global_ref.set({"date": today, "note_count": fs.Increment(drained)}, merge=True)
-    log.info("drained %d deferred captures (budget was %d)", drained, budget)
-    return {"drained": drained}
 
 
 @router.post("/process-agent/{job_id}")
 async def process_agent_job(job_id: str, request: Request):
     """Deep async agent worker: runs the orchestrator headlessly for a heavy multi-note task
-    (e.g. a PRD over 15 notes) and writes the result as a note. Same OIDC + idempotency as the
+    (e.g. a PRD over 15 notes) and writes the result as a note. Same worker-secret auth + idempotency as the
     URL pipeline. Deep tasks don't retry-storm: any failure marks the job failed (HTTP 200)."""
     _verify_oidc(request)
 

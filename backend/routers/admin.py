@@ -2,10 +2,11 @@
 
 Joins three sources: Firebase Auth (identity, signup, last sign-in), Firestore notes
 (per-user count() aggregations — no doc reads billed), and the lifetime token counters
-flush_usage writes to users/{uid}. Cost is derived from raw tokens at read-time using
-the config price table, so it always reflects current pricing.
+flush_usage writes to users/{uid}. Cost is OpenRouter's billed USD (`*_cost_usd`, summed by
+flush_usage); docs written before the cutover fall back to raw tokens × the config price table.
 """
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -34,26 +35,24 @@ async def require_admin(authorization: str | None = Header(default=None)) -> str
     return claims["uid"]
 
 
-def _cost_usd(
-    ti_main: int, to_main: int, ti_lite: int, to_lite: int,
-    images: int = 0, ti_embed: int = 0, ti_audio_main: int = 0,
-) -> float:
-    """Per-tier token totals (+ generated images) → USD, using config prices
-    (tokens priced per 1M; images per-image).
+# Frozen Gemini rates (USD per 1M) — the pre-cutover tokens were billed at these, not at the
+# DeepSeek PRICE_* config. Embed: old EMBED_PRICE_IN.
+LEGACY_PRICE_MAIN_IN, LEGACY_PRICE_MAIN_OUT = 1.50, 9.00
+LEGACY_PRICE_LITE_IN, LEGACY_PRICE_LITE_OUT = 0.25, 1.50
+LEGACY_PRICE_EMBED_IN = 0.025
+# Days before this are priced from tokens at legacy rates; on/after, from billed `tok_cost_usd`.
+COST_CUTOVER_DATE = os.getenv("COST_CUTOVER_DATE", "2026-10-04")
 
-    `ti_audio_main` is the audio-modality SUBSET of `ti_main`: it's priced at the higher
-    GEMINI_PRICE_IN_AUDIO and the remaining (text) main input at GEMINI_PRICE_IN, so audio
-    and text never double-count regardless of how the counter is stored. 0 until the voice
-    metering wiring lands (see config.GEMINI_PRICE_IN_AUDIO)."""
-    token_cost = (
-        (ti_main - ti_audio_main) * settings.GEMINI_PRICE_IN
-        + ti_audio_main * settings.GEMINI_PRICE_IN_AUDIO
-        + to_main * settings.GEMINI_PRICE_OUT
-        + ti_lite * settings.GEMINI_LITE_PRICE_IN
-        + to_lite * settings.GEMINI_LITE_PRICE_OUT
-        + ti_embed * settings.EMBED_PRICE_IN
+
+def _cost_usd(ti_main: int, to_main: int, ti_lite: int, to_lite: int, ti_embed: int = 0) -> float:
+    """Legacy Gemini cost: token totals × frozen LEGACY_PRICE_* (per 1M)."""
+    return (
+        ti_main * LEGACY_PRICE_MAIN_IN
+        + to_main * LEGACY_PRICE_MAIN_OUT
+        + ti_lite * LEGACY_PRICE_LITE_IN
+        + to_lite * LEGACY_PRICE_LITE_OUT
+        + ti_embed * LEGACY_PRICE_EMBED_IN
     ) / 1_000_000
-    return token_cost + images * settings.IMAGEN_PRICE_PER_IMAGE
 
 
 @router.get("/admin/stats")
@@ -97,7 +96,11 @@ async def admin_stats(_: str = Depends(require_admin)):
         to_lite = prof.get("lifetime_tokens_out_lite", 0)
         ti_embed = prof.get("lifetime_tokens_in_embed", 0)
         images = prof.get("lifetime_images", 0)
-        cost = _cost_usd(ti_main, to_main, ti_lite, to_lite, images, ti_embed)
+        # ponytail: lifetime = legacy-rate tokens + billed post-cutover USD. Token counters keep
+        # growing after cutover, so post-cutover tokens are slightly double-counted (see
+        # pricing_note); the daily trend is exact. Sum daily docs if exactness is ever needed.
+        cost = _cost_usd(ti_main, to_main, ti_lite, to_lite, ti_embed) + (
+            prof.get("lifetime_cost_usd") or 0.0)
         tokens = ti_main + to_main + ti_lite + to_lite
         total_cost += cost
         total_tokens += tokens
@@ -147,14 +150,16 @@ async def admin_stats(_: str = Depends(require_admin)):
         notes_d = d_data.get("note_count", 0)
         asks_d = d_data.get("ask_count", 0)
         images_d = d_data.get("image_count", 0)
-        daily_cost = _cost_usd(
-            d_data.get("tok_tokens_in_main", 0),
-            d_data.get("tok_tokens_out_main", 0),
-            d_data.get("tok_tokens_in_lite", 0),
-            d_data.get("tok_tokens_out_lite", 0),
-            images_d,
-            d_data.get("tok_tokens_in_embed", 0),
-        )
+        if f"{day[:4]}-{day[4:6]}-{day[6:]}" >= COST_CUTOVER_DATE:
+            daily_cost = d_data.get("tok_cost_usd") or 0.0
+        else:
+            daily_cost = _cost_usd(
+                d_data.get("tok_tokens_in_main", 0),
+                d_data.get("tok_tokens_out_main", 0),
+                d_data.get("tok_tokens_in_lite", 0),
+                d_data.get("tok_tokens_out_lite", 0),
+                d_data.get("tok_tokens_in_embed", 0),
+            )
         daily_trend.append({
             "date": day,
             "notes": notes_d,
@@ -204,7 +209,10 @@ async def admin_stats(_: str = Depends(require_admin)):
             "images_today": sys_today.get("image_count", 0),
         },
         "signups_by_source": signups_by_source,
-        "pricing_note": "Cost uses configured Gemini + Imagen prices — verify GEMINI_PRICE_* and IMAGEN_PRICE_PER_IMAGE against live Vertex pricing.",
+        "pricing_note": (
+            "Daily trend: pre-cutover days = tokens × legacy Gemini rates, later days = OpenRouter "
+            "billed USD. Lifetime/total = legacy-rate tokens + billed USD, so it slightly "
+            "overstates post-cutover token spend (tokens counted at legacy rates too)."),
         "daily_trend": daily_trend,
         "users": per_user,
     }

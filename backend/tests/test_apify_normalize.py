@@ -121,3 +121,26 @@ def test_normalize_tiktok_videometa_shape():
     assert out["thumbnail"] == "https://p.tiktokcdn.com/cover.jpg"
     assert out["duration"] == 42
     assert out["author"] == "chef"
+
+
+def test_latest_comments_parsed_defensively():
+    item = {"caption": "c", "latestComments": [
+        {"text": "1 cup flour", "ownerUsername": "a"}, "plain string", {"text": "  "},
+        {"nope": 1}, None, 5]}
+    assert apify._normalize(item)["comments"] == ["1 cup flour", "plain string"]
+    assert apify._normalize({"caption": "c"})["comments"] == []
+    assert apify._normalize({"latestComments": "weird"})["comments"] == []
+    many = {"latestComments": [{"text": f"c{i}"} for i in range(30)]}
+    assert len(apify._normalize(many)["comments"]) == apify.MAX_COMMENTS
+
+
+def test_youtube_subtitles_parsed_defensively():
+    item = {"subtitles": [{"language": "en", "srt": "1\n00:00:01 --> 00:00:02\nhello there\n\n2\n00:00:02 --> 00:00:03\nworld"}]}
+    assert apify._normalize(item)["subtitles"] == "hello there world"
+    assert apify._normalize({"subtitles": None})["subtitles"] == ""
+
+
+def test_youtube_input_requests_subtitles():
+    from services.apify import _youtube_input
+    i = _youtube_input("https://youtu.be/x")
+    assert i["downloadSubtitles"] is True and i["subtitlesLanguage"] == "en"

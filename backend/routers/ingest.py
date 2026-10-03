@@ -4,15 +4,14 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud import firestore as fs
 from pydantic import ValidationError
 
 from config import settings
 from models.note import IngestRequest, JobStatus
-from services import uploads
 from services.auth_dep import require_user
-from services.cloud_tasks import enqueue_process_job
+from services.dispatch import enqueue_process_job
 from services.firebase import get_db, touch_user_activity
 from services.net_guard import BlockedURLError, assert_public_url_async
 
@@ -121,14 +120,11 @@ async def _create_job(db, user_id: str, body: IngestRequest,
     status = "deferred" if deferred else "pending"
     job_doc = {
         "user_id": user_id,
-        "input_type": body.input_type,    # "url" | "text" | "image" | "pdf" | "voice"
+        "input_type": body.input_type,    # "url" | "text"
         "url": body.url or None,
         "text": body.text,                # typed-note body (input_type == "text")
         "process_ai": body.process_ai,    # False → save the typed note verbatim (no Gemini)
         "title": body.title,              # user-supplied title (non-url inputs)
-        "media_gcs_uri": body.media_gcs_uri,    # gs:// of the uploaded file
-        "media_mime": body.media_mime,          # MIME for the worker's FileData part
-        "media_cover_url": body.media_cover_url,  # public cover (images)
         "content": body.content,          # device-extracted text (PWA/shortcut), if any
         "source": body.source,            # "web" | "shortcut" | "pwa" | "ai_chat" | "upload"
         "note_hint": body.note_hint,      # user instructions for Gemini (from Clip AI chat)
@@ -149,15 +145,15 @@ async def _create_job(db, user_id: str, body: IngestRequest,
                  extra={"job_id": job_id, "user_id": user_id, "url": body.url})
         return JobStatus(job_id=job_id, status="deferred")
 
-    # Dev inline path: with no Cloud Tasks SA configured (local dev) there's no queue to
-    # enqueue onto — run the worker in-process so a localhost capture actually processes.
-    if not settings.CLOUD_TASKS_SA_EMAIL:
-        log.info("inline dev processing active (no Cloud Tasks SA configured)",
+    # Dev inline path: with no WORKER_SECRET configured (local dev) the worker route would
+    # reject us — run the worker in-process so a localhost capture actually processes.
+    if not settings.WORKER_SECRET:
+        log.info("inline dev processing active (no WORKER_SECRET configured)",
                  extra={"job_id": job_id, "user_id": user_id})
         asyncio.create_task(_run_inline(job_id))
         return JobStatus(job_id=job_id, status="pending")
 
-    # Enqueue off the event loop (the SDK call is blocking). A queue failure must not orphan
+    # Dispatch off the event loop (the HTTP call is blocking). A dispatch failure must not orphan
     # a "pending" job that renders an eternal "Saving…" card — mark it failed so the client
     # sees a terminal state instead of a 500.
     try:
@@ -174,8 +170,11 @@ async def _create_job(db, user_id: str, body: IngestRequest,
     return JobStatus(job_id=job_id, status="pending")
 
 
+_bg_tasks: set[asyncio.Task] = set()  # strong refs so fire-and-forget tasks aren't GC'd
+
+
 async def _run_inline(job_id: str) -> None:
-    """Dev-only worker invocation (no Cloud Tasks hop, so OIDC is bypassed). Best-effort:
+    """Dev-only worker invocation (no dispatch hop, so the secret check is bypassed). Best-effort:
     a crash here only affects this one capture, and the job doc already exists."""
     try:
         from routers.process import _process_job  # local import avoids a heavy import cycle
@@ -183,6 +182,19 @@ async def _run_inline(job_id: str) -> None:
     except Exception as e:  # noqa: BLE001
         log.error("inline dev processing failed: %s: %s", type(e).__name__, e,
                   extra={"job_id": job_id})
+
+
+async def _redispatch_own_stale(db, user_id: str) -> None:
+    """Recovery without waiting for the daily cron: re-dispatch this user's own stale jobs
+    (newest 10; age filtering in Python). Best-effort — never blocks the capture."""
+    try:
+        from routers.process import redispatch_stale  # local import avoids a heavy import cycle
+        docs = [d async for d in db.collection("jobs").where("user_id", "==", user_id)
+                .order_by("created_at", direction="DESCENDING").limit(10).stream()]
+        await redispatch_stale(docs)
+    except Exception as e:  # noqa: BLE001
+        log.warning("own-stale re-dispatch failed: %s: %s", type(e).__name__, e,
+                    extra={"user_id": user_id})
 
 
 @router.post("/ingest", response_model=JobStatus)
@@ -207,41 +219,9 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
         except BlockedURLError:
             raise HTTPException(status_code=400, detail="This URL points at a private address and can't be saved.")
 
-    return await _create_job(get_db(), user_id, body)
-
-
-@router.post("/ingest/upload", response_model=JobStatus)
-async def ingest_upload(
-    file: UploadFile = File(...),
-    input_type: str = Form(...),
-    title: str | None = Form(None),
-    source: str = Form("upload"),
-    note_hint: str | None = Form(None),
-    user_id: str = Depends(require_user),
-):
-    """Binary capture path: a screenshot/image, PDF, voice memo, or video shared into the
-    app. Uploads the bytes to GCS, then creates the same job shape the URL path does so the
-    worker pipeline is identical from here on."""
-    if input_type not in ("image", "pdf", "voice", "video"):
-        raise HTTPException(status_code=400, detail="Unsupported upload type.")
-    if not uploads.bucket_for(input_type):
-        raise HTTPException(status_code=503, detail="File uploads aren't configured on this server.")
-
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="The file is empty.")
-    # Video gets a larger ceiling than images/PDFs — even a short clip dwarfs a screenshot,
-    # while the per-input cap still bounds the Gemini token cost of a single capture.
-    cap_mb = settings.MAX_VIDEO_UPLOAD_MB if input_type == "video" else settings.MAX_UPLOAD_MB
-    if len(data) > cap_mb * 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"File too large (max {cap_mb} MB).")
-    mime = (file.content_type or "").split(";")[0].strip().lower()
-    if mime not in settings.ALLOWED_UPLOAD_MIME.get(input_type, set()):
-        raise HTTPException(status_code=415, detail=f"Unsupported {input_type} format ({mime or 'unknown'}).")
-
-    gs_uri, cover_url = await uploads.store_upload(input_type, data, mime)
-    body = IngestRequest(
-        input_type=input_type, source=source, title=title, note_hint=note_hint,
-        media_gcs_uri=gs_uri, media_mime=mime, media_cover_url=cover_url,
-    )
-    return await _create_job(get_db(), user_id, body)
+    db = get_db()
+    out = await _create_job(db, user_id, body)
+    # Fire-and-forget: up to 10 sequential dispatches must not delay the response.
+    _bg_tasks.add(t := asyncio.create_task(_redispatch_own_stale(db, user_id)))
+    t.add_done_callback(_bg_tasks.discard)
+    return out

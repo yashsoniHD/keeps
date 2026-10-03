@@ -2,7 +2,7 @@
 
 Tier 1: direct fetch with realistic mobile headers; parse JSON-LD schema.org/Product if
         present, else known per-site selectors (Amazon title/price/feature bullets).
-Tier 2: Firecrawl API (if FIRECRAWL_API_KEY set) for bot-blocked pages.
+Tier 2: Jina Reader for bot-blocked pages.
 Tier 3: og:meta only.
 
 Phase 0 measures which tier Amazon.in actually requires.
@@ -159,21 +159,6 @@ async def _jina_reader(url: str) -> str | None:
     return None
 
 
-async def _firecrawl(url: str) -> str | None:
-    """Tier 2: Firecrawl scrape → markdown. Requires FIRECRAWL_API_KEY."""
-    if not settings.FIRECRAWL_API_KEY:
-        return None
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            "https://api.firecrawl.dev/v1/scrape",
-            headers={"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"},
-            json={"url": url, "formats": ["markdown"]},
-        )
-    if resp.status_code != 200:
-        return None
-    return (resp.json().get("data") or {}).get("markdown")
-
-
 async def acquire(url: str) -> ContentBundle:
     html, status, final_url = "", 0, url
     try:
@@ -219,7 +204,7 @@ async def acquire(url: str) -> ContentBundle:
     # shell with og:title but no price/specs/body — looks "ok" but extracts nothing).
     thin = not json_ld and not site_fields.get("price") and len(body_text) < 800
     if blocked or thin:
-        md = (await _jina_reader(final_url)) or (await _firecrawl(final_url))
+        md = await _jina_reader(final_url)
         if md:
             return ContentBundle(
                 kind="text", text=md[:28000],

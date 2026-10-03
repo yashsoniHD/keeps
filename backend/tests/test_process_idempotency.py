@@ -1,4 +1,4 @@
-"""Worker idempotency: Cloud Tasks retries must never re-run paid AI work — neither a
+"""Worker idempotency: retries must never re-run paid AI work — neither a
 sequential redelivery of a completed job nor a concurrent duplicate delivery."""
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -28,13 +28,13 @@ async def test_completed_job_is_noop(fake_db):
 
 
 async def test_missing_job_returns_200_shape(fake_db):
-    """Cloud Tasks retries on 5xx; a missing job must return a normal payload instead."""
+    """A missing job must return a normal payload, not a 5xx (which would trigger a retry)."""
     result = await process.process_job("nope", DummyRequest())
     assert result == {"status": "missing"}
 
 
 async def test_pipeline_failure_returns_200_shape(fake_db, monkeypatch):
-    """A permanent pipeline exception never 5xxs (no Cloud Tasks retry storm) — it
+    """A permanent pipeline exception never 5xxs (no retry storm) — it
     salvages a bookmark note and completes. Full ladder coverage: test_process_salvage."""
     fake_db.seed("jobs", "job-2", {"status": "pending", "user_id": "u", "url": "https://example.com/x"})
 
@@ -60,7 +60,7 @@ async def test_pipeline_failure_returns_200_shape(fake_db, monkeypatch):
 # --- concurrent duplicate delivery (transactional claim) ---------------------
 
 async def test_in_flight_job_rejects_duplicate_delivery(fake_db):
-    """A job actively claimed by another delivery must 409 (Cloud Tasks redelivers later),
+    """A job actively claimed by another delivery must 409 (the dispatcher drops it),
     never run the pipeline a second time."""
     fake_db.seed("jobs", "job-3", {"status": "processing", "user_id": "u", "url": "https://x",
                                    "updated_at": datetime.now(timezone.utc)})

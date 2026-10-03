@@ -42,15 +42,13 @@ class _FakeClient:
         return _FakeResp(self._t)
 
 
-def _raise_download_block(url):
-    # yt-dlp raises DownloadError rather than returning None — that's the case the old code
-    # let escape to the generic scraper. Any Exception models it here.
-    raise RuntimeError("ERROR: [Instagram] X: Requested content is not available, "
-                       "rate-limit reached or login required.")
+async def _raise_download_block(url):
+    """yt-dlp blocked: `_meta_ytdlp` swallows the DownloadError and returns {}."""
+    return {}
 
 
 async def test_blocked_download_uses_caption_from_og_tags(monkeypatch):
-    monkeypatch.setattr(sv, "_download", _raise_download_block)
+    monkeypatch.setattr(sv, "_meta_ytdlp", _raise_download_block)
     monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
 
     bundle = await sv.acquire("https://www.instagram.com/p/DY6zt0_DE3v/")
@@ -64,66 +62,39 @@ async def test_blocked_download_uses_caption_from_og_tags(monkeypatch):
 
 
 async def test_blocked_download_does_not_raise_when_og_fetch_also_fails(monkeypatch):
-    """Even if the og: fetch fails, acquire returns a URL-only bundle so the pipeline can
-    salvage a bookmark — it must never re-raise the download error."""
-    monkeypatch.setattr(sv, "_download", _raise_download_block)
+    """Even if the og: fetch fails, acquire returns a bundle (never raises) — and never
+    `text=url`, which would let the model hallucinate a note from the URL slug."""
+    monkeypatch.setattr(sv, "_meta_ytdlp", _raise_download_block)
     monkeypatch.setattr(sv, "guarded_async_client",
                         lambda **kw: _FakeClient(RuntimeError("blocked")))
 
     url = "https://www.instagram.com/reel/ZZZ/"
     bundle = await sv.acquire(url)
 
-    assert bundle.strategy == "social_og"
-    assert bundle.text == url
+    assert bundle.strategy == "private_or_blocked"
+    assert bundle.kind == "metadata_only"
+    assert bundle.text is None
     assert bundle.images == []
+
+
+async def test_login_wall_title_is_private_or_blocked(monkeypatch):
+    """A login wall serves only the generic site title — no caption, no image."""
+    monkeypatch.setattr(sv, "_meta_ytdlp", _raise_download_block)
+    monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(
+        '<html><head><meta property="og:title" content="Instagram"></head></html>'))
+    bundle = await sv.acquire("https://www.instagram.com/p/XYZ/")
+    assert bundle.strategy == "private_or_blocked"
 
 
 async def test_apify_disabled_skips_straight_to_og(monkeypatch):
     """With no APIFY_TOKEN, the paid path must short-circuit before reserving a slot (no
     Firestore touch, no cost) and fall to the og-caption fallback."""
     monkeypatch.setattr(sv.settings, "APIFY_TOKEN", "")
-    monkeypatch.setattr(sv, "_download", _raise_download_block)
+    monkeypatch.setattr(sv, "_meta_ytdlp", _raise_download_block)
     monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
 
     bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
     assert bundle.strategy == "social_og"
-
-
-async def test_apify_video_path_when_ytdlp_blocked(monkeypatch):
-    """yt-dlp blocked + APIFY_TOKEN set → Apify returns a video URL, we fetch it and route
-    it through the GCS video path (strategy apify_gcs) for full Gemini video analysis."""
-    monkeypatch.setattr(sv.settings, "APIFY_TOKEN", "tok")
-    monkeypatch.setattr(sv.settings, "CLOUD_STORAGE_BUCKET", "bucket")
-    monkeypatch.setattr(sv, "_download", _raise_download_block)
-
-    async def fake_reserve():
-        return True
-
-    async def fake_fetch(url):
-        return {"video_url": "https://scontent.cdninstagram.com/v.mp4",
-                "caption": "Best 3 cafes in Lisbon", "title": "Best 3 cafes in Lisbon",
-                "thumbnail": "https://scontent.cdninstagram.com/t.jpg",
-                "author": "traveler", "duration": 16}
-
-    async def fake_dl_media(media_url):
-        assert media_url == "https://scontent.cdninstagram.com/v.mp4"
-        return "/tmp/apify_x.mp4"
-
-    async def fake_frame(path):
-        return "https://storage.googleapis.com/covers/abc.jpg"
-
-    monkeypatch.setattr("services.firebase.reserve_apify_slot", fake_reserve)
-    monkeypatch.setattr("services.apify.fetch", fake_fetch)
-    monkeypatch.setattr(sv, "_download_media", fake_dl_media)
-    monkeypatch.setattr(sv, "_upload_to_gcs", lambda p: "gs://bucket/media/x.mp4")
-    monkeypatch.setattr("services.covers.extract_video_frame", fake_frame)
-    monkeypatch.setattr(sv.os.path, "exists", lambda p: False)  # skip temp-file cleanup
-
-    bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
-    assert bundle.strategy == "apify_gcs"
-    assert bundle.video_uri == "gs://bucket/media/x.mp4"
-    assert bundle.images == ["https://storage.googleapis.com/covers/abc.jpg"]
-    assert bundle.metadata["caption"] == "Best 3 cafes in Lisbon"
 
 
 def test_caption_cap_is_4000():
@@ -138,15 +109,15 @@ async def test_instagram_post_is_apify_first(monkeypatch):
     """A non-reel IG post (/p/) tries Apify FIRST — its post scraper returns the caption + every
     carousel slide, where yt-dlp on a mixed carousel only gets the video slide. yt-dlp must not
     run at all when Apify succeeds."""
-    def _no_download(url):
+    async def _no_download(url):
         raise AssertionError("yt-dlp must not run when Apify succeeds for a /p/ post")
 
     async def fake_apify(url):
         return ContentBundle(kind="text", text="10 cafes in Lisbon", strategy="apify_carousel",
                              images=["https://cdn/1.jpg"], metadata={"platform": "instagram"})
 
-    monkeypatch.setattr(sv, "_download", _no_download)
-    monkeypatch.setattr(sv, "_acquire_via_apify", fake_apify)
+    monkeypatch.setattr(sv, "_meta_ytdlp", _no_download)
+    monkeypatch.setattr(sv, "_apify_tier", fake_apify)
 
     bundle = await sv.acquire("https://www.instagram.com/p/DY6zt0_DE3v/")
     assert bundle.strategy == "apify_carousel"
@@ -157,16 +128,16 @@ async def test_instagram_reel_is_ytdlp_first(monkeypatch):
     """Reels stay yt-dlp-first (cheaper, usually works): the download is attempted before Apify."""
     order = []
 
-    def fake_download(url):
+    async def fake_download(url):
         order.append("download")
-        raise RuntimeError("blocked")
+        return {}
 
     async def fake_apify(url):
         order.append("apify")
         return None
 
-    monkeypatch.setattr(sv, "_download", fake_download)
-    monkeypatch.setattr(sv, "_acquire_via_apify", fake_apify)
+    monkeypatch.setattr(sv, "_meta_ytdlp", fake_download)
+    monkeypatch.setattr(sv, "_apify_tier", fake_apify)
     monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
 
     bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
@@ -183,8 +154,8 @@ async def test_instagram_post_apify_miss_falls_to_ytdlp_then_og(monkeypatch):
         apify_calls["n"] += 1
         return None  # miss
 
-    monkeypatch.setattr(sv, "_acquire_via_apify", fake_apify)
-    monkeypatch.setattr(sv, "_download", _raise_download_block)  # yt-dlp blocked
+    monkeypatch.setattr(sv, "_apify_tier", fake_apify)
+    monkeypatch.setattr(sv, "_meta_ytdlp", _raise_download_block)  # yt-dlp blocked
     monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
 
     bundle = await sv.acquire("https://www.instagram.com/p/DY6zt0_DE3v/")
@@ -196,7 +167,7 @@ async def test_instagram_post_apify_miss_falls_to_ytdlp_then_og(monkeypatch):
 async def test_apify_cap_reached_falls_through_to_og(monkeypatch):
     """When the global daily Apify cap is hit, reserve returns False → no scrape, og-caption."""
     monkeypatch.setattr(sv.settings, "APIFY_TOKEN", "tok")
-    monkeypatch.setattr(sv, "_download", _raise_download_block)
+    monkeypatch.setattr(sv, "_meta_ytdlp", _raise_download_block)
     monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(_OG_HTML))
 
     async def fake_reserve():
@@ -211,3 +182,80 @@ async def test_apify_cap_reached_falls_through_to_og(monkeypatch):
     bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
     assert bundle.strategy == "social_og"
     assert "Best 3 cafes in Lisbon" in bundle.text
+
+
+async def test_ytdlp_caption_long_enough_stops_at_tier_one(monkeypatch):
+    """A full caption passes T1 as `reel_caption` (via ytdlp) without touching Apify."""
+    async def meta(url):
+        return {"title": "t", "description": "x" * 200, "duration": 30,
+                "thumbnail": "https://cdn/t.jpg"}
+
+    async def no_apify(url):
+        raise AssertionError("apify must not run when the caption is long enough")
+
+    monkeypatch.setattr(sv, "_meta_ytdlp", meta)
+    monkeypatch.setattr(sv, "_apify_tier", no_apify)
+    bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
+    assert bundle.strategy == "reel_caption"
+    assert bundle.metadata["via"] == "ytdlp" and bundle.metadata["tier"] == "caption"
+    assert bundle.images == ["https://cdn/t.jpg"]
+
+
+async def test_apify_video_becomes_reel_caption_with_comments(monkeypatch):
+    """Apify reel: reel_caption, via apify, comments appended, media_url kept for T2, and the
+    thumbnail is NOT sent as vision input (it would reroute a reel to the vision model)."""
+    monkeypatch.setattr(sv.settings, "APIFY_TOKEN", "tok")
+
+    async def reserve():
+        return True
+
+    async def fetch(url):
+        return {"caption": "short", "title": "t", "video_url": "https://cdn/v.mp4",
+                "thumbnail": "https://cdn/t.jpg", "images": ["https://cdn/t.jpg"],
+                "comments": ["1 cup flour, 2 eggs"], "duration": 20}
+
+    async def no_images(urls, **kw):
+        raise AssertionError("no image fetch for a video post")
+
+    monkeypatch.setattr("services.firebase.reserve_apify_slot", reserve)
+    monkeypatch.setattr("services.apify.fetch", fetch)
+    monkeypatch.setattr(sv, "_fetch_image_parts", no_images)
+    bundle = await sv._apify_tier("https://www.instagram.com/reel/ZZZ/")
+    assert bundle.strategy == "reel_caption"
+    assert bundle.metadata["via"] == "apify" and bundle.metadata["media_url"] == "https://cdn/v.mp4"
+    assert "Top comments" in bundle.text and "1 cup flour" in bundle.text
+    assert bundle.image_parts == []
+
+
+async def test_empty_caption_ytdlp_returns_textless_reel_caption(monkeypatch):
+    """yt-dlp metadata ok but no caption, Apify empty -> reel_caption with text=None (never
+    'Video by <user>') so the gate escalates to transcript/frames."""
+    async def meta(url):
+        return {"title": "Video by someone", "description": "", "duration": 30}
+
+    async def no_apify(url):
+        return None
+
+    monkeypatch.setattr(sv, "_meta_ytdlp", meta)
+    monkeypatch.setattr(sv, "_apify_tier", no_apify)
+    bundle = await sv.acquire("https://www.instagram.com/reel/ZZZ/")
+    assert bundle.strategy == "reel_caption" and bundle.text is None
+    assert bundle.metadata["via"] == "ytdlp"
+
+
+async def test_login_wall_description_and_image_are_ignored(monkeypatch):
+    html = ('<meta property="og:title" content="Instagram">'
+            '<meta property="og:description" content="Log in to Instagram to see photos">'
+            '<meta property="og:image" content="https://static/logo.png">')
+    monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(html))
+    bundle = await sv._caption_fallback("https://www.instagram.com/p/XYZ/")
+    assert bundle.strategy == "private_or_blocked" and not bundle.images
+
+
+async def test_wall_description_with_real_title_is_blocked(monkeypatch):
+    html = ('<meta property="og:title" content="Some Page">'
+            '<meta property="og:description" content="Create an account or log in to Facebook">'
+            '<meta property="og:image" content="https://static/logo.png">')
+    monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _FakeClient(html))
+    bundle = await sv._caption_fallback("https://www.facebook.com/reel/1")
+    assert bundle.strategy == "private_or_blocked"

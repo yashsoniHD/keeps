@@ -27,8 +27,8 @@ class DummyRequest:
 @pytest.fixture
 def patch_endpoint(fake_db, monkeypatch):
     monkeypatch.setattr(notes_mod, "get_db", lambda: fake_db)
-    # A configured SA email keeps _create_job on the Cloud Tasks enqueue path (not dev inline).
-    monkeypatch.setattr(settings, "CLOUD_TASKS_SA_EMAIL", "sa@example.com")
+    # A configured WORKER_SECRET keeps _create_job on the dispatch path (not dev inline).
+    monkeypatch.setattr(settings, "WORKER_SECRET", "s3cret", raising=False)
     enqueued: list[str] = []
     monkeypatch.setattr(ingest_mod, "enqueue_process_job", lambda jid: enqueued.append(jid))
 
@@ -69,7 +69,7 @@ async def test_reextract_job_carries_target_note_id(fake_db, patch_endpoint):
     assert job["url"] == "https://x.com/a"
     assert job["input_type"] == "url"
     assert job["status"] == "pending"
-    assert patch_endpoint == [res["job_id"]]  # enqueued to Cloud Tasks
+    assert patch_endpoint == [res["job_id"]]  # dispatched to the worker
 
 
 async def test_reextract_exempt_from_lifetime_note_cap(fake_db, patch_endpoint, monkeypatch):

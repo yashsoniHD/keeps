@@ -7,10 +7,11 @@ Maps a URL to the acquisition strategy best suited to it. Every strategy module 
 Adding a new source (Pinterest, X, …) = one new module registered here.
 """
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from models.note import ContentBundle
-from services.net_guard import BlockedURLError, assert_public_url_async
+from services.net_guard import BlockedURLError, assert_public_url_async, guarded_async_client
+from services.url_utils import canonical_url
 from services.sources import youtube, social_video, reddit, product, twitter, google_share, generic
 
 log = logging.getLogger("clipnote.sources")
@@ -27,12 +28,56 @@ def resolve(url: str):
     return generic
 
 
+async def _resolve_share(url: str) -> str | None:
+    """Instagram/Facebook `/share/...` links are redirects to the real post. One GET, no
+    redirect following, read `Location` (a login-wall redirect is ignored). None = leave as is."""
+    try:
+        async with guarded_async_client(timeout=8.0, follow_redirects=False) as client:
+            resp = await client.get(url, headers={"User-Agent": "facebookexternalhit/1.1"})
+        loc = resp.headers.get("location")
+        if resp.status_code not in (301, 302, 303, 307, 308) or not loc:
+            return None
+        target = canonical_url(urljoin(url, loc))
+        if "/login" in target or "/accounts/" in target or "/share/" in target:
+            return None
+        await assert_public_url_async(target)
+        return target
+    except BlockedURLError:
+        raise
+    except Exception as e:
+        log.info("share link resolution failed for %s: %s", url, str(e)[:120])
+        return None
+
+
 async def acquire(url: str) -> ContentBundle:
     """Resolve and run the strategy; on failure fall back to the generic scraper
     so a note is still produced from whatever metadata is reachable."""
     # SSRF gate: refuse URLs that resolve to private/internal addresses before any
     # strategy touches them. BlockedURLError is permanent — no fallback, no stub note.
     await assert_public_url_async(url)
+    canonical = None
+    if "/share/" in urlparse(url).path and social_video.matches(url):
+        if canonical := await _resolve_share(url):
+            url = canonical
+    bundle = await _acquire(url)
+    if canonical:
+        bundle.metadata["canonical_url"] = canonical
+    return bundle
+
+
+async def escalate(url: str, bundle: ContentBundle) -> ContentBundle | None:
+    """Next, costlier tier for a `reel_*` bundle (transcript, then frames); None if none left."""
+    if not bundle.strategy.startswith("reel_"):
+        return None
+    return await social_video.escalate(bundle.metadata.get("canonical_url") or url, bundle)
+
+
+def cleanup(bundle: ContentBundle | None) -> None:
+    """Remove any temp files the job's strategies left behind."""
+    social_video.cleanup(bundle)
+
+
+async def _acquire(url: str) -> ContentBundle:
     strategy = resolve(url)
     try:
         return await strategy.acquire(url)

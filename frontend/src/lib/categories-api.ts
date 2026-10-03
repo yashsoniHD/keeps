@@ -9,7 +9,7 @@ const API_URL =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.DEV
     ? "http://localhost:8080"
-    : "https://clip-note-api-674775099277.us-central1.run.app");
+    : "https://clip-note-api.vercel.app");
 
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const attempt = async (forceRefresh: boolean) => {

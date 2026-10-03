@@ -1,6 +1,6 @@
 """Clipnote Agent — dynamic orchestrator + subagents + tools (Phase 1).
 
-The orchestrator (`run_agent`) is a streaming Gemini function-calling loop. Its "tools" are a
+The orchestrator (`run_agent`) is a streaming OpenAI-style tool-calling loop (OpenRouter). Its "tools" are a
 mix of cheap deterministic leaf tools (maps/directions/compute) and reasoning **subagents**
 that wrap the existing services (notes RAG, artifact synthesis, note authoring). Web tools
 (research_web / fetch_url) are declared but gated behind ENABLE_WEB_TOOLS.
@@ -8,12 +8,13 @@ that wrap the existing services (notes RAG, artifact synthesis, note authoring).
 Lives in a service (not the router) and keeps run_agent here — not in gemini.py — so imports
 flow one way: agent_tools → {gemini_service, note_retrieval, net_guard}. The router wires it.
 
-Streaming notes (verified against docs):
-  - use the SDK's native async client (`client.aio.…generate_content_stream`); the sync
-    iterator can't yield incrementally from an async route.
-  - function calling is incompatible with response_mime_type=json → final output is markdown;
-    citations come from the note ids subagents actually returned (collected in ctx).
-  - usage_metadata is on the final chunk only → meter once per turn from the last chunk.
+Streaming notes:
+  - use the async client (`gemini_service.aclient`); the sync iterator can't yield
+    incrementally from an async route.
+  - final output is markdown (no JSON mode with tools); citations come from the note ids
+    subagents actually returned (collected in ctx).
+  - `usage` arrives on the final chunk only (with empty `choices`) → meter once per round.
+  - parallel tool calls are model-dependent (not guaranteed like Gemini's batched calls).
 """
 import ast
 import asyncio
@@ -23,8 +24,6 @@ import operator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus
-
-from google.genai import types
 
 from config import settings
 from models.ask import ArtifactNote, AskPlan
@@ -82,22 +81,18 @@ Rules:
 # ──────────────────────────── tool declarations ────────────────────────────
 
 def _decl(name, description, properties, required=None):
-    return types.FunctionDeclaration(
-        name=name, description=description,
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={k: types.Schema(**v) for k, v in properties.items()},
-            required=required or [],
-        ),
-    )
+    return {"type": "function", "function": {
+        "name": name, "description": description,
+        "parameters": {"type": "object", "properties": properties, "required": required or []},
+    }}
 
 
-_STR = {"type": types.Type.STRING}
-_BOOL = {"type": types.Type.BOOLEAN}
-_STRLIST = {"type": types.Type.ARRAY, "items": types.Schema(type=types.Type.STRING)}
+_STR = {"type": "string"}
+_BOOL = {"type": "boolean"}
+_STRLIST = {"type": "array", "items": {"type": "string"}}
 
 
-def _tool_declarations() -> list[types.FunctionDeclaration]:
+def _tool_declarations() -> list[dict]:
     decls = [
         _decl("search_notes", "Search the user's saved notes. Returns matching notes with ids.",
               {"query": {**_STR, "description": "what to look for in their notes"},
@@ -347,7 +342,7 @@ async def dispatch(name: str, args: dict, ctx: AgentContext) -> dict:
 
 # ──────────────────────────── orchestrator ────────────────────────────
 
-def _initial_contents(ctx: AgentContext) -> list[types.Content]:
+def _initial_contents(ctx: AgentContext) -> list[dict]:
     parts = []
     # Tell the agent the user's local date so it can map "today"/"this week" to a period keyword.
     local_now = ctx.now_utc + timedelta(minutes=ctx.tz_offset_minutes)
@@ -371,18 +366,8 @@ def _initial_contents(ctx: AgentContext) -> list[types.Content]:
         parts.append("Conversation so far:\n" + "\n".join(
             f"{t['role']}: {t['text']}" for t in ctx.history))
     parts.append(f"User message: {ctx.question}")
-    return [types.Content(role="user", parts=[types.Part(text="\n\n".join(parts))])]
-
-
-def _chunk_parts(chunk):
-    """Yield (part, is_visible_text) for each part across a streamed chunk's candidates.
-    Reading parts directly (vs `chunk.text`) lets us skip thinking parts and, crucially,
-    keep the ORIGINAL functionCall Part objects — which carry the `thought_signature`
-    Gemini 3.x requires when the tool-call turn is sent back."""
-    for cand in (getattr(chunk, "candidates", None) or []):
-        content = getattr(cand, "content", None)
-        for part in (getattr(content, "parts", None) or []):
-            yield part
+    return [{"role": "system", "content": ASK_ORCHESTRATOR_SYSTEM},
+            {"role": "user", "content": "\n\n".join(parts)}]
 
 
 # Last-ditch nudge for a run that ended without ever emitting a token — most often a round
@@ -395,88 +380,113 @@ _RETRY_NUDGE = (
 NO_ANSWER_MESSAGE = "I couldn't put together an answer just now. Please try again."
 
 
-async def _retry_final_answer(ctx: AgentContext, contents: list) -> str:
-    """One tool-free generate over the tool results already gathered in `contents`.
+_NO_REASONING = {"reasoning": {"enabled": False}}
+
+
+async def _retry_final_answer(ctx: AgentContext, messages: list) -> str:
+    """One tool-free completion over the tool results already gathered in `messages`.
     Returns the answer text (may be empty on failure). Metered like any other model call."""
-    config = types.GenerateContentConfig(
-        system_instruction=ASK_ORCHESTRATOR_SYSTEM, temperature=0.3,
-        thinking_config=types.ThinkingConfig(thinking_budget=0))
-    nudge = types.Content(role="user", parts=[types.Part(text=_RETRY_NUDGE)])
-    resp = await gemini_service.client.aio.models.generate_content(
-        model=settings.GEMINI_MODEL, contents=contents + [nudge], config=config)
-    record_usage(settings.GEMINI_MODEL, resp)
-    return (getattr(resp, "text", None) or "").strip()
+    kwargs = {}
+    if any(m.get("role") == "tool" for m in messages):
+        # Some providers reject tool messages in history unless `tools` is present.
+        kwargs = {"tools": _tool_declarations(), "tool_choice": "none"}
+    resp = await gemini_service.aclient.chat.completions.create(
+        model=settings.TEXT_MODEL, messages=messages + [{"role": "user", "content": _RETRY_NUDGE}],
+        temperature=0.3, extra_body=_NO_REASONING, **kwargs)
+    record_usage(settings.TEXT_MODEL, resp)
+    text = resp.choices[0].message.content if resp.choices else None
+    return (text or "").strip()
+
+
+def _tool_label(name: str) -> str:
+    return "Searching your notes…" if name == "search_notes" else (
+        "Building it…" if name in ("build_artifact", "author_note") else (
+            "Checking the web…" if name in _WEB_TOOLS else f"{name}…"))
+
+
+def _parse_args(raw: str) -> dict:
+    try:
+        args = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return args if isinstance(args, dict) else {}
 
 
 async def run_agent(ctx: AgentContext):
     """Stream the agent. Yields event dicts: {type: delta|tool|agent|error, ...}.
     Citations/artifact are read off `ctx` by the caller after the generator finishes."""
-    contents = _initial_contents(ctx)
+    messages = _initial_contents(ctx)
     use_tools = settings.ASK_ENABLE_TOOLS
-    tool_config = types.GenerateContentConfig(
-        system_instruction=ASK_ORCHESTRATOR_SYSTEM,
-        tools=[types.Tool(function_declarations=_tool_declarations())] if use_tools else None,
-        temperature=0.3,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
-    )
+    tools = _tool_declarations() if use_tools else None
 
     any_delta = False  # did the whole run ever emit visible text?
 
     for round_i in range(ctx.max_rounds):
-        # Force a final, tool-free answer on the last allowed round.
+        # Force a final, tool-free answer on the last allowed round. `tools` stays present
+        # (tool_choice="none") because some providers reject tool messages in history otherwise.
         last_round = round_i == ctx.max_rounds - 1
-        config = tool_config if (use_tools and not last_round) else types.GenerateContentConfig(
-            system_instruction=ASK_ORCHESTRATOR_SYSTEM, temperature=0.3,
-            thinking_config=types.ThinkingConfig(thinking_budget=0))
+        kwargs: dict = {}
+        if tools:
+            kwargs["tools"] = tools
+            if last_round:
+                kwargs["tool_choice"] = "none"
 
-        call_parts: list = []  # ORIGINAL functionCall parts (preserve thought_signature)
-        last_chunk = None
+        calls: dict[int, dict] = {}  # stream index -> {id, name, arguments}
+        last_usage_chunk = None
         try:
-            stream = await gemini_service.client.aio.models.generate_content_stream(
-                model=settings.GEMINI_MODEL, contents=contents, config=config)
+            stream = await gemini_service.aclient.chat.completions.create(
+                model=settings.TEXT_MODEL, messages=messages, temperature=0.3, stream=True,
+                stream_options={"include_usage": True}, extra_body=_NO_REASONING, **kwargs)
             async for chunk in stream:
-                last_chunk = chunk
-                for part in _chunk_parts(chunk):
-                    if getattr(part, "function_call", None) is not None:
-                        call_parts.append(part)
-                    elif getattr(part, "text", None) and not getattr(part, "thought", False):
-                        any_delta = True
-                        yield {"type": "delta", "text": part.text}
+                if getattr(chunk, "usage", None) is not None:
+                    last_usage_chunk = chunk
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if getattr(delta, "content", None):
+                    any_delta = True
+                    yield {"type": "delta", "text": delta.content}
+                for tc in (getattr(delta, "tool_calls", None) or []):
+                    slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                    if tc.id:
+                        slot["id"] = tc.id
+                    fn = getattr(tc, "function", None)
+                    if fn is not None:
+                        if fn.name:
+                            slot["name"] = fn.name
+                        if fn.arguments:
+                            slot["arguments"] += fn.arguments
         except Exception as e:
             log.error("agent stream failed: %s: %s", type(e).__name__, e,
                       extra={"user_id": ctx.user_id})
+            if last_usage_chunk is not None:  # bill whatever streamed before the failure
+                record_usage(settings.TEXT_MODEL, last_usage_chunk)
             yield {"type": "error", "message": "The assistant had trouble answering."}
             return
-        if last_chunk is not None:
-            record_usage(settings.GEMINI_MODEL, last_chunk)
+        if last_usage_chunk is not None:
+            record_usage(settings.TEXT_MODEL, last_usage_chunk)
 
-        if not call_parts:
+        tool_calls = [calls[i] for i in sorted(calls) if calls[i]["name"]]
+        if not tool_calls:
             break  # the model answered (or produced nothing) — finalize below
 
-        # Re-attach the model's ACTUAL function-call parts (with thought_signature intact —
-        # rebuilding from just the function_call would drop it and Gemini 3.x rejects the turn),
-        # then run the tools and append their responses.
-        contents.append(types.Content(role="model", parts=call_parts))
-        response_parts = []
+        for n, c in enumerate(tool_calls):
+            c["id"] = c["id"] or f"call_{round_i}_{n}"
+        messages.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": c["id"], "type": "function",
+             "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
+            for c in tool_calls]})
         # Emit status events first so the UI shows all tools starting immediately.
-        for part in call_parts:
-            fc = part.function_call
-            label = "Searching your notes…" if fc.name == "search_notes" else (
-                "Building it…" if fc.name in ("build_artifact", "author_note") else (
-                    "Checking the web…" if fc.name in _WEB_TOOLS else f"{fc.name}…"))
-            yield {"type": ("agent" if fc.name in _SUBAGENTS else "tool"),
-                   "name": fc.name, "status": label}
-        # Execute all tool calls concurrently — Gemini batches them in one turn precisely
-        # because they're safe to parallelize (no data dependency between them).
+        for c in tool_calls:
+            yield {"type": ("agent" if c["name"] in _SUBAGENTS else "tool"),
+                   "name": c["name"], "status": _tool_label(c["name"])}
+        # Execute all tool calls concurrently — calls batched in one turn have no data
+        # dependency between them.
         results = await asyncio.gather(*(
-            dispatch(part.function_call.name,
-                     dict(part.function_call.args) if part.function_call.args else {}, ctx)
-            for part in call_parts
-        ))
-        for part, result in zip(call_parts, results):
-            response_parts.append(
-                types.Part.from_function_response(name=part.function_call.name, response=result))
-        contents.append(types.Content(role="user", parts=response_parts))
+            dispatch(c["name"], _parse_args(c["arguments"]), ctx) for c in tool_calls))
+        for c, result in zip(tool_calls, results):
+            messages.append({"role": "tool", "tool_call_id": c["id"],
+                             "content": json.dumps(result, ensure_ascii=False, default=str)})
 
     # The run ended (model stopped calling tools, or rounds exhausted) without ever streaming
     # a token and without building an artifact — the silent-empty-answer bug. Make ONE tool-free
@@ -485,7 +495,7 @@ async def run_agent(ctx: AgentContext):
     if not any_delta and ctx.artifact is None:
         text = ""
         try:
-            text = await _retry_final_answer(ctx, contents)
+            text = await _retry_final_answer(ctx, messages)
         except Exception as e:
             log.error("agent retry answer failed: %s: %s", type(e).__name__, e,
                       extra={"user_id": ctx.user_id})

@@ -4,10 +4,9 @@ import { RefreshCw } from "lucide-react";
 // How far (px, after resistance) the user must pull before release triggers a reload.
 const THRESHOLD = 70;
 
-// Input modes a capture composer can open in (focused link field, text, file picker, voice
-// recorder). Defined here as the shared type AddNoteSheet consumes; the live capture flow that
+// Input modes a capture composer can open in (focused link field, text). Defined here as the shared type AddNoteSheet consumes; the live capture flow that
 // uses it lives in CaptureProvider (driven by the bottom-nav + button), not this shell.
-export type CaptureMode = "link" | "text" | "file" | "voice";
+export type CaptureMode = "link" | "text";
 
 // Custom pull-to-refresh for touch devices: the installed PWA has no browser chrome —
 // no reload button, and iOS standalone mode has no native pull-to-refresh either. A

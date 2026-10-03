@@ -60,25 +60,11 @@ async def test_verified_admin_email_passes(monkeypatch):
 
 # ---------------- cost math ----------------
 
-def test_cost_usd_uses_per_tier_prices(monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_PRICE_IN", 1.0)
-    monkeypatch.setattr(settings, "GEMINI_PRICE_OUT", 2.0)
-    monkeypatch.setattr(settings, "GEMINI_LITE_PRICE_IN", 0.1)
-    monkeypatch.setattr(settings, "GEMINI_LITE_PRICE_OUT", 0.2)
-    # 1M main-in @ $1 + 1M main-out @ $2 + 1M lite-in @ $0.1 + 1M lite-out @ $0.2
-    cost = admin_mod._cost_usd(1_000_000, 1_000_000, 1_000_000, 1_000_000)
-    assert cost == pytest.approx(1.0 + 2.0 + 0.1 + 0.2)
-
-
-def test_cost_usd_prices_audio_input_at_audio_rate(monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_PRICE_IN", 1.0)
-    monkeypatch.setattr(settings, "GEMINI_PRICE_IN_AUDIO", 3.0)
-    monkeypatch.setattr(settings, "GEMINI_PRICE_OUT", 0.0)
-    # 1M main-in of which 400k is audio: 600k text @ $1 + 400k audio @ $3, no double-count.
-    cost = admin_mod._cost_usd(1_000_000, 0, 0, 0, ti_audio_main=400_000)
-    assert cost == pytest.approx(0.6 * 1.0 + 0.4 * 3.0)
-    # ti_audio_main defaults to 0 → all main-in priced at the text rate (back-compat).
-    assert admin_mod._cost_usd(1_000_000, 0, 0, 0) == pytest.approx(1.0)
+def test_cost_usd_uses_frozen_legacy_prices(monkeypatch):
+    # New DeepSeek PRICE_* must not affect historic Gemini tokens.
+    monkeypatch.setattr(settings, "PRICE_MAIN_IN", 99.0)
+    cost = admin_mod._cost_usd(1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000)
+    assert cost == pytest.approx(1.50 + 9.00 + 0.25 + 1.50 + 0.025)
 
 
 # ---------------- stats aggregation ----------------
@@ -167,10 +153,10 @@ class FakeDb:
 
 
 async def test_admin_stats_rolls_up_cost_and_activity(monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_PRICE_IN", 1.0)
-    monkeypatch.setattr(settings, "GEMINI_PRICE_OUT", 1.0)
-    monkeypatch.setattr(settings, "GEMINI_LITE_PRICE_IN", 1.0)
-    monkeypatch.setattr(settings, "GEMINI_LITE_PRICE_OUT", 1.0)
+    monkeypatch.setattr(settings, "PRICE_MAIN_IN", 1.0)
+    monkeypatch.setattr(settings, "PRICE_MAIN_OUT", 1.0)
+    monkeypatch.setattr(settings, "PRICE_LITE_IN", 1.0)
+    monkeypatch.setattr(settings, "PRICE_LITE_OUT", 1.0)
     monkeypatch.setattr(settings, "USD_TO_INR", 80.0)
 
     async def fake_list_auth_users():
@@ -222,10 +208,10 @@ async def test_admin_stats_rolls_up_cost_and_activity(monkeypatch):
     # Funding metrics: both users have notes → 100% activation; cost spread over 2 active users.
     assert out["totals"]["activated"] == 2
     assert out["totals"]["activation_rate"] == pytest.approx(1.0)
-    assert out["totals"]["cost_per_active_user_usd"] == pytest.approx(0.5)
-    # u1: 1M tokens, every tier $1/1M → $1.00 → ₹80
-    assert out["totals"]["cost_usd"] == pytest.approx(1.0)
-    assert out["totals"]["cost_inr"] == pytest.approx(80.0)
+    assert out["totals"]["cost_per_active_user_usd"] == pytest.approx(1.5313, abs=0.001)
+    # u1: 250k each tier at legacy rates = 0.25*(1.5+9+0.25+1.5) = $3.0625
+    assert out["totals"]["cost_usd"] == pytest.approx(3.06, abs=0.01)
+    assert out["totals"]["cost_inr"] == pytest.approx(3.06 * 80.0, abs=1.0)
 
     # sorted by cost desc → u1 first
     assert out["users"][0]["uid"] == "u1"
@@ -235,3 +221,37 @@ async def test_admin_stats_rolls_up_cost_and_activity(monkeypatch):
     assert out["users"][1]["uid"] == "u2"
     assert out["users"][1]["active_7d"] is False
     assert out["users"][1]["active_30d"] is True
+
+
+async def test_admin_stats_legacy_plus_billed_cost(monkeypatch):
+    """Lifetime = legacy-rate tokens + billed lifetime_cost_usd; daily trend uses the cutover
+    date: before → legacy formula, on/after → billed tok_cost_usd."""
+    monkeypatch.setattr(settings, "PRICE_MAIN_IN", 99.0)  # must be ignored
+    monkeypatch.setattr(admin_mod, "COST_CUTOVER_DATE", "2000-01-01")  # today is post-cutover
+
+    async def fake_list_auth_users():
+        return [{"uid": "u1", "email": "a@x.com", "created_at": 0, "last_sign_in": None},
+                {"uid": "u2", "email": "b@x.com", "created_at": 0, "last_sign_in": None}]
+
+    monkeypatch.setattr(admin_mod, "list_auth_users", fake_list_auth_users)
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    users = [
+        {"__id__": "u1", "lifetime_tokens_in_main": 1_000_000, "lifetime_cost_usd": 0.25},
+        {"__id__": "u2", "lifetime_tokens_in_main": 1_000_000},
+    ]
+    system = [{"__id__": f"usage-{today}", "date": today, "tok_tokens_in_main": 1_000_000,
+               "tok_cost_usd": 0.1}]
+    fake_db = FakeDb({"users": users, "notes": [], "jobs": [], "usage": [], "system": system},
+                     sys_doc=None)
+    monkeypatch.setattr(admin_mod, "get_db", lambda: fake_db)
+
+    out = await admin_mod.admin_stats(_="admin-uid")
+    by_uid = {u["uid"]: u for u in out["users"]}
+    assert by_uid["u1"]["cost_usd"] == pytest.approx(1.75)
+    assert by_uid["u2"]["cost_usd"] == pytest.approx(1.5)
+    assert {d["date"]: d["cost_usd"] for d in out["daily_trend"]}[today] == pytest.approx(0.1)
+
+    monkeypatch.setattr(admin_mod, "COST_CUTOVER_DATE", "2999-01-01")  # today is pre-cutover
+    out = await admin_mod.admin_stats(_="admin-uid")
+    assert {d["date"]: d["cost_usd"] for d in out["daily_trend"]}[today] == pytest.approx(1.5)

@@ -18,7 +18,7 @@ export function reportClientError(kind: string, message: unknown, stack?: unknow
     import.meta.env.VITE_API_URL ??
     (import.meta.env.DEV
       ? "http://localhost:8080"
-      : "https://clip-note-api-674775099277.us-central1.run.app");
+      : "https://clip-note-api.vercel.app");
   const endpoint = `${base}/api/client-errors`;
   try {
     if (!navigator.sendBeacon?.(endpoint, body)) {

@@ -1,13 +1,12 @@
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
+from services.url_utils import canonical_url
+
 
 class IngestRequest(BaseModel):
-    # The capture's origin shape. "url" is the historic default; the rest let the user
-    # save things that aren't a clean link (a typed thought, a screenshot, a PDF, a voice
-    # memo). Binary inputs (image/pdf/voice) arrive pre-uploaded to GCS via /ingest/upload,
-    # so the request only carries a reference (media_gcs_uri), never the bytes.
-    input_type: Literal["url", "text", "image", "pdf", "voice", "video"] = "url"
+    # The capture's origin shape. "url" is the default; "text" is a typed note.
+    input_type: Literal["url", "text"] = "url"
     # Size ceilings reject junk at the model boundary instead of carrying megabytes of body
     # into Firestore job docs (the worker additionally truncates text/content to 30k chars).
     url: str = Field(default="", max_length=4096)  # required only when input_type == "url"
@@ -17,11 +16,8 @@ class IngestRequest(BaseModel):
     # AI-structured behaviour for every other path.
     process_ai: bool = True
     title: str | None = Field(default=None, max_length=300)  # user-supplied title (non-url inputs)
-    media_gcs_uri: str | None = None   # gs:// URI of the uploaded file (image/pdf/voice/video)
-    media_mime: str | None = None      # MIME of the uploaded file (Vertex needs it on FileData)
-    media_cover_url: str | None = None # public https cover (images double as their own cover)
     content: str | None = Field(default=None, max_length=200_000)  # device-extracted page text (PWA/shortcut)
-    source: str = "web"                # "web" | "shortcut" | "pwa" | "ai_chat" | "upload"
+    source: str = "web"                # "web" | "shortcut" | "pwa" | "ai_chat"
     note_hint: str | None = Field(default=None, max_length=500)  # user instructions for Gemini
 
     @field_validator("url")
@@ -35,30 +31,23 @@ class IngestRequest(BaseModel):
         if any(c.isspace() for c in v):
             for tok in v.split():
                 if tok.startswith(("http://", "https://")):
-                    return tok
-        return v
+                    return canonical_url(tok)
+        return canonical_url(v)
 
 
 class ContentBundle(BaseModel):
     """Normalized output of a source strategy — the single input shape the AI pipeline consumes.
 
     kind:
-      video_uri  — Gemini analyzes the video directly (YouTube URL or gs:// URI)
+      video_uri  — the model analyzes the video directly (YouTube URL only)
       text       — scraped/extracted text (articles, reddit threads, captions, typed notes)
       structured — JSON-LD found on the page; passed to Gemini verbatim as ground truth
-      image      — a user-saved image/screenshot, ingested by gs:// URI (media_uri)
-      document   — a user-saved PDF (or audio), ingested by gs:// URI (media_uri)
     A bundle may carry several of these at once (e.g. text + structured); `kind` records the
     primary acquisition path for reporting.
     """
-    kind: Literal["video_uri", "text", "structured", "metadata_only", "image", "document"]
+    kind: Literal["video_uri", "text", "structured", "metadata_only"]
     text: str | None = None
     video_uri: str | None = None
-    # Any non-video media (image / PDF / audio) Gemini ingests by gs:// URI, mirroring the
-    # video_uri path. Vertex requires an explicit mimeType on FileData (image/jpeg,
-    # application/pdf, audio/mp4, …) — set media_mime accordingly.
-    media_uri: str | None = None
-    media_mime: str | None = None
     structured: dict[str, Any] | None = None
     images: list[str] = Field(default_factory=list)
     # Image bytes to hand Gemini as vision input — e.g. every slide of an Instagram
@@ -67,7 +56,9 @@ class ContentBundle(BaseModel):
     # cover). Empty for text/video sources.
     image_parts: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    strategy: str = ""           # e.g. "youtube_direct", "ytdlp_gcs", "reddit_json"
+    strategy: str = ""           # e.g. "youtube_direct", "reel_caption", "reddit_json"
+    # metadata keys beyond title/author/platform: via (ytdlp|apify|og|oembed), tier
+    # (caption|transcript|frames), media_url, media_path, workdir, canonical_url, comments.
 
     @property
     def preview(self) -> str:
@@ -82,7 +73,7 @@ class NoteExtraction(BaseModel):
     content_type: str
     title: str
     ai_summary: str
-    cover_image_prompt: str
+    cover_image_prompt: str = ""
     data: dict[str, Any]  # structured fields only — rendered by React templates, never HTML
 
 

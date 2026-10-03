@@ -1,25 +1,35 @@
-"""YouTube (shorts + long-form): direct Gemini video analysis via the URL.
+"""YouTube: transcript-first, with the model reading the URL itself when that's cheaper/only way.
 
-No download, no scraping — Gemini natively ingests public YouTube URLs and sees both
-visuals and audio (a recipe shown on screen but never spoken still gets extracted).
-A metadata-only yt-dlp probe (no download) supplies title/duration/thumbnail and the
-transcript used as fallback for videos over the duration cap.
+Google fetches the video for YOUTUBE_MODEL, not our IP, so direct analysis is the reliable path.
+One 8 s watch-page fetch (`ytInitialPlayerResponse`) supplies duration, title, description and
+caption-track URLs; oEmbed is the fallback when the page is blocked. Routing:
+  <= 180 s (Shorts)                 -> youtube_direct (YOUTUBE_MODEL reads the URL, ~$0.002)
+  longer + transcript >= 200 chars  -> youtube_transcript (text bundle, TEXT_MODEL)
+  longer, no transcript, <= MAX     -> youtube_direct
+  longer than MAX_VIDEO_SECONDS     -> Apify subtitles, else description-only text
 """
-import asyncio
+import html
 import json as _json
+import logging
 import re
+from urllib.parse import urlparse
 
 import httpx
-import yt_dlp
 
 from config import settings
 from models.note import ContentBundle
-from services.net_guard import assert_public_url
 
-import logging
 log = logging.getLogger("clipnote.sources")
 
 _DOMAINS = ("youtube.com", "youtu.be", "music.youtube.com")
+SHORT_SECONDS = 180
+MIN_TRANSCRIPT_CHARS = 200
+PAGE_TIMEOUT_SECONDS = 8.0
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+       "Chrome/124.0 Safari/537.36")
+_VIDEO_ID_RE = re.compile(
+    r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|shorts/|embed/|live/))([\w-]{11})"
+)
 
 
 def matches(url: str) -> bool:
@@ -27,70 +37,44 @@ def matches(url: str) -> bool:
     return any(d in u for d in _DOMAINS)
 
 
-def _probe(url: str) -> dict:
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["en.*"],
-        # yt-dlp has no default socket timeout — an unresponsive host would otherwise pin
-        # the worker thread until the Cloud Run deadline (a 5xx → paid Cloud Tasks retry).
-        "socket_timeout": 30,
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False) or {}
-
-
-# Wall-clock budget for the metadata probe. On expiry the probe falls to the oEmbed path —
-# the probe is enrichment, not load-bearing (Gemini ingests the URL directly either way).
-PROBE_TIMEOUT_SECONDS = 60
-
-
-def _extract_transcript(info: dict) -> str | None:
-    """Pulls manual or auto captions (English-ish) from yt-dlp info as plain text."""
-    tracks = (info.get("subtitles") or {}) or (info.get("automatic_captions") or {})
-    if not tracks:
-        return None
-    lang = next((l for l in tracks if l.startswith("en")), next(iter(tracks), None))
-    if not lang:
-        return None
-    fmts = tracks[lang]
-    pick = next((f for f in fmts if f.get("ext") in ("json3", "vtt", "srv1")), fmts[0] if fmts else None)
-    if not pick or not pick.get("url"):
+def _parse_player_response(page: str) -> dict | None:
+    """Pull `ytInitialPlayerResponse` out of watch-page HTML (raw_decode: no regex over JSON)."""
+    marker = page.find("ytInitialPlayerResponse")
+    start = page.find("{", marker) if marker != -1 else -1
+    if start == -1:
         return None
     try:
-        # Subtitle URL comes from yt-dlp's probe, not directly from the user — but it
-        # still derives from user input, so it gets the same SSRF check.
-        assert_public_url(pick["url"])
-        raw = httpx.get(pick["url"], timeout=15.0).text
-    except Exception:
+        pr, _ = _json.JSONDecoder().raw_decode(page[start:])
+    except ValueError:
         return None
-    if pick.get("ext") == "json3":
-        try:
-            events = _json.loads(raw).get("events", [])
-            words = [seg.get("utf8", "") for ev in events for seg in (ev.get("segs") or [])]
-            text = "".join(words)
-        except Exception:
-            return None
-    else:  # vtt/srt-ish: drop timestamp/index lines
-        lines = [ln.strip() for ln in raw.splitlines()
-                 if ln.strip() and "-->" not in ln and not ln.strip().isdigit()
-                 and not ln.startswith(("WEBVTT", "Kind:", "Language:"))]
-        text = " ".join(lines)
-    text = text.strip()
-    return text[:28000] if text else None
+    vd = pr.get("videoDetails") or {}
+    if not vd:
+        return None
+    thumbs = (vd.get("thumbnail") or {}).get("thumbnails") or []
+    tracks = ((pr.get("captions") or {}).get("playerCaptionsTracklistRenderer") or {}).get(
+        "captionTracks") or []
+    return {
+        "duration": int(vd.get("lengthSeconds") or 0),
+        "title": vd.get("title"),
+        "author": vd.get("author"),
+        "thumbnail": thumbs[-1].get("url") if thumbs else None,
+        "description": (vd.get("shortDescription") or "")[:4000],
+        "tracks": tracks,
+    }
 
 
-_VIDEO_ID_RE = re.compile(
-    r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|shorts/|embed/|live/))([\w-]{11})"
-)
+async def _watch_page(vid: str) -> dict | None:
+    # Fixed host (youtube.com) — no SSRF surface.
+    async with httpx.AsyncClient(timeout=PAGE_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        resp = await client.get("https://www.youtube.com/watch", params={"v": vid},
+                                headers={"User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9",
+                                         "Cookie": "CONSENT=YES+1"})
+    resp.raise_for_status()
+    return _parse_player_response(resp.text)
 
 
 async def _oembed(url: str) -> dict:
-    """Metadata fallback when the yt-dlp probe is bot-blocked (datacenter IPs):
-    YouTube's public oEmbed endpoint needs no auth and is not bot-gated."""
+    """Metadata fallback when the watch page is blocked: public oEmbed, no auth, not bot-gated."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get("https://www.youtube.com/oembed",
                                 params={"url": url, "format": "json"})
@@ -98,46 +82,89 @@ async def _oembed(url: str) -> dict:
     return resp.json()
 
 
-async def acquire(url: str) -> ContentBundle:
-    # The probe supplies duration (for the over-cap transcript fallback) and rich
-    # metadata — but it is NOT load-bearing: Gemini ingests the URL directly. YouTube
-    # bot-blocks yt-dlp on datacenter IPs, so a failed probe degrades to oEmbed
-    # metadata + the direct path (duration unknown → cost is bounded by user caps).
+def _captions_text(raw: str) -> str:
+    try:  # json3
+        events = _json.loads(raw).get("events", [])
+        return "".join(seg.get("utf8", "") for ev in events for seg in (ev.get("segs") or []))
+    except ValueError:  # XML (<text ...>line</text>)
+        return " ".join(html.unescape(m) for m in re.findall(r"<text[^>]*>(.*?)</text>", raw, re.S))
+
+
+async def _fetch_transcript(tracks: list[dict]) -> str | None:
+    """English-ish caption track -> plain text. Best-effort: timedtext may need signed params
+    that datacenter IPs don't get; any failure just means 'no transcript'."""
+    track = next((t for t in tracks if str(t.get("languageCode", "")).startswith("en")),
+                 tracks[0] if tracks else None)
+    base = (track or {}).get("baseUrl") or ""
+    host = urlparse(base).hostname or ""
+    if not (host == "youtube.com" or host.endswith(".youtube.com")):
+        return None
     try:
-        info = await asyncio.wait_for(asyncio.to_thread(_probe, url),
-                                      timeout=PROBE_TIMEOUT_SECONDS)
+        async with httpx.AsyncClient(timeout=PAGE_TIMEOUT_SECONDS) as client:
+            resp = await client.get(base + ("" if "fmt=" in base else "&fmt=json3"))
+        resp.raise_for_status()
+        text = " ".join(_captions_text(resp.text).split())
     except Exception as e:
-        log.info("probe blocked/failed (%s); falling back to oEmbed", str(e)[:120])
-        info = {}
+        log.info("youtube transcript fetch failed: %s", str(e)[:120])
+        return None
+    return text[:28000] or None
+
+
+async def _apify_subtitles(url: str) -> str | None:
+    """>MAX_VIDEO_SECONDS with no free transcript: one capped Apify call for subtitles."""
+    from services import apify
+    from services.firebase import reserve_apify_slot
+
+    if not settings.APIFY_TOKEN or apify.actor_kind(url) is None or not await reserve_apify_slot():
+        return None
+    result = await apify.fetch(url)
+    return (result or {}).get("subtitles") or None
+
+
+async def acquire(url: str) -> ContentBundle:
+    vid = m.group(1) if (m := _VIDEO_ID_RE.search(url)) else None
+    page = None
+    if vid:
+        try:
+            page = await _watch_page(vid)
+        except Exception as e:
+            log.info("watch page failed (%s); falling back to oEmbed", str(e)[:120])
+    if page is None:
+        page = {"duration": 0, "tracks": [], "description": "",
+                "thumbnail": f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg" if vid else None}
         try:
             oe = await _oembed(url)
-            info = {"title": oe.get("title"), "uploader": oe.get("author_name")}
-        except Exception as e2:
-            log.warning("oEmbed also failed: %s", e2)
-        vid = m.group(1) if (m := _VIDEO_ID_RE.search(url)) else None
-        if vid:
-            info.setdefault("thumbnail", f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg")
+            page.update(title=oe.get("title"), author=oe.get("author_name"))
+        except Exception as e:
+            log.warning("oEmbed also failed: %s", e)
 
-    duration = int(info.get("duration") or 0)
+    duration = page["duration"]
     metadata = {
-        "title": info.get("title") or "Untitled",
-        "author": info.get("uploader") or info.get("creator"),
+        "title": page.get("title") or "Untitled",
+        "author": page.get("author"),
         "platform": "youtube",
         "duration": duration,
-        "description": (info.get("description") or "")[:4000],
+        "description": page.get("description") or "",
     }
-    images = [t for t in [info.get("thumbnail")] if t]
+    images = [page["thumbnail"]] if page.get("thumbnail") else []
 
-    if duration and duration > settings.MAX_VIDEO_SECONDS:
-        # Over the cap: transcript path (cheap) instead of full video tokens.
-        transcript = await asyncio.to_thread(_extract_transcript, info)
-        text = transcript or metadata["description"] or metadata["title"]
-        return ContentBundle(
-            kind="text", text=text, images=images, metadata=metadata,
-            strategy="youtube_transcript",
-        )
+    def text_bundle(text: str, via: str) -> ContentBundle:
+        return ContentBundle(kind="text", text=text, images=images,
+                             metadata={**metadata, "via": via}, strategy="youtube_transcript")
 
-    return ContentBundle(
-        kind="video_uri", video_uri=url, images=images, metadata=metadata,
-        strategy="youtube_direct",
-    )
+    def direct() -> ContentBundle:
+        return ContentBundle(kind="video_uri", video_uri=url, images=images, metadata=metadata,
+                             strategy="youtube_direct")
+
+    if not duration and "/shorts/" not in url:  # page blocked, length unknown: don't risk a
+        return text_bundle(metadata["description"] or metadata["title"], "description")  # long video
+    if duration <= SHORT_SECONDS:  # Shorts, or an unknown-length /shorts/ link
+        return direct()
+    transcript = await _fetch_transcript(page["tracks"]) if page["tracks"] else None
+    if transcript and len(transcript) >= MIN_TRANSCRIPT_CHARS:
+        return text_bundle(transcript, "captions")
+    if duration <= settings.MAX_VIDEO_SECONDS:
+        return direct()
+    if subs := await _apify_subtitles(url):
+        return text_bundle(subs, "apify")
+    return text_bundle(metadata["description"] or metadata["title"], "description")

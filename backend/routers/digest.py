@@ -219,7 +219,7 @@ async def my_digest(body: MyDigestRequest | None = None,
         "sections": [s.model_dump() for s in built.sections],
         "source_note_ids": fed_ids,
         "generated_at": now,
-        "model": settings.GEMINI_MODEL,
+        "model": settings.TEXT_MODEL,
         "prompt_version": settings.PERSONAL_DIGEST_PROMPT_VERSION,
         "fallback": fallback,
     }
