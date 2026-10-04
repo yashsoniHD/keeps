@@ -129,7 +129,7 @@ infra/       firestore.rules, firestore.indexes.json, vercel.md, setup.sh, build
 cd frontend && npm install && npm run dev            # frontend
 cd backend && pip install -r requirements.txt && uvicorn main:app --reload --port 8080   # backend (WORKER_SECRET unset = inline worker)
 cd backend && .venv/bin/python -m pytest -q          # tests
-cd backend && vercel deploy --prod                   # backend (env vars: infra/vercel.md)
+vercel deploy --prod --yes                           # backend, from the REPO ROOT (root dir setting = backend; env vars: infra/vercel.md)
 cd frontend && npm run build && firebase deploy --only hosting
 firebase deploy --only firestore                     # rules + indexes
 cd backend && python -m scripts.reindex_embeddings --apply   # after changing EMBED_MODEL/EMBED_TEXT_VERSION

@@ -40,3 +40,5 @@ frontend/src/rowpreview-main.tsx
 
 # Non-secret production API URL for Vite builds (keeps hosting builds pointed at Vercel)
 !frontend/.env.production
+.vercel
+.env*

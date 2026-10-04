@@ -6,10 +6,11 @@ Firestore and Hosting stay on Firebase.
 ## Deploy
 
 ```bash
-cd backend
-vercel link          # team yashsoni102-progs-projects, project root = backend
+# Run from the REPO ROOT: the Vercel project's Root Directory setting is `backend`, so
+# deploying from inside backend/ fails with "Root Directory \"backend\" does not exist".
+vercel link --yes --scope yashsoni102-progs-projects --project clip-note-api
 # vercel env add <NAME> production   (for each variable below)
-vercel deploy --prod
+vercel deploy --prod --yes
 ```
 
 `backend/Dockerfile.vercel` is the image (ffmpeg + yt-dlp deps; binds `$PORT`). `backend/vercel.json`
