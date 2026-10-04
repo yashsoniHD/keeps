@@ -34,9 +34,6 @@ def patch_worker(fake_db, monkeypatch):
     async def no_categories(user_id):
         return []
 
-    async def no_collections(user_id):
-        return []
-
     async def no_op_add(user_id, slug):
         return None
 
@@ -44,7 +41,6 @@ def patch_worker(fake_db, monkeypatch):
         return {}  # salvage must not hit the network in tests
 
     monkeypatch.setattr(process, "get_user_categories", no_categories)
-    monkeypatch.setattr(process, "get_user_collections", no_collections)
     monkeypatch.setattr(process, "add_user_category", no_op_add)
     monkeypatch.setattr(process, "_link_preview", no_preview)
 
@@ -158,13 +154,19 @@ async def test_unreachable_source_salvages_without_extracting(fake_db, monkeypat
     salvage an honest bookmark rather than feed the stub to Gemini (which fabricates a full
     note from the URL slug). classify/extract must NOT run, and nothing is fanned out."""
     seed_job(fake_db)
+    acquired, sleeps = [], []
 
     async def unreachable(url):
+        acquired.append(url)
         return UNREACHABLE
 
-    monkeypatch.setattr(process.sources, "acquire", unreachable)
+    async def fake_sleep(d):
+        sleeps.append(d)
 
-    classify_calls, extract_calls, fan_calls = [], [], []
+    monkeypatch.setattr(process.sources, "acquire", unreachable)
+    monkeypatch.setattr(process.asyncio, "sleep", fake_sleep)
+
+    classify_calls, extract_calls = [], []
 
     async def spy_classify(*a, **k):
         classify_calls.append(a)
@@ -175,12 +177,8 @@ async def test_unreachable_source_salvages_without_extracting(fake_db, monkeypat
         return NoteExtraction(content_type="summary", title="t", ai_summary="s",
                               cover_image_prompt="", data={"body": "x" * 60})
 
-    async def spy_fan(user_id, note_id, note_doc):
-        fan_calls.append(note_id)
-
     monkeypatch.setattr(process.gemini_service, "classify", spy_classify)
     monkeypatch.setattr(process.gemini_service, "extract_async", spy_extract)
-    monkeypatch.setattr(process, "fan_out_note", spy_fan)
 
     result = await process.process_job("job-1", DummyRequest())
 
@@ -193,7 +191,55 @@ async def test_unreachable_source_salvages_without_extracting(fake_db, monkeypat
     assert note["acquisition"] == "salvage"
     assert extract_calls == []   # (a) Gemini extraction never ran on the fabrication path
     assert classify_calls == []
-    assert fan_calls == []        # (b) a salvaged bookmark is not fanned out to mini-apps
+    assert len(acquired) == process.MAX_TRANSIENT_ATTEMPTS   # retried before salvaging
+    assert sleeps == list(process.RETRY_SLEEPS)
+
+
+async def test_one_off_unreachable_is_retried_then_succeeds(fake_db, monkeypatch):
+    """A single network blip (pin.it once came back unreachable) must not become a bookmark:
+    the in-process retry re-acquires and the real note is written."""
+    seed_job(fake_db)
+    patch_pipeline(monkeypatch, extraction=NoteExtraction(
+        content_type="summary", title="Real", ai_summary="s",
+        data={"tldr": "enough real content here", "keyPoints": ["a", "b"]}))
+    results = [UNREACHABLE, BUNDLE]
+
+    async def flaky(url):
+        return results.pop(0)
+
+    async def fake_sleep(d):
+        pass
+
+    async def noop(*a, **k):
+        return None
+
+    async def same(user_id, ct, data, cover):
+        return data, None
+
+    monkeypatch.setattr(process, "add_user_source", noop)
+    monkeypatch.setattr(process, "touch_user_activity", noop)
+    monkeypatch.setattr(process, "enrich_note_data", same)
+    monkeypatch.setattr(process.sources, "acquire", flaky)
+    monkeypatch.setattr(process.asyncio, "sleep", fake_sleep)
+    result = await process.process_job("job-1", DummyRequest())
+    assert result["status"] == "completed" and not result.get("salvaged")
+    note = salvaged_notes(fake_db)[0]
+    assert note["title"] == "Real" and note.get("is_fallback") is not True
+    assert fake_db.docs[("jobs", "job-1")]["attempt_count"] == 2
+
+
+async def test_private_or_blocked_is_not_retried(fake_db, monkeypatch):
+    seed_job(fake_db)
+    calls = []
+
+    async def blocked(url):
+        calls.append(url)
+        return ContentBundle(kind="metadata_only", strategy="private_or_blocked",
+                             metadata={"title": "instagram"})
+
+    monkeypatch.setattr(process.sources, "acquire", blocked)
+    result = await process.process_job("job-1", DummyRequest())
+    assert result["status"] == "failed" and len(calls) == 1
 
 
 async def test_blocked_url_still_hard_fails(fake_db, monkeypatch):

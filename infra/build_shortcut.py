@@ -19,7 +19,7 @@ import sys
 import uuid
 from pathlib import Path
 
-API_URL = "https://clip-note-api-674775099277.us-central1.run.app/api/ingest"
+API_URL = "https://clip-note-api-yashsoni102-progs-projects.vercel.app/api/ingest"
 ROOT = Path(__file__).resolve().parent.parent
 UNSIGNED = ROOT / "infra" / "build" / "clipnote-unsigned.shortcut"
 SIGNED = ROOT / "frontend" / "public" / "clipnote.shortcut"

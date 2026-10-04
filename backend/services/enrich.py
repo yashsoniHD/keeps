@@ -1,37 +1,16 @@
-"""Note enrichment: external data merged onto the note's own `data` map.
-
-The mini-apps used to fan a capture out into per-item docs (watch/wish/place/recipe/trip_items,
-of which only watch/place_items remain as of 2026-07-12 — see CLAUDE.md) and the note was never
-written. Notes-first inverts that: every capture is a note, and the
-enrichment the apps performed — TMDB posters + "where to watch" providers, Google Places
-photos/ratings/coords + action links, itinerary stop geocoding, price parsing — lands *inside*
-`note.data`, where the note templates render it.
-
-`enrich_note_data` is the single entry point, dispatched on the same content-type matchers that
-used to route mini-app fan-out (`is_entertainment` etc., still owned by gemini.py). Everything is
-best-effort: a miss at any level (API disabled, no match, network error) leaves a valid plain
-note — enrichment must never sink an ingest.
-
-Enriched fields use snake_case (poster_url, providers, action_links, lat/lng…) to distinguish
-them from the camelCase fields Gemini extracts (mustTry, priceForTwo…): source-said vs looked-up.
-"""
+"""Note enrichment: TMDB posters + "where to watch" providers merged onto entertainment notes'
+`data.titles[]`. Everything is best-effort: a miss (no key, no match, network error) leaves a
+valid plain note and must never sink an ingest. Enriched fields are snake_case (poster_url,
+providers, ...) vs the camelCase fields the model extracts (source-said vs looked-up).
+JustWatch attribution is mandatory wherever providers render (frontend)."""
 import logging
-import re
-from urllib.parse import quote_plus
 
 from config import settings
-from services import google_places, tmdb
+from services import tmdb
 from services.firebase import get_db
-from services.gemini import (is_entertainment, is_itinerary, is_places,
-                             is_shopping)
+from services.gemini import is_entertainment
 
 log = logging.getLogger("clipnote.enrich")
-
-# A leading currency token + the first number in a price string ("₹2,499", "Rs. 1,200", "$19.99").
-_PRICE_RE = re.compile(
-    r"(₹|\$|€|£|¥|Rs\.?|INR|USD|EUR|GBP|AED|CAD|AUD)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
-    re.I,
-)
 
 
 async def get_user_region(uid: str) -> str:
@@ -43,24 +22,6 @@ async def get_user_region(uid: str) -> str:
     except Exception:  # noqa: BLE001
         region = None
     return (region or settings.DEFAULT_WATCH_REGION).upper()
-
-
-# ---- shopping: price parsing --------------------------------------------------------------
-
-def parse_price(raw) -> tuple[float | None, str | None]:
-    """Best-effort split of a price string into a numeric amount (for sorting) and a currency
-    token (for display). Returns (None, None) when nothing parses."""
-    if not isinstance(raw, str):
-        return None, None
-    m = _PRICE_RE.search(raw)
-    if not m:
-        return None, None
-    currency = (m.group(1) or "").strip() or None
-    try:
-        amount = float(m.group(2).replace(",", ""))
-    except (ValueError, AttributeError):
-        amount = None
-    return amount, currency
 
 
 # ---- entertainment: TMDB ------------------------------------------------------------------
@@ -100,203 +61,19 @@ async def _enrich_titles(titles: list, region: str) -> tuple[list, str | None]:
     return out, cover
 
 
-# ---- places: Google Places ----------------------------------------------------------------
-
-def _city_from_location(location: str | None) -> str | None:
-    if not location:
-        return None
-    parts = [p.strip() for p in location.split(",") if p.strip()]
-    return parts[-1] if parts else None
-
-
-# Common Indian city name variants that otherwise show up as separate city filter chips for the
-# same place (a source caption saying "Bangalore" vs a Places lookup returning "Bengaluru").
-# Single source of truth — `scripts/normalize_cities.py` imports this same map so a backfill of
-# already-saved venues can never drift from what a fresh capture writes.
-CITY_ALIASES: dict[str, str] = {
-    "bangalore": "Bengaluru",
-    "bombay": "Mumbai",
-    "madras": "Chennai",
-    "calcutta": "Kolkata",
-    "gurgaon": "Gurugram",
-}
-
-
-def normalize_city(raw: str | None) -> str | None:
-    """Canonicalize a city string: known variants (case-insensitive) collapse to one spelling via
-    CITY_ALIASES; anything else passes through trimmed, as-is. None/blank input -> None. Pure —
-    used both at write time (`_enrich_venues`, `services/places.py`) and by the backfill script."""
-    if not isinstance(raw, str):
-        return None
-    s = raw.strip()
-    if not s:
-        return None
-    return CITY_ALIASES.get(s.lower(), s)
-
-
-def _maps_url(name: str, city: str | None, place_id: str | None,
-              google_maps_url: str | None) -> str:
-    if google_maps_url:
-        return google_maps_url
-    q = quote_plus(f"{name} {city or ''}".strip())
-    url = f"https://www.google.com/maps/search/?api=1&query={q}"
-    if place_id:
-        url += f"&query_place_id={place_id}"
-    return url
-
-
-def _action_links(name: str, city: str | None,
-                  venue: dict, details: dict) -> list[dict]:
-    """Action row: Directions (Google Maps) + any real website/instagram/phone the source or
-    Google provided. Reserve/Order deep-links were dropped — they only ever landed on a
-    platform search (no stable per-venue URL) and added clutter."""
-    name = name or ""
-    links: list[dict] = [{
-        "label": "Directions", "kind": "directions",
-        "url": _maps_url(name, city, details.get("place_id"), details.get("google_maps_url")),
-    }]
-
-    website = venue.get("website") or details.get("website")
-    if website:
-        links.append({"label": "Website", "kind": "website", "url": website})
-
-    ig = venue.get("instagram")
-    if ig:
-        url = ig if ig.startswith("http") else f"https://instagram.com/{ig.lstrip('@')}"
-        links.append({"label": "Instagram", "kind": "instagram", "url": url})
-
-    phone = venue.get("phone") or details.get("phone")
-    if phone:
-        links.append({"label": "Call", "kind": "call",
-                      "url": "tel:" + re.sub(r"[^+0-9]", "", phone)})
-    return links
-
-
-def _enrichment_from_details(venue: dict, details: dict) -> dict:
-    """Google fields merged onto a venue (looked-up, never source-said)."""
-    return {
-        "formatted_address": details.get("formatted_address"),
-        "lat": details.get("lat"),
-        "lng": details.get("lng"),
-        "rating": details.get("rating"),
-        "user_rating_count": details.get("user_rating_count"),
-        "price_level": details.get("price_level"),
-        "opening_hours": details.get("opening_hours") or [],
-        "website": venue.get("website") or details.get("website"),
-        "phone": venue.get("phone") or details.get("phone"),
-        "google_maps_url": details.get("google_maps_url"),
-        "reservable": details.get("reservable"),
-        "photo_url": details.get("photo_url"),
-        "photo_width": details.get("photo_width"),
-        "photo_height": details.get("photo_height"),
-        "photo_attribution": details.get("photo_attribution"),
-    }
-
-
-async def _enrich_venues(venues: list, region: str) -> tuple[list, str | None]:
-    """Match each extracted venue to Google Places and merge photo/rating/coords/action links
-    onto it. Returns (venues, first_photo_url) — the photo is the cover candidate. Bounded by
-    PLACES_MAX_ENRICHED_VENUES so a long listicle can't run up the bill: venues past the cap keep
-    their extracted text and are appended un-enriched (mirrors _geocode_days)."""
-    cover: str | None = None
-    out: list = []
-    budget = settings.PLACES_MAX_ENRICHED_VENUES
-    for v in venues:
-        if not isinstance(v, dict) or not (v.get("name") or "").strip():
-            out.append(v)
-            continue
-        if budget <= 0:
-            out.append(v)  # past the cap: un-enriched, but kept so the list stays complete
-            continue
-        budget -= 1
-        name = v["name"].strip()
-        location = v.get("location") or ""
-        source_city = v.get("city") or _city_from_location(location)
-        try:
-            hit = await google_places.search_place(name, location, region)
-            details = (await google_places.place_details(hit.place_id)) if hit else None
-            v = dict(v)
-            if hit:
-                v["place_id"] = hit.place_id
-                v["name"] = (details or {}).get("name") or hit.name or name
-            if details:
-                v.update(_enrichment_from_details(v, details))
-                cover = cover or details.get("photo_url")
-            # Prefer Google's own locality over the source caption text — it's the fix for the
-            # same place showing up under two spellings ("Bangalore" and "Bengaluru"); when
-            # there's no Places match at all, the alias map still normalizes the source text.
-            city = normalize_city((details or {}).get("locality") or source_city)
-            if city:
-                v["city"] = city
-            v["action_links"] = _action_links(v["name"], city, v, details or {})
-        except Exception as e:  # noqa: BLE001 — one venue's miss must not sink the rest.
-            log.warning("venue enrichment failed for %r: %s: %s", name, type(e).__name__, e)
-        out.append(v)
-    return out, cover
-
-
-# ---- trips: stop geocoding ----------------------------------------------------------------
-
-async def _geocode_days(days: list, destination: str | None, region: str | None) -> list:
-    """Return a copy of `days` with each stop's `lat`/`lng` filled in from Google Places, best
-    effort. No-op (returns days unchanged) when Places is disabled. Bounded by
-    TRIP_MAX_GEOCODED_STOPS so a pathological many-stop trip can't run up the bill; stops past
-    the cap keep their text and are simply absent from the map."""
-    if not isinstance(days, list) or not google_places.enabled():
-        return days
-    budget = settings.TRIP_MAX_GEOCODED_STOPS
-    out_days = []
-    for day in days:
-        if not isinstance(day, dict):
-            out_days.append(day)
-            continue
-        stops = day.get("stops") or []
-        out_stops = []
-        for stop in stops:
-            if isinstance(stop, dict) and stop.get("place") and budget > 0:
-                budget -= 1
-                place = stop["place"]
-                try:
-                    hit = await google_places.search_place(place, destination, region)
-                except Exception as e:  # noqa: BLE001 — one stop's miss must not sink the rest.
-                    log.warning("trip stop geocode failed for %r: %s: %s",
-                                place, type(e).__name__, e)
-                    hit = None
-                if hit and hit.lat is not None and hit.lng is not None:
-                    stop = {**stop, "lat": hit.lat, "lng": hit.lng}
-            out_stops.append(stop)
-        out_days.append({**day, "stops": out_stops})
-    return out_days
-
-
 # ---- entry point ----------------------------------------------------------------------------
 
 async def enrich_note_data(user_id: str, content_type: str, data: dict | None,
                            cover_image_url: str | None) -> tuple[dict, str | None]:
-    """Enrich a freshly-extracted note's `data` in place, per its content family. Returns
-    (data, cover_override) — cover_override is a poster/photo to adopt ONLY when the note is
-    otherwise coverless (real source imagery always wins). Best-effort throughout: any failure
-    returns the data unchanged."""
+    """Enrich a freshly-extracted note's `data` (entertainment titles only). Returns
+    (data, cover_override) — a poster to adopt ONLY when the note is otherwise coverless.
+    Best-effort: any failure returns the data unchanged."""
     data = data or {}
     cover: str | None = None
     try:
         if is_entertainment(content_type) and isinstance(data.get("titles"), list):
             region = await get_user_region(user_id)
             data["titles"], cover = await _enrich_titles(data["titles"], region)
-        elif is_places(content_type) and isinstance(data.get("venues"), list):
-            region = await get_user_region(user_id)
-            data["venues"], cover = await _enrich_venues(data["venues"], region)
-        elif is_itinerary(content_type) and isinstance(data.get("days"), list):
-            region = await get_user_region(user_id)
-            data["days"] = await _geocode_days(
-                data["days"], (data.get("destination") or "").strip() or None, region)
-        elif is_shopping(content_type) and data.get("price"):
-            amount, currency = parse_price(data.get("price"))
-            if amount is not None:
-                data["price_amount"] = amount
-            if currency:
-                data["currency"] = currency
-        # recipes need no external enrichment — the note data is already complete.
     except Exception as e:  # noqa: BLE001 — enrichment must never sink an ingest.
         log.warning("note enrichment failed (%s): %s: %s", content_type, type(e).__name__, e)
     return data, (cover if not cover_image_url else None)

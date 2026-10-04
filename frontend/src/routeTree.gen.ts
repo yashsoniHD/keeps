@@ -9,46 +9,13 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as WishlistRouteImport } from './routes/wishlist'
-import { Route as WatchlistRouteImport } from './routes/watchlist'
-import { Route as TripsRouteImport } from './routes/trips'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SearchRouteImport } from './routes/search'
-import { Route as RecipesRouteImport } from './routes/recipes'
-import { Route as PlacesRouteImport } from './routes/places'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as LibraryRouteImport } from './routes/library'
-import { Route as DigestRouteImport } from './routes/digest'
-import { Route as CollectionsRouteImport } from './routes/collections'
-import { Route as AskRouteImport } from './routes/ask'
-import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as WatchlistIndexRouteImport } from './routes/watchlist.index'
-import { Route as PlacesIndexRouteImport } from './routes/places.index'
-import { Route as NotesIndexRouteImport } from './routes/notes.index'
-import { Route as LibraryIndexRouteImport } from './routes/library.index'
-import { Route as WatchlistItemIdRouteImport } from './routes/watchlist.$itemId'
-import { Route as PlacesItemIdRouteImport } from './routes/places.$itemId'
-import { Route as PNoteIdRouteImport } from './routes/p.$noteId'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
-import { Route as LibraryCollectionIdRouteImport } from './routes/library.$collectionId'
 
-const WishlistRoute = WishlistRouteImport.update({
-  id: '/wishlist',
-  path: '/wishlist',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WatchlistRoute = WatchlistRouteImport.update({
-  id: '/watchlist',
-  path: '/watchlist',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TripsRoute = TripsRouteImport.update({
-  id: '/trips',
-  path: '/trips',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ShareRoute = ShareRouteImport.update({
   id: '/share',
   path: '/share',
@@ -64,44 +31,9 @@ const SearchRoute = SearchRouteImport.update({
   path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RecipesRoute = RecipesRouteImport.update({
-  id: '/recipes',
-  path: '/recipes',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlacesRoute = PlacesRouteImport.update({
-  id: '/places',
-  path: '/places',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LibraryRoute = LibraryRouteImport.update({
-  id: '/library',
-  path: '/library',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DigestRoute = DigestRouteImport.update({
-  id: '/digest',
-  path: '/digest',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CollectionsRoute = CollectionsRouteImport.update({
-  id: '/collections',
-  path: '/collections',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AskRoute = AskRouteImport.update({
-  id: '/ask',
-  path: '/ask',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -109,250 +41,69 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WatchlistIndexRoute = WatchlistIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => WatchlistRoute,
-} as any)
-const PlacesIndexRoute = PlacesIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => PlacesRoute,
-} as any)
-const NotesIndexRoute = NotesIndexRouteImport.update({
-  id: '/notes/',
-  path: '/notes/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LibraryIndexRoute = LibraryIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => LibraryRoute,
-} as any)
-const WatchlistItemIdRoute = WatchlistItemIdRouteImport.update({
-  id: '/$itemId',
-  path: '/$itemId',
-  getParentRoute: () => WatchlistRoute,
-} as any)
-const PlacesItemIdRoute = PlacesItemIdRouteImport.update({
-  id: '/$itemId',
-  path: '/$itemId',
-  getParentRoute: () => PlacesRoute,
-} as any)
-const PNoteIdRoute = PNoteIdRouteImport.update({
-  id: '/p/$noteId',
-  path: '/p/$noteId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const NotesNoteIdRoute = NotesNoteIdRouteImport.update({
   id: '/notes/$noteId',
   path: '/notes/$noteId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LibraryCollectionIdRoute = LibraryCollectionIdRouteImport.update({
-  id: '/$collectionId',
-  path: '/$collectionId',
-  getParentRoute: () => LibraryRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/ask': typeof AskRoute
-  '/collections': typeof CollectionsRoute
-  '/digest': typeof DigestRoute
-  '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
-  '/places': typeof PlacesRouteWithChildren
-  '/recipes': typeof RecipesRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
-  '/trips': typeof TripsRoute
-  '/watchlist': typeof WatchlistRouteWithChildren
-  '/wishlist': typeof WishlistRoute
-  '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
-  '/p/$noteId': typeof PNoteIdRoute
-  '/places/$itemId': typeof PlacesItemIdRoute
-  '/watchlist/$itemId': typeof WatchlistItemIdRoute
-  '/library/': typeof LibraryIndexRoute
-  '/notes/': typeof NotesIndexRoute
-  '/places/': typeof PlacesIndexRoute
-  '/watchlist/': typeof WatchlistIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/ask': typeof AskRoute
-  '/collections': typeof CollectionsRoute
-  '/digest': typeof DigestRoute
   '/login': typeof LoginRoute
-  '/recipes': typeof RecipesRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
-  '/trips': typeof TripsRoute
-  '/wishlist': typeof WishlistRoute
-  '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
-  '/p/$noteId': typeof PNoteIdRoute
-  '/places/$itemId': typeof PlacesItemIdRoute
-  '/watchlist/$itemId': typeof WatchlistItemIdRoute
-  '/library': typeof LibraryIndexRoute
-  '/notes': typeof NotesIndexRoute
-  '/places': typeof PlacesIndexRoute
-  '/watchlist': typeof WatchlistIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/ask': typeof AskRoute
-  '/collections': typeof CollectionsRoute
-  '/digest': typeof DigestRoute
-  '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
-  '/places': typeof PlacesRouteWithChildren
-  '/recipes': typeof RecipesRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
-  '/trips': typeof TripsRoute
-  '/watchlist': typeof WatchlistRouteWithChildren
-  '/wishlist': typeof WishlistRoute
-  '/library/$collectionId': typeof LibraryCollectionIdRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
-  '/p/$noteId': typeof PNoteIdRoute
-  '/places/$itemId': typeof PlacesItemIdRoute
-  '/watchlist/$itemId': typeof WatchlistItemIdRoute
-  '/library/': typeof LibraryIndexRoute
-  '/notes/': typeof NotesIndexRoute
-  '/places/': typeof PlacesIndexRoute
-  '/watchlist/': typeof WatchlistIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/admin'
-    | '/ask'
-    | '/collections'
-    | '/digest'
-    | '/library'
     | '/login'
-    | '/places'
-    | '/recipes'
     | '/search'
     | '/settings'
     | '/share'
-    | '/trips'
-    | '/watchlist'
-    | '/wishlist'
-    | '/library/$collectionId'
     | '/notes/$noteId'
-    | '/p/$noteId'
-    | '/places/$itemId'
-    | '/watchlist/$itemId'
-    | '/library/'
-    | '/notes/'
-    | '/places/'
-    | '/watchlist/'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/admin'
-    | '/ask'
-    | '/collections'
-    | '/digest'
-    | '/login'
-    | '/recipes'
-    | '/search'
-    | '/settings'
-    | '/share'
-    | '/trips'
-    | '/wishlist'
-    | '/library/$collectionId'
-    | '/notes/$noteId'
-    | '/p/$noteId'
-    | '/places/$itemId'
-    | '/watchlist/$itemId'
-    | '/library'
-    | '/notes'
-    | '/places'
-    | '/watchlist'
+  to: '/' | '/login' | '/search' | '/settings' | '/share' | '/notes/$noteId'
   id:
     | '__root__'
     | '/'
-    | '/admin'
-    | '/ask'
-    | '/collections'
-    | '/digest'
-    | '/library'
     | '/login'
-    | '/places'
-    | '/recipes'
     | '/search'
     | '/settings'
     | '/share'
-    | '/trips'
-    | '/watchlist'
-    | '/wishlist'
-    | '/library/$collectionId'
     | '/notes/$noteId'
-    | '/p/$noteId'
-    | '/places/$itemId'
-    | '/watchlist/$itemId'
-    | '/library/'
-    | '/notes/'
-    | '/places/'
-    | '/watchlist/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
-  AskRoute: typeof AskRoute
-  CollectionsRoute: typeof CollectionsRoute
-  DigestRoute: typeof DigestRoute
-  LibraryRoute: typeof LibraryRouteWithChildren
   LoginRoute: typeof LoginRoute
-  PlacesRoute: typeof PlacesRouteWithChildren
-  RecipesRoute: typeof RecipesRoute
   SearchRoute: typeof SearchRoute
   SettingsRoute: typeof SettingsRoute
   ShareRoute: typeof ShareRoute
-  TripsRoute: typeof TripsRoute
-  WatchlistRoute: typeof WatchlistRouteWithChildren
-  WishlistRoute: typeof WishlistRoute
   NotesNoteIdRoute: typeof NotesNoteIdRoute
-  PNoteIdRoute: typeof PNoteIdRoute
-  NotesIndexRoute: typeof NotesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/wishlist': {
-      id: '/wishlist'
-      path: '/wishlist'
-      fullPath: '/wishlist'
-      preLoaderRoute: typeof WishlistRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/watchlist': {
-      id: '/watchlist'
-      path: '/watchlist'
-      fullPath: '/watchlist'
-      preLoaderRoute: typeof WatchlistRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/trips': {
-      id: '/trips'
-      path: '/trips'
-      fullPath: '/trips'
-      preLoaderRoute: typeof TripsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/share': {
       id: '/share'
       path: '/share'
@@ -374,60 +125,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SearchRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/recipes': {
-      id: '/recipes'
-      path: '/recipes'
-      fullPath: '/recipes'
-      preLoaderRoute: typeof RecipesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/places': {
-      id: '/places'
-      path: '/places'
-      fullPath: '/places'
-      preLoaderRoute: typeof PlacesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/library': {
-      id: '/library'
-      path: '/library'
-      fullPath: '/library'
-      preLoaderRoute: typeof LibraryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/digest': {
-      id: '/digest'
-      path: '/digest'
-      fullPath: '/digest'
-      preLoaderRoute: typeof DigestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/collections': {
-      id: '/collections'
-      path: '/collections'
-      fullPath: '/collections'
-      preLoaderRoute: typeof CollectionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ask': {
-      id: '/ask'
-      path: '/ask'
-      fullPath: '/ask'
-      preLoaderRoute: typeof AskRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -437,55 +139,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/watchlist/': {
-      id: '/watchlist/'
-      path: '/'
-      fullPath: '/watchlist/'
-      preLoaderRoute: typeof WatchlistIndexRouteImport
-      parentRoute: typeof WatchlistRoute
-    }
-    '/places/': {
-      id: '/places/'
-      path: '/'
-      fullPath: '/places/'
-      preLoaderRoute: typeof PlacesIndexRouteImport
-      parentRoute: typeof PlacesRoute
-    }
-    '/notes/': {
-      id: '/notes/'
-      path: '/notes'
-      fullPath: '/notes/'
-      preLoaderRoute: typeof NotesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/library/': {
-      id: '/library/'
-      path: '/'
-      fullPath: '/library/'
-      preLoaderRoute: typeof LibraryIndexRouteImport
-      parentRoute: typeof LibraryRoute
-    }
-    '/watchlist/$itemId': {
-      id: '/watchlist/$itemId'
-      path: '/$itemId'
-      fullPath: '/watchlist/$itemId'
-      preLoaderRoute: typeof WatchlistItemIdRouteImport
-      parentRoute: typeof WatchlistRoute
-    }
-    '/places/$itemId': {
-      id: '/places/$itemId'
-      path: '/$itemId'
-      fullPath: '/places/$itemId'
-      preLoaderRoute: typeof PlacesItemIdRouteImport
-      parentRoute: typeof PlacesRoute
-    }
-    '/p/$noteId': {
-      id: '/p/$noteId'
-      path: '/p/$noteId'
-      fullPath: '/p/$noteId'
-      preLoaderRoute: typeof PNoteIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/notes/$noteId': {
       id: '/notes/$noteId'
       path: '/notes/$noteId'
@@ -493,75 +146,16 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotesNoteIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/library/$collectionId': {
-      id: '/library/$collectionId'
-      path: '/$collectionId'
-      fullPath: '/library/$collectionId'
-      preLoaderRoute: typeof LibraryCollectionIdRouteImport
-      parentRoute: typeof LibraryRoute
-    }
   }
 }
 
-interface LibraryRouteChildren {
-  LibraryCollectionIdRoute: typeof LibraryCollectionIdRoute
-  LibraryIndexRoute: typeof LibraryIndexRoute
-}
-
-const LibraryRouteChildren: LibraryRouteChildren = {
-  LibraryCollectionIdRoute: LibraryCollectionIdRoute,
-  LibraryIndexRoute: LibraryIndexRoute,
-}
-
-const LibraryRouteWithChildren =
-  LibraryRoute._addFileChildren(LibraryRouteChildren)
-
-interface PlacesRouteChildren {
-  PlacesItemIdRoute: typeof PlacesItemIdRoute
-  PlacesIndexRoute: typeof PlacesIndexRoute
-}
-
-const PlacesRouteChildren: PlacesRouteChildren = {
-  PlacesItemIdRoute: PlacesItemIdRoute,
-  PlacesIndexRoute: PlacesIndexRoute,
-}
-
-const PlacesRouteWithChildren =
-  PlacesRoute._addFileChildren(PlacesRouteChildren)
-
-interface WatchlistRouteChildren {
-  WatchlistItemIdRoute: typeof WatchlistItemIdRoute
-  WatchlistIndexRoute: typeof WatchlistIndexRoute
-}
-
-const WatchlistRouteChildren: WatchlistRouteChildren = {
-  WatchlistItemIdRoute: WatchlistItemIdRoute,
-  WatchlistIndexRoute: WatchlistIndexRoute,
-}
-
-const WatchlistRouteWithChildren = WatchlistRoute._addFileChildren(
-  WatchlistRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
-  AskRoute: AskRoute,
-  CollectionsRoute: CollectionsRoute,
-  DigestRoute: DigestRoute,
-  LibraryRoute: LibraryRouteWithChildren,
   LoginRoute: LoginRoute,
-  PlacesRoute: PlacesRouteWithChildren,
-  RecipesRoute: RecipesRoute,
   SearchRoute: SearchRoute,
   SettingsRoute: SettingsRoute,
   ShareRoute: ShareRoute,
-  TripsRoute: TripsRoute,
-  WatchlistRoute: WatchlistRouteWithChildren,
-  WishlistRoute: WishlistRoute,
   NotesNoteIdRoute: NotesNoteIdRoute,
-  PNoteIdRoute: PNoteIdRoute,
-  NotesIndexRoute: NotesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

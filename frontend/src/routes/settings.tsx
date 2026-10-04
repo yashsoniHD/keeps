@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { PillButton, PillLink, pillClasses } from "@/components/shared/PillButton";
+import { PillButton, pillClasses } from "@/components/shared/PillButton";
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -8,18 +8,14 @@ import {
   Copy,
   Check,
   Download,
-  BarChart3,
   Share2,
   Moon,
   Sun,
-  Sparkles,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { checkAdminAccess } from "@/routes/admin";
 import { createToken, listTokensCached, revokeToken, type ShortcutToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
-import { CategoriesSection } from "@/components/CategoriesSection";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/lib/theme";
 import { getInstallPrompt, isAndroid, isIOS, isStandalone } from "@/lib/platform";
@@ -45,29 +41,10 @@ function Settings() {
   const navigate = useNavigate();
   const [signOutConfirm, setSignOutConfirm] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
-
-  // Only the server knows who's an admin (ADMIN_EMAILS is a Cloud Run env var, never
-  // shipped to the client). Probe once per session — the shared cache means this is a
-  // no-op network-wise if /admin already ran it, and vice versa.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    checkAdminAccess()
-      .then(() => {
-        if (!cancelled) setIsAdmin(true);
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -132,13 +109,7 @@ function Settings() {
           </div>
         </section>
 
-        {/* The digest is the marquee feature, so it sits right under the profile;
-            then preferences, organisation, and device setup. */}
-        <YourDigestSection />
-
         <AppearanceSection />
-
-        <CategoriesSection />
 
         <ConnectPhone />
 
@@ -151,15 +122,6 @@ function Settings() {
             {shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
             {shareCopied ? "Link copied!" : "Share the app"}
           </button>
-          {isAdmin && (
-            <Link
-              to="/admin"
-              className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
-            >
-              <BarChart3 className="h-4 w-4" />
-              Admin dashboard
-            </Link>
-          )}
           <button
             onClick={() => setSignOutConfirm(true)}
             className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
@@ -219,24 +181,6 @@ function AppearanceSection() {
           aria-label="Toggle dark mode"
         />
       </label>
-    </section>
-  );
-}
-
-// A Wrapped-style, in-app story recap of recent saves — replaces the old email digest opt-in.
-function YourDigestSection() {
-  return (
-    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
-      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        <Sparkles className="h-3.5 w-3.5" />
-        Your digest
-      </h2>
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <p className="text-sm text-ink-soft">A recap of what you have been saving.</p>
-        <PillLink to="/digest" className="shrink-0">
-          View your digest
-        </PillLink>
-      </div>
     </section>
   );
 }

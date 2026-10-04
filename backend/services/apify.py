@@ -3,7 +3,7 @@
 yt-dlp downloads fail cookie-less from datacenter IPs (Instagram's "login required /
 rate-limit reached" wall); Apify owns the residential proxies + accounts and returns the
 post's media URL + caption for a per-scrape fee. We then fetch that (publicly playable,
-short-lived) CDN video URL and hand it to the normal GCS → Gemini video path.
+short-lived) CDN video URL and hand the bytes to the video model.
 
 Per-platform actors (env-overridable in config). Their input shapes differ — Instagram's
 post scraper takes the URL in a `username` array, TikTok takes `postURLs`, Facebook takes
@@ -29,7 +29,8 @@ _RUN_SYNC = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
 # `downloadedVideo` (Apify-hosted copy) is preferred over `videoUrl` (the IG/TikTok CDN URL):
 # it's on api.apify.com — always fetchable, never referer-gated or time-signed. TikTok
 # (clockworks) uses `mediaUrls` (array) / nested `videoMeta`; Instagram uses the flat fields.
-_VIDEO_FIELDS = ("downloadedVideo", "videoUrl", "mediaUrls", "webVideoUrl", "downloadUrl")
+# Never `webVideoUrl`: that is the TikTok PAGE url, not media.
+_VIDEO_FIELDS = ("downloadedVideo", "videoUrl", "mediaUrls", "downloadUrl")
 _CAPTION_FIELDS = ("caption", "text", "title", "description")
 _THUMB_FIELDS = ("displayUrl", "coverUrl", "thumbnailUrl", "imageUrl")
 _AUTHOR_FIELDS = ("ownerFullName", "ownerUsername", "authorMeta", "author", "channelName")
@@ -76,10 +77,9 @@ def _subtitles_text(item: dict) -> str:
 # Carousel/sidecar posts: the instagram-post-scraper returns every slide either as a flat
 # `images` URL array or as `childPosts` objects each carrying their own `displayUrl`.
 _IMAGES_FIELDS = ("images", "imageUrls")
-# Cap how many slides we pull — keeps the Gemini request small and the (free) image
-# fetches bounded for a pathological 20-slide carousel. 12 covers an intro slide + a
-# 10-venue listicle (10 dropped the last venue).
-MAX_CAROUSEL_IMAGES = 12
+# Cap how many slides we pull — keeps the vision request small and the (free) image
+# fetches bounded for a pathological 20-slide carousel.
+MAX_CAROUSEL_IMAGES = 6
 
 
 def _carousel_images(item: dict) -> list[str]:
@@ -127,8 +127,8 @@ def _ig_reel_input(url: str) -> dict:
 
 
 def _tiktok_input(url: str) -> dict:
-    # shouldDownloadVideos populates `mediaUrls` with a fetchable URL for the video.
-    return {"postURLs": [url], "resultsPerPage": 1, "shouldDownloadVideos": True,
+    # No paid video download: `videoMeta.downloadAddr`/`playAddr` give the CDN URL we fetch.
+    return {"postURLs": [url], "resultsPerPage": 1, "shouldDownloadVideos": False,
             "shouldDownloadCovers": False}
 
 
@@ -266,3 +266,39 @@ async def fetch(url: str) -> dict | None:
         log.warning("apify %s failed for %s: %s: %s", actor.actor_id, url,
                     type(e).__name__, str(e)[:200])
         return None
+
+
+async def _release_slot() -> None:
+    """Give back a slot reserved by reserve_apify_slot when the run produced nothing, so only
+    successful runs count against APIFY_DAILY_GLOBAL_CAP. Best-effort."""
+    from datetime import datetime, timezone
+    from google.cloud import firestore as fs
+    from services.firebase import get_db
+
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    try:
+        await get_db().collection("system").document(f"usage-{today}").set(
+            {"apify_count": fs.Increment(-1)}, merge=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("apify slot release failed: %s: %s", type(e).__name__, e)
+
+
+async def fetch_capped(url: str) -> dict | None:
+    """fetch() behind the global daily cap. The slot is reserved up front (bounds concurrent
+    runs) and released when the run fails or comes back empty. None = nothing usable."""
+    from services.firebase import reserve_apify_slot
+
+    if not settings.APIFY_TOKEN or actor_kind(url) is None:
+        return None
+    try:
+        reserved = await reserve_apify_slot()
+    except Exception as e:  # noqa: BLE001 — no slot, no paid run
+        log.warning("apify slot reservation failed: %s: %s", type(e).__name__, e)
+        reserved = False
+    if not reserved:
+        log.info("apify daily cap reached for %s", url)
+        return None
+    result = await fetch(url)
+    if not result:
+        await _release_slot()
+    return result

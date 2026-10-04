@@ -8,8 +8,6 @@ import {
   WifiOff,
   Clock,
   X,
-  Star,
-  Pin,
 } from "lucide-react";
 import type { Note, Job } from "@/lib/types";
 import { formatDateShort, noteAccent, noteIcon, noteLabel, sourceLabel } from "@/lib/note-meta";
@@ -186,8 +184,6 @@ export function NoteCard({ note }: { note: Note }) {
             </span>
           </div>
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-soft">
-            {note.pinned_at && <Pin className="h-3 w-3 fill-ink/70 text-ink/70" />}
-            {note.is_favorite && <Star className="h-3 w-3 fill-favorite text-favorite" />}
             {formatDateShort(note.created_at)}
           </span>
         </div>
@@ -206,6 +202,7 @@ export function NoteCard({ note }: { note: Note }) {
           {note.source_domain ? (
             <>
               <img
+                loading="lazy"
                 src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
                 onError={(e) => {
                   e.currentTarget.style.visibility = "hidden";
@@ -384,6 +381,7 @@ export function BoardCard({
               note.source_domain && (
                 <span className="flex min-w-0 items-center gap-1.5">
                   <img
+                    loading="lazy"
                     src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
                     onError={(e) => {
                       e.currentTarget.style.display = "none";
@@ -406,6 +404,7 @@ export function BoardCard({
             <span className="ml-auto flex shrink-0 items-center gap-1.5">
               {!hideCategory && note.source_domain && (
                 <img
+                  loading="lazy"
                   src={`https://www.google.com/s2/favicons?domain=${note.source_domain}&sz=32`}
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
@@ -578,6 +577,7 @@ export function ProcessingCard({ job, label = "Processing" }: { job: Job; label?
 
       <div className="mt-auto flex items-center gap-2 pt-4 text-[11px] text-ink-soft">
         <img
+          loading="lazy"
           src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
           onError={(e) => {
             e.currentTarget.style.visibility = "hidden";

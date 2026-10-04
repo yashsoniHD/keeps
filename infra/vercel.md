@@ -23,15 +23,16 @@ preflights and the cron GET all return 401.
 | Name | Notes |
 |---|---|
 | `OPENROUTER_API_KEY` | all model calls |
-| `TEXT_MODEL`, `LITE_MODEL`, `VISION_MODEL`, `YOUTUBE_MODEL`, `TRANSCRIBE_MODEL`, `EMBED_MODEL` | model ids, see the migration plan table |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | key JSON for SA `clip-note-vercel` (`roles/datastore.user`). Written to `/tmp/sa.json` at boot and exported as `GOOGLE_APPLICATION_CREDENTIALS`; used by Firebase Admin, Firestore and Google Places |
+| `VIDEO_MODELS`, `YOUTUBE_MODELS`, `IMAGE_MODELS`, `TEXT_MODELS`, `CLASSIFY_MODELS`, `EMBED_MODEL` | model chains (comma-separated `free,paid`; paid takes over on error), defaults in `backend/config.py`. `VIDEO_MODELS` defaults to `google/gemini-2.5-flash-lite` only; `IMAGE_MODELS` defaults to `google/gemini-2.5-flash-lite` only (gemma free 429'd every call; ling paid rejects >4 images, so 6-slide carousels failed); `TEXT_MODELS` defaults to `deepseek/deepseek-v3.2` only and `CLASSIFY_MODELS` to `qwen/qwen3-30b-a3b-instruct-2507` only (free heads demoted after the A/B and spike) |
+| `VIDEO_CALL_TIMEOUT_S`, `VIDEO_MAX_BYTES` | video-call timeout (default 120) and max mp4 size (default 25 MB; larger files under `MAX_VIDEO_SECONDS` are ffmpeg re-encoded, needs libx264) |
+| `MAX_VIDEO_SECONDS` | default 600; longer reels are not sent to the video model |
+| `YOUTUBE_MAX_DIRECT_SECONDS` | default 900; longer YouTube videos use the fallback scraper (~8 s latency per minute of video) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | key JSON for SA `clip-note-vercel` (`roles/datastore.user`). Written to `/tmp/sa.json` at boot and exported as `GOOGLE_APPLICATION_CREDENTIALS`; used by Firebase Admin and Firestore |
 | `GOOGLE_CLOUD_PROJECT` | `weekly-updates-automation` |
 | `WORKER_URL` | stable production alias, e.g. `https://<project>.vercel.app` (no trailing slash) |
 | `WORKER_SECRET` | random string; authenticates the self-dispatch to `/api/process*`. Empty disables the route (fail closed) and enables the local inline dev path |
 | `CRON_SECRET` | random string; Vercel sends it as `Authorization: Bearer` to the cron route |
-| `PUBLIC_APP_URL`, `APP_BASE_URL` | frontend origin(s) |
-| `ADMIN_EMAILS` | admin dashboard allow-list |
-| `TMDB_BEARER`, `APIFY_TOKEN`, `JINA_API_KEY` | enrichment / scraping |
+| `TMDB_BEARER`, `APIFY_TOKEN`, `JINA_API_KEY` | enrichment / scraping. Without `APIFY_TOKEN`, Instagram reels are never watched; every IG note is caption-only |
 
 Generate secrets with `openssl rand -hex 32`.
 
@@ -51,16 +52,12 @@ Manual sweep: `curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/
 Hobby cron runs once a day (+/- 59 min, no retries). Upgrade path if recovery latency matters: Vercel Queues
 with a small Node consumer service.
 
-## Re-index after cutover
+## Re-index embeddings
 
-Vertex (old) and Qwen (new) embeddings live in different vector spaces. Until both steps below
-have run, search, Ask retrieval and collection auto-filing compare Vertex vectors to Qwen vectors
-and return meaningless results.
+Embeddings from different models live in different vector spaces; after changing `EMBED_MODEL` /
+`EMBED_TEXT_VERSION`, search compares mismatched vectors until notes are re-embedded. From `backend/`:
 
-1. Notes + `search_index`: from `backend/`, `python -m scripts.backfill_content_embeddings --apply --per-minute 60`
-   (dry-run without `--apply`; `--user-id` to do one user first).
-2. Collections (`topic_embedding`): `python -m scripts.migrate_smart_collections` does compute
-   `topic_embedding`, **but skips any collection that already has one**, so on its own it will not
-   re-embed existing collections. Either clear `topic_embedding` on every collection first (one-off
-   Firestore update) and then run it, or hit "Rescan" per collection (`rescore_collection`
-   always re-embeds).
+```bash
+python -m scripts.reindex_embeddings                 # dry-run
+python -m scripts.reindex_embeddings --apply         # --user-id UID to do one user first, --per-minute N
+```

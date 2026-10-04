@@ -141,7 +141,7 @@ def capture_pipeline(fake_db, monkeypatch):
         captured["assign_bundle"] = bundle
         return "summary"
 
-    async def fake_extract(url, bundle, content_type, note_hint=None):
+    async def fake_extract(url, bundle, content_type, note_hint=None, **_):
         captured["bundle"] = bundle
         captured["url"] = url
         return NoteExtraction(
@@ -150,11 +150,7 @@ def capture_pipeline(fake_db, monkeypatch):
             data={"sections": [{"heading": "H", "items": ["a sufficiently long item of content"]}]},
         )
 
-    async def no_collections(uid):
-        return []
-
     monkeypatch.setattr(process, "get_user_categories", no_categories)
-    monkeypatch.setattr(process, "get_user_collections", no_collections)
     monkeypatch.setattr(process, "add_user_category", no_op)
     monkeypatch.setattr(process, "add_user_source", no_op)
     monkeypatch.setattr(process, "_note_embedding", no_embed)

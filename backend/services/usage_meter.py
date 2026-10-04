@@ -1,4 +1,4 @@
-"""Request-scoped AI usage meter (tokens + USD).
+"""Request-scoped AI usage meter (calls + USD + which model answered).
 
 Keeps `gemini.py` free of any Firestore dependency: each model call records its OpenAI-shape
 `usage` into a contextvar-held meter, and the route flushes the accumulated totals to Firestore
@@ -24,21 +24,22 @@ _meter: contextvars.ContextVar["UsageMeter | None"] = contextvars.ContextVar(
 
 
 class UsageMeter:
-    __slots__ = ("by_model", "calls", "cost_usd")
+    """Per-request totals that `firebase.flush_usage` adds to the global daily counter
+    (system/usage-{date}: tok_ai_calls, tok_cost_usd). `models` counts calls per model that
+    actually answered (OpenRouter's `response.model` — the free or the paid fallback)."""
+    __slots__ = ("models", "calls", "cost_usd", "last_model")
 
     def __init__(self) -> None:
-        # model id -> [tokens_in, tokens_out]. Kept as a 2-element list because
-        # firebase._split_by_tier unpacks it as `(tin, tout)`.
-        self.by_model: dict[str, list[int]] = {}
+        self.models: dict[str, int] = {}
         self.calls = 0
         self.cost_usd = 0.0
+        self.last_model = ""
 
-    def add(self, model: str, tokens_in: int, tokens_out: int, cost_usd: float = 0.0) -> None:
-        slot = self.by_model.setdefault(model, [0, 0])
-        slot[0] += tokens_in
-        slot[1] += tokens_out
+    def add(self, model: str, cost_usd: float = 0.0) -> None:
+        self.models[model] = self.models.get(model, 0) + 1
         self.cost_usd += cost_usd
         self.calls += 1
+        self.last_model = model
 
 
 def start_metering() -> UsageMeter:
@@ -48,23 +49,20 @@ def start_metering() -> UsageMeter:
     return meter
 
 
-def _tier_price(model: str, tokens_in: int, tokens_out: int) -> float:
-    """USD from the config fallback price table (per 1M tokens): lite, embed, else main."""
-    if model == settings.LITE_MODEL:
-        p_in, p_out = settings.PRICE_LITE_IN, settings.PRICE_LITE_OUT
-    elif model == settings.EMBED_MODEL:
-        p_in, p_out = settings.PRICE_EMBED_IN, 0.0
-    else:
-        p_in, p_out = settings.PRICE_MAIN_IN, settings.PRICE_MAIN_OUT
-    return (tokens_in * p_in + tokens_out * p_out) / 1_000_000
+def fallback_price(model: str, tokens_in: int, tokens_out: int) -> float:
+    """USD from the config price table (per 1M tokens) when OpenRouter reports no cost."""
+    if model.endswith(":free"):
+        return 0.0
+    if model == settings.EMBED_MODEL:
+        return tokens_in * settings.PRICE_EMBED_IN / 1_000_000
+    return (tokens_in * settings.PRICE_MAIN_IN + tokens_out * settings.PRICE_MAIN_OUT) / 1_000_000
 
 
 def record_usage(model: str, response) -> None:
-    """Record one OpenRouter response's usage into the active meter (no-op if none).
+    """Record one OpenRouter response into the active meter (no-op if none or no `usage`).
 
-    Works for chat responses, the final streamed chunk (the only one carrying `usage`), and
-    embeddings (`completion_tokens` absent → 0). `completion_tokens` already includes reasoning
-    tokens. Cost is OpenRouter's billed `usage.cost` when present, else the config price table.
+    `model` should be the model that actually answered (`response.model`). Cost is
+    OpenRouter's billed `usage.cost` when present, else `fallback_price`.
     """
     meter = _meter.get()
     if meter is None:
@@ -72,9 +70,8 @@ def record_usage(model: str, response) -> None:
     usage = getattr(response, "usage", None)
     if usage is None:
         return
-    tokens_in = getattr(usage, "prompt_tokens", 0) or 0
-    tokens_out = getattr(usage, "completion_tokens", 0) or 0
     cost = getattr(usage, "cost", None)
     if not isinstance(cost, (int, float)):
-        cost = _tier_price(model, tokens_in, tokens_out)
-    meter.add(model, tokens_in, tokens_out, float(cost))
+        cost = fallback_price(model, getattr(usage, "prompt_tokens", 0) or 0,
+                              getattr(usage, "completion_tokens", 0) or 0)
+    meter.add(model, float(cost))

@@ -65,18 +65,6 @@ async def acquire(url: str) -> ContentBundle:
     return bundle
 
 
-async def escalate(url: str, bundle: ContentBundle) -> ContentBundle | None:
-    """Next, costlier tier for a `reel_*` bundle (transcript, then frames); None if none left."""
-    if not bundle.strategy.startswith("reel_"):
-        return None
-    return await social_video.escalate(bundle.metadata.get("canonical_url") or url, bundle)
-
-
-def cleanup(bundle: ContentBundle | None) -> None:
-    """Remove any temp files the job's strategies left behind."""
-    social_video.cleanup(bundle)
-
-
 async def _acquire(url: str) -> ContentBundle:
     strategy = resolve(url)
     try:

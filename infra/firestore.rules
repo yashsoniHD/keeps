@@ -1,115 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Profile + categories: owner read/write (categories also written by backend admin SDK,
-    // which bypasses rules).
+    // Profile: owner reads; the client may only write its own profile/prefs fields. Categories,
+    // counters, plan etc. are backend-only (admin SDK bypasses rules).
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys()
+             .hasOnly(['display_name', 'email', 'photo_url', 'region', 'onboarding_done', 'signup_ref', 'signup_at', 'created_at']);
     }
-    // Watchlist items (per-title, TMDB-enriched): owner reads live via onSnapshot.
-    // Backend-write-only — the worker writes enrichment, and watched/rating go through the
-    // /api/watch-items endpoints — so the client can never tamper with poster/provider data.
-    match /users/{uid}/watch_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Wishlist items (per-product, fanned out from product notes): same shape as watch_items.
-    // Owner reads live via onSnapshot; backend-write-only so the client can't tamper with the
-    // worker-written price/image/buy-url fields — promote/purchase/target-price go through
-    // /api/wish-items.
-    match /users/{uid}/wish_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Places items (per-venue, fanned out from place notes, Google-Places-enriched): same shape.
-    // Owner reads live via onSnapshot; backend-write-only so the client can't tamper with the
-    // worker-written photo/rating/coords fields — promote/visit/rating/notes go through
-    // /api/place-items. (places_cache, like tmdb_cache, is backend-only via default-deny.)
-    match /users/{uid}/place_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Recipe items (per-recipe, fanned out from recipe notes; no external API — a pure copy of the
-    // note's structured ingredients/steps): same shape. Owner reads live via onSnapshot;
-    // backend-write-only so the client can't tamper with the worker-written fields — the favorite
-    // toggle goes through /api/recipe-items.
-    match /users/{uid}/recipe_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Trip items (per-trip, fanned out from itinerary notes; a near-pure copy of the note's
-    // structured days/stops, with stops geocoded for the map): same shape. Owner reads live via
-    // onSnapshot; backend-write-only so the client can't tamper with the worker-written fields —
-    // the favorite toggle goes through /api/trip-items.
-    match /users/{uid}/trip_items/{itemId} {
-      allow read:  if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-    // Notes: owner reads/deletes; anyone may read a note the owner has shared
-    // (is_public == true) — that powers the public /p/{id} link. Created and updated
-    // only by the backend (which toggles is_public via the admin SDK).
+    // Notes: owner reads/deletes; created and updated only by the backend.
     match /notes/{noteId} {
-      allow read: if resource.data.is_public == true
-                  || (request.auth != null && request.auth.uid == resource.data.user_id);
-      allow delete: if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow create, update: if false;
-    }
-    // Collections (user-created folders). Owner-only, and — unlike notes — partly written
-    // directly by the client: name/description/icon/palette/updated_at are pure organisation
-    // (style, no note content), so the client may set those freely. Everything else on the doc
-    // — topic_embedding/topic_query (the match-scoring vector + the text it was built from),
-    // pinned_note_ids/excluded_note_ids (hard membership overrides), match_threshold, digest
-    // (the cached, Gemini-composed digest — services/gemini.py build_digest) — is written ONLY
-    // by the backend (services/collections.py rescore_collection / add_pin / add_exclusion;
-    // routers/collections.py POST .../digest), because a client that could set its own
-    // topic_embedding, pin/exclude list, or digest could forge membership or fabricate a
-    // digest without ever going through the embedding matcher / Gemini.
-    // create checks the INCOMING doc's user_id (no resource yet); other ops check the stored one.
-    match /collections/{cid} {
       allow read, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow create:       if request.auth != null && request.auth.uid == request.resource.data.user_id
-                          && !request.resource.data.keys().hasAny([
-                               'topic_embedding', 'topic_query', 'pinned_note_ids',
-                               'excluded_note_ids', 'match_threshold', 'digest',
-                             ]);
-      allow update:       if request.auth != null && request.auth.uid == resource.data.user_id
-                          && request.resource.data.user_id == resource.data.user_id
-                          // Backend-only fields must be byte-for-byte unchanged by a client write
-                          // (absent-before counts as a value too, so a client can't introduce
-                          // one of these keys for the first time either).
-                          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-                               'topic_embedding', 'topic_query', 'pinned_note_ids',
-                               'excluded_note_ids', 'match_threshold', 'digest',
-                             ]);
-    }
-    // Search index (one doc per note). Backend-write-only — the worker keeps it in sync
-    // (upsert on create/edit, delete on delete). Owner reads live via onSnapshot to power the
-    // "recent saves" strip; semantic search + Clip AI query it server-side.
-    match /search_index/{entryId} {
-      allow read:  if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow write: if false;
-    }
-    // Private per-note annotations (owner's "your thoughts"). Kept OUT of the note doc
-    // so a publicly shared note never exposes them. Owner reads; backend admin SDK writes.
-    match /annotations/{noteId} {
-      allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow write: if false;
+      allow create, update: if false;
     }
     // Jobs: owner reads (live status via onSnapshot); written only by the backend.
     match /jobs/{jobId} {
       allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow write: if false;
     }
-    // Personal Access Tokens (iOS shortcut): backend only — never client-readable.
-    match /shortcut_tokens/{tokenId} {
-      allow read, write: if false;
-    }
-    // Rate-limit counters and global kill switch: backend only.
-    match /usage/{docId} {
-      allow read, write: if false;
-    }
-    match /system/{docId} {
-      allow read, write: if false;
-    }
+    // Backend-only collections: PATs, rate-limit counters, global kill switch, TMDB cache,
+    // acquisition (scrape metadata) cache.
+    match /shortcut_tokens/{id} { allow read, write: if false; }
+    match /usage/{id}           { allow read, write: if false; }
+    match /system/{id}          { allow read, write: if false; }
+    match /tmdb_cache/{id}      { allow read, write: if false; }
+    match /acq_cache/{id}       { allow read, write: if false; }
   }
 }

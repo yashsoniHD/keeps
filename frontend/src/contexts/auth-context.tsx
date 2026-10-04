@@ -7,7 +7,8 @@ import {
   getAdditionalUserInfo,
   signOut as firebaseSignOut,
 } from "firebase/auth";
-import { auth } from "@/integrations/firebase/client";
+import { clearIndexedDbPersistence, terminate } from "firebase/firestore";
+import { auth, db } from "@/integrations/firebase/client";
 import { analytics } from "@/lib/analytics";
 import { ensureUserRegion, recordSignup } from "@/lib/firestore";
 import { readSignupRef, clearSignupRef } from "@/lib/attribution";
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
-      // Seed the Watchlist "where to watch" region once, the first time we see this user.
+      // Seed the "where to watch" region (TMDB providers on notes) once, the first time we see this user.
       if (u) ensureUserRegion(u.uid).catch(() => {});
       // Sign-out: wipe the SWR cache so a next user never sees the previous account's feed/walls.
       else clearCache();
@@ -59,6 +60,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await firebaseSignOut(auth);
+    // Wipe the persistent Firestore cache so the next person on a shared device can't read
+    // this user's notes from IndexedDB. `terminate` makes `db` unusable, so reload to get a
+    // fresh instance.
+    try {
+      await terminate(db);
+      await clearIndexedDbPersistence(db);
+    } catch {
+      /* another tab may still hold the cache; best-effort */
+    }
+    window.location.assign("/login");
   };
 
   return (

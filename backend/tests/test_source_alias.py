@@ -53,6 +53,9 @@ def _fake_db(docs):
         def limit(self, *a, **k):
             return self
 
+        def select(self, *a, **k):
+            return self
+
         def stream(self):
             return FakeStream()
 

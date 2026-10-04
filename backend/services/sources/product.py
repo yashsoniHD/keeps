@@ -147,7 +147,7 @@ async def _jina_reader(url: str) -> str | None:
     if settings.JINA_API_KEY:
         headers["Authorization"] = f"Bearer {settings.JINA_API_KEY}"
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(f"https://r.jina.ai/{url}", headers=headers)
         if resp.status_code == 200 and len(resp.text) > 500:
             # Jina forwards CAPTCHA interstitials as "successful" markdown — reject them.
@@ -176,7 +176,8 @@ async def acquire(url: str) -> ContentBundle:
     soup = BeautifulSoup(html, "html.parser") if html else BeautifulSoup("", "html.parser")
     json_ld = _extract_json_ld(soup)
     og = _og_meta(soup)
-    site_fields = _amazon_fields(soup, html) if "amazon" in url.lower() or "amzn." in url.lower() else {}
+    is_amazon = "amazon" in url.lower() or "amzn." in url.lower()
+    site_fields = _amazon_fields(soup, html) if is_amazon else {}
 
     # Readable text body (descriptions, reviews snippets) for context.
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
@@ -204,7 +205,8 @@ async def acquire(url: str) -> ContentBundle:
     # shell with og:title but no price/specs/body — looks "ok" but extracts nothing).
     thin = not json_ld and not site_fields.get("price") and len(body_text) < 800
     if blocked or thin:
-        md = await _jina_reader(final_url)
+        # Jina is always bot-blocked on Amazon: skip straight to search grounding there.
+        md = None if is_amazon else await _jina_reader(final_url)
         if md:
             return ContentBundle(
                 kind="text", text=md[:28000],

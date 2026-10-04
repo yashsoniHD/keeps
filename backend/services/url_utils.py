@@ -3,7 +3,7 @@ resolvers (`apify._url_kind` relies on a `/reel` substring) see one shape."""
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-_TRACKING = {"fbclid", "gclid", "igsh", "igshid", "mibextid"}
+_TRACKING = {"fbclid", "gclid", "igsh", "igshid", "mibextid", "stkn"}
 # /reels/<code>, /<user>/reel/<code>  ->  /reel/<code>/
 _IG_REEL = re.compile(r"^/(?:[^/]+/)?reels?/([\w-]+)/?$")
 

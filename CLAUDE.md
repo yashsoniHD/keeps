@@ -1,40 +1,10 @@
 # Clip Note
 
-Save any URL as a beautifully structured note. Paste a link — the app scrapes or downloads the content, sends it through Gemini, and produces a richly structured note with a cover image. Note types are AI-determined and open-ended; new categories emerge automatically.
+Save any URL as a structured note. Paste or share a link; the app analyses the content (video included) and produces a note you can browse in a feed, search, and filter by category. Note types are AI-determined and open-ended.
 
----
+**One job: link -> structured note -> feed / search / category filter.** Web app only (PWA share target + iOS Shortcut for phone capture). Removed (2026-10): Ask AI, collections, digests, Places/Watchlist/wishlist/recipe/trip mini-apps, public share links, annotations, favorites/pins, admin dashboard, category editor (rename/merge/icon), file/voice uploads. Old notes carrying those fields must still render (the frontend ignores unknown fields).
 
-## Product Focus
-
-**Primary use case (MVP wedge):** turn saved links into notes worth *re-reading* — the value is not
-in capturing, it's in the structured note being better than the source and easy to come back to.
-
-**Target user:** someone who already saves links constantly (recipes, articles, products, travel)
-and loses them in a graveyard of tabs/bookmarks they never reopen.
-
-**Retention hook:** a genuinely real-time feed (MVP), then weekly digest email (Phase 3) and
-full-text search (Phase 4). The capture flow is the easy part; *coming back* is the product.
-
-**Phased build order (binding — see the plan doc):** the work is sequenced so the core bet,
-monetization, retention, and growth each get de-risked in turn:
-
-| Phase | What | Gate |
-|-------|------|------|
-| 0 | Validate AI output on 20–30 real URLs | Blocks everything |
-| 1 | Core backend + frontend | Working capture-to-note |
-| 2 | PWA share target + iOS shortcut/PAT | Capture is a reflex |
-| 3 | Paywall + weekly digest email | Before public launch |
-| 4 | Typesense search + public notes | First month of usage |
-| 5 | Expo native share extension | After web validation |
-
-Hard rules: **don't skip Phase 0; don't launch publicly before Phase 3.**
-
-**Still deferred (post-Phase-5):** resurfacing/reminders, user-owned collections, Android native app,
-(Imagen covers dropped — links-only.)
-
-> **Phase 0 is a real gate, not a formality.** Before building, run the extraction on 20–30 real URLs
-> (recipes, products, articles, a paywalled article, a captioned video) and judge the output by hand.
-> If it isn't clearly better than the source, fix the prompt before writing production code.
+Open item: a paywall before public launch (the weekly digest is dropped). Retention = the feed and search.
 
 ---
 
@@ -52,369 +22,142 @@ Hard rules: **don't skip Phase 0; don't launch publicly before Phase 3.**
 | Service account | `clip-note-vercel` (`roles/datastore.user`), key supplied as `GOOGLE_SERVICE_ACCOUNT_JSON` (written to `/tmp/sa.json`, exported as `GOOGLE_APPLICATION_CREDENTIALS`) |
 | AI provider | OpenRouter (`OPENROUTER_API_KEY`) |
 | Firebase web app | "Clip Note" `1:674775099277:web:5a3293c1c0b570e392bfc4` |
-| Models | `TEXT_MODEL=deepseek/deepseek-v3.2` (extract/ask/digests) · `LITE_MODEL=qwen/qwen3-30b-a3b-instruct-2507` (classify/plan, text-only) · `VISION_MODEL=qwen/qwen3-vl-30b-a3b-instruct` (frames/carousels) · `YOUTUBE_MODEL=google/gemini-2.5-flash-lite` (YouTube URLs only) · `TRANSCRIBE_MODEL=openai/whisper-large-v3-turbo` (reel audio) · `EMBED_MODEL=qwen/qwen3-embedding-8b` (768-dim). All env-overridable in `backend/config.py`. |
+| Models | See "Models" below. All env-overridable in `backend/config.py`. |
 | TMDB (note enrichment) | `TMDB_BEARER` env on Vercel = TMDB v4 Read Access Token. Empty = enrichment no-op. Free API; "Streaming data by JustWatch" credit is mandatory wherever providers render. |
 | Billing budget | "Clip Note credits guard" ₹30,000 (50/80/100% alerts) |
-| Distill reference app | `/Users/yashsoni/dev/distill` |
-| Lovable frontend source | `/Users/yashsoni/Downloads/Clip Note` |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Why |
-|-------|-----------|-----|
-| Frontend | TanStack Start (React 19, Vite, Tailwind 4, shadcn/ui) | Lovable-designed frontend, kept as-is |
-| Auth | Firebase Authentication — Google Sign-In only | Single tap, no passwords, native GCP |
-| Database | Firestore | Schema-less — handles AI-invented note types without migrations |
-| Backend | FastAPI container on Vercel (Hobby) | Dockerized (ffmpeg + yt-dlp), scale-to-zero, free; 300 s per request |
-| Job dispatch | Self-POST worker + in-process retry + daily cron sweep | No queue service; ingest returns job_id fast, worker runs as a real in-flight request |
-| AI | OpenRouter — DeepSeek V3.2 (text), Qwen3 lite/vision, Gemini 2.5 Flash Lite (YouTube URLs only), Whisper (reel audio), Qwen3-embedding-8b (768-dim) | Cheap open models by default; Gemini only where it fetches the video itself |
-| Hosting | Firebase Hosting | Frontend static export |
+Frontend: Vite SPA (React 19, Tailwind 4, shadcn/ui), Firebase Hosting. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
 
 ---
 
 ## Architecture
 
 ```
-User pastes URL (links only; typed text notes also allowed — no file/voice uploads)
-  → POST /api/ingest (Firebase ID token; URL canonicalized via services/url_utils.py)
-  → Write Firestore: jobs/{job_id} {status: "pending"}
-  → services/dispatch.py: POST self /api/process/{job_id} with X-Worker-Secret, 1.5 s read timeout = "accepted"
-  → Return {job_id}
+paste / PWA share / iOS Shortcut (PAT)
+  -> POST /api/ingest (Firebase JWT or PAT; URL canonicalized; per-user duplicate source_url returns the existing note)
+  -> jobs/{id} pending -> self-POST /api/process/{id} (X-Worker-Secret, 1.5 s read timeout = accepted)
 
-[/api/process/{job_id}]  (X-Worker-Secret; idempotent claim — duplicates 409, completed = no-op; budget JOB_DEADLINE_S=270)
-  → Update job {status: "processing"}
-  → Resolve source (services/sources/): YouTube → transcript-first / direct URL; reels → tier cascade;
-    web → JSON-LD-first scrape; transient failure → in-process retry (5 s, 10 s) inside the budget
-  → Completeness gate may escalate reel tiers (never rejects a note)
-  → Cover: hot-linked og:image / thumbnail / first <img> / enrichment poster → frontend gradient hero (nothing persisted)
-  → OpenRouter → {content_type, title, ai_summary, data{}}   (structured data only — no HTML)
-  → Write Firestore: notes/{note_id}
-  → Update job {status: "completed", note_id}
+/api/process/{id}  (idempotent claim; budget JOB_DEADLINE_S=270; transient retry in-process)
+  reel (IG/TikTok/FB)  -> get the video file (Instagram: Apify only; TikTok/FB: yt-dlp, Apify if that fails)
+                          -> video+audio model (caption + top comments as context) -> note
+  YouTube (<=900 s)    -> Gemini watches the URL; on VideoUnreadable -> fallback scraper (captions/Apify)
+  carousel / images    -> vision model (<=6 images, 768 px)
+  web / X / Reddit / product -> text model
+  -> notes/{id} {content_type, title, ai_summary, data{}}; TMDB enrichment inside note.data for entertainment
+  -> jobs/{id} completed {note_id}
 
-[Vercel cron, daily] GET /api/process/sweep → re-dispatch stale pending/processing jobs (and drain deferred captures)
-
-[Frontend Firestore onSnapshot on jobs/{job_id}]
-  → Note appears automatically, navigate to /notes/{note_id}
+Daily cron GET /api/process/sweep re-dispatches stale pending/processing jobs.
+Frontend: onSnapshot on jobs/{id}; feed reads notes via Firestore; search/edit/delete/re-extract via the API.
 ```
 
-### Key Architecture Decisions
-
-- **No Supabase** — Firebase Auth + Firestore (kept after the move off Google Cloud; free tier)
-- **Dispatch, not a queue** — `services/dispatch.py::enqueue_process_job` self-POSTs the worker (the worker only answers when done, so the 1.5 s read timeout means "accepted"; connect error / 401 / 403 fails the job loudly). `process_job` retries transient failures in-process (5 s, 10 s) and stops at `JOB_DEADLINE_S = 270` (Vercel kills a request at 300 s); an out-of-budget job stays `pending` for the sweep. `GET /api/process/sweep` (daily cron, `Authorization: Bearer CRON_SECRET`) and ingest's per-user stale re-dispatch are the backstops; jobs older than 24 h or with 5 attempts are marked failed. Upgrade path: Vercel Queues + a small Node consumer.
-- **Single Vercel container, shared-secret worker auth** — `services/worker_auth.py::verify_worker_secret` checks `X-Worker-Secret` (fails closed when `WORKER_SECRET` is unset; the cron bearer is accepted only on the sweep route). Unset `WORKER_SECRET` locally = inline worker.
-- **Structured data, not stored HTML** — the model returns a structured `data` map; React templates render it (`RecipeNote`, `ItineraryNote`, `ProductNote`, `SummaryNote`, and a `GenericNote` fallback for AI-invented types). This keeps the design restylable, cheaper (fewer output tokens), consistent, and free of `dangerouslySetInnerHTML`. **Do not have the model emit HTML.**
-- **Dynamic note types** — the model invents `content_type` slugs, matched/normalized against the user's existing `categories` array (`users/{uid}.categories`) — no full-collection scan per ingest; `GenericNote` renders any type without a dedicated template
-- **Links-only; Imagen, uploads, voice, GCS removed.** No file/voice/video uploads, no cover persistence, no Imagen, no Cloud Storage. Covers are hot-linked og:image / thumbnail / first `<img>` / enrichment poster; a missing or expired one renders the **frontend gradient + type-icon hero** (`NoteContent.tsx` `CoverHero`). Existing image/pdf/voice notes still render.
-- **Reel cascade** (`services/sources/social_video.py`: `acquire` → `escalate` → `cleanup`) — never send whole video. T1 caption + top comments (yt-dlp metadata, one Apify call if thin) → T2 Whisper transcript (one ≤360p ≤25 MB download, ffmpeg mp3, `TRANSCRIBE_MODEL`; <15 words = no speech) → T3 ≤8 frames at 768 px to `VISION_MODEL` → else `private_or_blocked` (job fails, no note). A pure completeness gate in `process.py` (`_is_complete`, `_extract_with_escalation`) escalates only `reel_*` bundles, max 2 escalations, and never rejects a note (keeps the best partial). Strategy names `reel_caption|reel_transcript|reel_frames`; origin in `metadata.via` (`ytdlp|apify|og|oembed`). Escalation is skipped unless `elapsed + tier_cost + 45 < JOB_DEADLINE_S`.
-- **YouTube transcript-first** (`sources/youtube.py`) — one watch-page fetch (oEmbed fallback). ≤180 s (Shorts) → `YOUTUBE_MODEL` direct; longer with transcript ≥200 chars → text bundle `youtube_transcript` on `TEXT_MODEL`; longer, no transcript, ≤900 s → `YOUTUBE_MODEL` direct; >900 s → Apify subtitles, else description-only. After two YouTube-model failures, one `TEXT_MODEL` call from title + description.
-- **URL canonicalization** — `services/url_utils.py::canonical_url()` (pure, called from `IngestRequest._clean_url`) strips `utm_*`, `fbclid`, `gclid`, `igsh`, `igshid`, `mibextid`, TikTok share params (`si` only on YouTube hosts) and normalizes reel paths; Instagram/FB `/share/` links are resolved in `sources.acquire` (one non-following GET, `metadata["canonical_url"]`).
-- **Cost guardrails are mandatory** — per-user daily ingest cap + per-user note cap + a global daily kill-switch counter, enforced in `/api/ingest`; `APIFY_DAILY_GLOBAL_CAP` bounds Apify. OpenRouter spend is metered per call (`usage.cost`, falling back to `PRICE_*` per-tier rates) into `lifetime_cost_usd` / `tok_cost_usd`. Keep the GCP billing budget as a tripwire.
+Key decisions:
+- **Structured data, not HTML.** The model returns `data`; React templates render it (Recipe, Product, Summary, Workout, Itinerary and Place as plain lists, Watch with TMDB posters, Generic fallback). Never have the model emit HTML.
+- **Dispatch, not a queue.** `services/dispatch.py` self-POSTs the worker; `JOB_DEADLINE_S=270` bounds retries; out-of-budget jobs stay `pending` for the sweep; jobs >24 h or 5 attempts fail.
+- **Worker auth fails closed** (`services/worker_auth.py`): empty `WORKER_SECRET` rejects `/api/process*`; locally it is unset and ingest runs the worker inline.
+- **Acquisition cache** (`acq_cache`, 6 h, keyed by canonical URL): scrape metadata only (caption, comments, media URL, thumbnail); never video bytes. Retries and the sweep reuse it.
+- **A save never fails just because the video was missing**: the note is built from caption + cover and marked thin.
+- **Search** queries `notes` directly: keyword substring on title/summary (`.select()` projection, 3-char minimum) + Firestore `find_nearest` on `notes.embedding` (user_id filter). No separate index collection.
+- **Cost guardrails are mandatory**: per-user daily ingest/search caps, per-user note cap, global daily spend counter (`system/usage-{date}`), `APIFY_DAILY_GLOBAL_CAP`, SSRF guard on every outbound fetch (`services/net_guard.py`).
+- **URL canonicalization** (`services/url_utils.py`) strips tracking params; IG/FB `/share/` links resolve in `sources.acquire`.
 
 ---
 
-## Current State
+## Models (OpenRouter `models: [free, paid]`; paid takes over on 429/error/timeout; defaults in `backend/config.py`)
 
-**Status: Phase 0 passed + Phase 1 deployed (2026-06-10); off-Google-Cloud migration built, cutover pending (2026-10-03)**
+| Job | Free first | Paid fallback |
+|---|---|---|
+| Reel video + audio | none (free omni demoted: 5-7x slower, capacity-limited) | `google/gemini-2.5-flash-lite` (~$0.002-0.011/clip) |
+| YouTube | none | `google/gemini-2.5-flash-lite` |
+| Images | none (gemma free 429'd every call; ling paid rejects >4 images) | `google/gemini-2.5-flash-lite` |
+| Text notes | none (free head demoted: fabrication) | `deepseek/deepseek-v3.2` |
+| Classify | rules, then none (free head demoted: 0% availability) | `qwen/qwen3-30b-a3b-instruct-2507` |
+| Embeddings (768-dim) | none | `qwen/qwen3-embedding-8b` |
 
-The app is live (until cutover): https://weekly-updates-automation.web.app → Cloud Run API → Cloud Tasks worker →
-Firestore. Phase 0 validated 20/20 real URLs (report: `phase0/REPORT.md`); the user explicitly
-passed the gate.
-
-### Architecture notes that supersede older sections of this file
-- **Pre-cutover items below that mention Cloud Run, Cloud Tasks, Vertex/Gemini 3.x, Imagen or GCS describe the legacy deployment** — the Vercel + OpenRouter design in Architecture / Key Architecture Decisions above is current.
-- **Source-aware content resolver** (`backend/services/sources/`) replaced the binary
-  video-vs-webpage split: YouTube → direct Gemini URL analysis (no download); Instagram/FB/TikTok
-  → yt-dlp → GCS → `gs://` URI; Reddit → RSS-first (`.json` is bot-blocked); Amazon/products →
-  tiered scrape (mobile UA + JSON-LD + selectors; Firecrawl tier never needed so far); generic
-  web → JSON-LD-first scrape.
-- **Models:** `gemini-3.5-flash` + `gemini-3.1-flash-lite` on the **`global` endpoint** (3.x 404s
-  on us-central1). Gemini 3.x thinks by default — never set tight `max_output_tokens` (thoughts
-  consume it and `response.text` comes back None). Vertex requires explicit `mimeType` on
-  `FileData` even for YouTube URLs.
-- **Anti-generic + anti-fabrication prompts** (`backend/services/gemini.py`): per-type
-  `TYPE_PROMPTS` (incl. `workout`), composer building blocks for invented slugs, classifier rules
-  (no `general`; discussion threads are never plan-types), hard NEVER-FABRICATE rule.
-- **Datacenter-IP findings (verified on deployed worker):** Instagram downloads work cookie-less;
-  YouTube's yt-dlp *probe* is bot-blocked → non-fatal, falls back to oEmbed + direct Gemini path.
-- **IAM gotcha:** `clip-note-sa` needs `roles/iam.serviceAccountUser` **on itself** to enqueue
-  OIDC-signed Cloud Tasks (tokenCreator is not enough). Baked into `infra/setup.sh`.
-- Frontend is a **vanilla Vite SPA** (TanStack Start/SSR was stripped for Firebase Hosting);
-  templates: Recipe/Itinerary/Product/Summary/**Workout** + GenericNote
-  (facts/sections/steps/table/checklist/quotes blocks); open-slug design system in
-  `frontend/src/lib/note-meta.ts`.
-- **Ask AI is query-aware RAG, not single-shot semantic** (`routers/ask.py` + `services/gemini.py`):
-  a lite **planner** (`plan_ask` → `AskPlan`) turns each message into a structured filter set, then
-  retrieval is *built from the plan*, not always vector: **temporal** (`period`) → tz-aware
-  date-window query (client sends `tz_offset_minutes`; the model emits a *period keyword* and the
-  backend does the date math — "today" is the user's local day, not UTC); **exhaustive/aggregate**
-  (`content_types`, `exhaustive`) → the full filtered set, not a top-K shortlist; **semantic** →
-  planner picks ids from a *recent ∪ vector* candidate pool; **`scope=general`** → a plain
-  conversational answer with **no note refs and no citations** (off-notes follow-ups don't get forced
-  through notes). Coverage ("Based on N of M") surfaces any cap truncation. Two intents *write* notes:
-  `output != prose` → `synthesize` builds a COMPOSER-block **artifact** (itinerary / meal-plan +
-  deduped grocery list / comparison / checklist); `intent=create` → `create_note` authors one from the
-  whole conversation. Both return an `ArtifactNote` the UI renders via **GenericNote blocks** and saves
-  with `POST /api/notes/consolidated` (`template:"composed"` forces the generic renderer; `source:"ai"`,
-  `acquisition: ai_consolidated|ai_created`, `source_note_ids`). Caps: planner+answer are 2 Gemini
-  calls metered as one ask; `ASK_RECENT_POOL`/`ASK_EXHAUSTIVE_CAP` in config.
-
-### Next (per the phase table)
-- [x] Phase 2 (2026-06-10): PWA share target (`/share` route, manifest, SW, icons) + iOS
-      shortcut PATs (`cn_<id>.<secret>`, bcrypt; `require_user` accepts Firebase JWT or PAT;
-      Settings → "Capture from your phone"). Feed UX: delete, source filter, layout toggle,
-      responsive 1–4 col grid.
-- [x] Production hardening (2026-06-11, plan: `2026-06-11-production-readiness.md`):
-      SSRF guard on every outbound fetch (`backend/services/net_guard.py` — validates each
-      redirect hop; BlockedURLError is permanent, no fallback note); PAT lockout (10 failed
-      attempts) + 5-token cap; structured JSON logging (`services/logging_setup.py` —
-      job_id/user_id/url are queryable Cloud Logging fields); `/api/client-errors` browser
-      error sink; Gemini extract retry-once; Firestore PITR + daily backups (30d retention);
-      Cloud Tasks max-backoff 600s; Cloud Run max-instances 10; uptime check on /health +
-      email alerts (ERROR logs, queue depth >100) → yash@goheydigital.com; storage IAM
-      narrowed objectAdmin→objectUser; hosting security headers (**CSP is report-only —
-      flip to enforcing after checking violation reports**); frontend: 401 retry w/ token
-      refresh, deep-link/share survive login redirect, feed pagination + server-side type
-      filter, client error reporting; `backend/tests/` (30 tests) + GitHub Actions CI.
-- [x] Admin dashboard (2026-06-12): per-user usage + cost. Gemini token spend metered
-      via a request-scoped contextvar meter (`services/usage_meter.py`) — `gemini.py` calls
-      `record_usage` after every `generate_content` (output = candidates **+ thoughts**, since
-      3.x bills thinking tokens); `flush_usage` writes per-tier lifetime counters to
-      `users/{uid}` + global daily to `system/usage-{date}`. `GET /api/admin/stats`
-      (`routers/admin.py`, gated to `ADMIN_EMAILS` by **verified Firebase email**) joins
-      Firebase Auth identity + Firestore note counts + token counters; cost derived at
-      read-time from `GEMINI_PRICE_*` config (raw tokens stored, never $; rates confirmed
-      vs live pricing — 3.5-flash $1.50/$9.00, 3.1-flash-lite $0.25/$1.50 per 1M in/out).
-      Hidden `/admin` route + Settings link (admin-only). Deployed 2026-06-12 (Cloud Run
-      rev 00014-z6n + clipnote.web.app). No IAM grant needed: the runtime SA already has
-      `firebaseauth.users.get` via `roles/firebase.sdkAdminServiceAgent`, which is what
-      `auth.list_users()` requires.
-- [x] Ask AI query-aware RAG (2026-06-14): replaced the single `vector → select → answer` path
-      with a **planner-routed** pipeline (temporal / exhaustive / semantic / general) + structured
-      **artifacts** (consolidate notes → itinerary/meal-plan/comparison, "Save as note") +
-      **create-note-from-chat**. Fixes "summary of today's notes returned random notes" (tz-aware
-      date window) and general/off-notes follow-ups still citing notes (general-chat mode). New:
-      `AskPlan`/`ArtifactNote` models, `plan_ask`/`answer_chat`/`synthesize`/`create_note` in
-      gemini.py, `POST /api/notes/consolidated`, `tz_offset_minutes`, `ASK_RECENT_POOL`/
-      `ASK_EXHAUSTIVE_CAP`; 28 new tests (133 total). Deployed (Cloud Run rev 00032-zlr +
-      clipnote.web.app). Plan: `~/.claude/plans/think-from-an-average-vivid-knuth.md`. Deferred:
-      location-aware retrieval ("restaurants in Bandra") + cross-session chat persistence.
-- [x] Notes-first collapse (2026-07-10): removed the 5 mini-apps (routes, walls, item
-      subcollections, `/api/{watch,wish,place,recipe,trip}-items` routers, per-app tests) and
-      made **every capture a note again**, with TMDB/Places/price enrichment folded into
-      `note.data` by the new `services/enrich.py` (see "Notes-first" under Firestore
-      Collections). Home = the feed (single `Feed` component, `home` variant adds greeting +
-      capture chips + user Collections); search/Ask/nav/citations are notes-only;
-      `search_index` is notes-only and carries `content_type`. Existing items folded back via
-      `scripts/migrate_items_to_notes.py` (merge/regroup/idempotent + `--heal-refs`). Dropped
-      on purpose: status buckets, item ratings, TMDB/Places add-by-search. 336 backend tests.
-      Plan: `~/.claude/plans/i-feel-like-the-swirling-bentley.md`.
-- [x] Wishlist/Recipes/Trips fan-out removed for real (2026-07-12): despite the 2026-07-10 bullet
-      above, the backend had kept fanning every product/recipe/itinerary note into
-      `wish_items`/`recipe_items`/`trip_items` with zero remaining callers; that fan-out, their
-      routers, and their now-dead services (`wishlist.py`/`recipes.py`/`itineraries.py`) are
-      deleted. Watchlist and Places walls, and their fan-out/enrichment, are untouched.
-- [x] Off Google Cloud → Vercel + OpenRouter, links-only (2026-10-03; code complete, 693 tests):
-      Vertex/Gemini → OpenRouter (`_chat` helper in `services/gemini.py`, sync `OpenAI` client, `JSON_SUFFIX`
-      for json mode; Gemini 2.5 Flash Lite only for YouTube URLs; Whisper `transcribe`; Qwen3 embeddings,
-      `EMBED_TEXT_VERSION` 3); Cloud Tasks/OIDC → `dispatch.py` + `worker_auth.py` + sweep cron (also fixed
-      the old `drain-deferred` route-shadowing bug); reel cascade + YouTube transcript-first + URL
-      canonicalization (`url_utils.py`); `GOOGLE_SERVICE_ACCOUNT_JSON` credentials bootstrap in `config.py`.
-      Removed: file/voice/video uploads (`uploads.py`, `VoiceRecorder`), cover persistence (`covers.py`),
-      Imagen, Cloud Storage/GCS, Cloud Tasks, Firecrawl tier. Firebase Auth/Firestore/Hosting unchanged.
-      **Cutover (Phase F) is pending**: create the Vercel project, create the `clip-note-vercel` SA key
-      (ask first), set env vars, `vercel deploy --prod`, smoke test, embeddings re-index (search is wrong
-      until done), frontend deploy (new `VITE_API_URL`), soak, then GCP teardown (each step asks first).
-      Runbook: `infra/vercel.md`. Mobile app still points at Cloud Run (`mobile/README-API-URL.md`).
-- [ ] Phase 3: paywall + weekly digest — **required before public launch**
-- [ ] Phase 4: Typesense search + public notes · Phase 5: Expo share extension
-
----
-
-## File Structure (target)
-
-```
-clip-note/
-├── CLAUDE.md
-├── frontend/                        # TanStack Start app
-│   ├── src/
-│   │   ├── routes/                  # file-based routes
-│   │   │   ├── __root.tsx
-│   │   │   ├── index.tsx            # home feed
-│   │   │   └── notes.$noteId.tsx    # note detail
-│   │   ├── integrations/
-│   │   │   └── firebase/            # replaces supabase/
-│   │   │       ├── client.ts
-│   │   │       ├── auth.tsx
-│   │   │       └── auth-middleware.ts
-│   │   ├── components/
-│   │   │   └── note/templates/
-│   │   │       ├── RecipeNote.tsx
-│   │   │       ├── ItineraryNote.tsx
-│   │   │       ├── ProductNote.tsx
-│   │   │       ├── SummaryNote.tsx
-│   │   │       └── GenericNote.tsx  # new — smart fallback for AI-invented types
-│   │   └── lib/
-│   │       ├── firestore.ts         # getNotes, getNote, watchJob
-│   │       └── api.ts               # ingest(url) → {job_id}
-│   ├── vite.config.ts               # custom (replaces @lovable.dev/vite-tanstack-config)
-│   └── package.json
-├── backend/
-│   ├── main.py
-│   ├── config.py
-│   ├── routers/
-│   │   ├── ingest.py                # POST /api/ingest — fast path
-│   │   ├── process.py               # POST /api/process/{job_id} worker + GET /api/process/sweep (cron)
-│   │   ├── notes.py                 # GET/DELETE /api/notes
-│   │   └── jobs.py                  # GET /api/jobs — request history
-│   ├── services/
-│   │   ├── firebase.py              # firebase-admin: auth + Firestore
-│   │   ├── gemini.py                # OpenRouter: _chat, extract, classify, ask, transcribe (name is historical)
-│   │   ├── dispatch.py              # enqueue_process_job — self-POST worker dispatch
-│   │   ├── worker_auth.py           # verify_worker_secret (X-Worker-Secret / cron bearer)
-│   │   ├── url_utils.py             # canonical_url — strips tracking params
-│   │   ├── sources/                 # youtube, social_video (reel cascade), product, reddit, generic…
-│   │   ├── scraper.py               # from Distill (unchanged)
-│   │   └── downloader.py            # from Distill (unchanged)
-│   ├── models/note.py               # NoteExtraction Pydantic model
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── Dockerfile.vercel            # Vercel container image (binds $PORT)
-│   └── vercel.json                  # daily cron → /api/process/sweep
-├── mobile/README-API-URL.md         # mobile still targets the old Cloud Run URL
-└── infra/
-    ├── vercel.md                    # Vercel deploy, env vars, re-index runbook
-    └── setup.sh                     # legacy gcloud bootstrap (pre-cutover)
-```
+Free heads were trialled and demoted on 2026-10-04 per phase0/ab (fabrication, 0% availability, latency); re-trial by setting the *_MODELS env vars. Free endpoints need OpenRouter Settings -> Privacy to allow them.
 
 ---
 
 ## Firestore Collections
 
 ```
-users/{uid}           display_name, email, photo_url, categories[], created_at
-                      plan ("free"|"pro"), stripe_customer_id     # added in Phase 3
-                      lifetime_tokens_{in,out}_{main,lite,embed}, lifetime_ai_calls,
-                      lifetime_cost_usd                           # admin dashboard (OpenRouter usage.cost)
-notes/{note_id}       user_id, content_type, title, ai_summary,
-                      source_url, source_domain, source ("web"|"shortcut"|"pwa"|"ai"),
-                      cover_image_url, data (flexible map), created_at, updated_at
-                      template, acquisition, embedding (Vector 768)
-                      is_public (default false)                   # added in Phase 4
-                      source_note_ids[]  # Ask-AI notes (source="ai", template="composed")
-jobs/{job_id}         user_id, url, content, source, status, note_id, error,
-                      attempt_count, created_at, updated_at
-usage/{uid}-{date}    user_id, date, ingest_count, ask_count   # per-user daily rate limit
-system/usage-{date}   date, note_count, ask_count,             # global daily kill-switch
-                      tok_tokens_{in,out}_{main,lite,embed}, tok_ai_calls,
-                      tok_cost_usd                     # global daily token + $ spend
-shortcut_tokens/{id}  user_id, token_hash (bcrypt), label, created_at, last_used_at  # Phase 2 (PAT)
-tmdb_cache/{key}      cached TMDB details/providers (24h TTL); backend-only
-places_cache/{key}    cached Google Places lookups; backend-only
-search_index/{note-id}  user_id, kind ("note"), ref_id, content_type, title, summary,
-                      cover_image_url, collection_id?, embedding  # backend-write-only
+users/{uid}          display_name, email, photo_url, region, categories[], created_at
+notes/{note_id}      user_id, content_type, title, ai_summary, source_url, source_domain,
+                     source ("web"|"shortcut"|"pwa"), cover_image_url (hot-linked),
+                     data (flexible map), template, acquisition, embedding (Vector 768),
+                     embedding_version, created_at, updated_at
+jobs/{job_id}        user_id, url, status, note_id, error, attempt_count, created_at, updated_at
+shortcut_tokens/{id} user_id, token_hash (bcrypt), label, created_at, last_used_at   (backend-only)
+usage/{uid}-{date}   ingest_count, search_count          (backend-only rate limits)
+system/usage-{date}  global daily note count + spend      (backend-only kill switch)
+tmdb_cache/{key}     TMDB details/providers, 24 h         (backend-only)
+acq_cache/{key}      scrape metadata by canonical URL, 6 h (backend-only)
 ```
 
-**Notes-first (2026-07-10 — the mini-app collapse):** the five mini-apps (Watchlist, Wishlist,
-Recipes, Places, Trips) were removed; **every capture creates a note again** and their enrichment
-now lands **inside `note.data`** via `services/enrich.py` (`enrich_note_data`, dispatched on the
-same `is_entertainment`/`is_shopping`/`is_places`/`is_recipe`/`is_itinerary` matchers in
-`gemini.py`, which now gate enrichment instead of item fan-out):
-- entertainment → each `data.titles[]` entry gains TMDB fields (`tmdb_id`, `poster_url`,
-  `overview`, `genres`, `providers[]` + `providers_region`); the first poster is adopted as the
-  note cover only when coverless. Rendered by `WatchNote.tsx` (poster cards + "where to watch";
-  **JustWatch attribution is mandatory wherever providers render**).
-- place → each `data.venues[]` entry gains Google Places fields (`photo_url`, `lat/lng`, live
-  `rating`, `opening_hours`, `action_links[]` — the region-aware Directions/Reserve/Order row);
-  first photo adopted as cover. `PlaceNote.tsx` renders a venues map (`VenuesMap`) + enriched blocks.
-- itinerary → `data.days[].stops[]` geocoded (`lat/lng`, capped at `TRIP_MAX_GEOCODED_STOPS`);
-  `ItineraryNote.tsx` renders the stops map (`TripMap`) + a localStorage `PackingList`.
-- product → `data.price` parsed into `price_amount` + `currency`.
-- recipe → no external enrichment (already complete).
-Enrichment fields are snake_case (looked-up) vs Gemini's camelCase (source-said); every path is
-best-effort — a miss leaves a valid plain note. Cover ladder (hot-linked, never persisted): source image → enrichment
-poster/photo → frontend gradient hero. `users/{uid}.region` still feeds providers + action links
-(Settings → Region). Status buckets (`to_watch`/`purchased`/…), item ratings, and the TMDB/Places
-"add by search" flows were deliberately dropped; favorites survive as `note.is_favorite`.
-Existing item docs were folded back into notes by `scripts/migrate_items_to_notes.py`
-(merge-onto-live-note, listicle regrouping, idempotent; `--heal-refs` remaps composed notes'
-prefixed item ids). Frontend: home (`/`) IS the feed (`Feed home` variant — greeting + capture
-chips + user Collections above the stream); `search_index` is notes-only and hits carry
-`content_type`; Ask AI grounding, citations, and `goToNote` are notes-only.
+`users/{uid}.categories` is the source of truth for a user's note types (ArrayUnion on each new slug). Notes store structured `data` only. Legacy collections for removed features (conversations, place_items, watch_items, recipe/trip/wish items, collections, annotations, search_index, places_cache) are left in Firestore until the owner deletes them; rules deny all client access.
 
-`users/{uid}.categories` is the source of truth for a user's note types (kept current with
-`ArrayUnion` on each new slug) — read it instead of scanning `notes`. `notes` docs store **structured
-`data` only, never rendered HTML.**
+Note templates: `recipe`, `itinerary` (plain list), `product`, `summary`, `workout`, `entertainment` (`titles[]` + TMDB fields; resolved by data shape), `place` (plain `venues[]` list), `*` -> GenericNote. Legacy `template:"composed"` notes render via GenericNote.
 
-**Note types** — known templates with exact data schemas:
-- `recipe` → `{totalTime, servings, difficulty, ingredients: [{group?, items}], steps}`
-- `itinerary` → `{destination, duration, budget, days: [{day, title, stops: [{time, place, note, lat?, lng?}]}]}`
-- `product` → `{price, brand, rating, buyUrl, specs: [{label, value}], pros, cons}` (+ enriched `price_amount`, `currency`)
-- `summary` → `{medium, readTime?, videoLength?, tldr, keyPoints, quotes: [{text, timestamp?}]}`
-- `entertainment` → `{titles: [{title, year?, mediaType, creator?, why?, …TMDB enrichment}], listTheme?}`
-  (resolved by **data shape** — `titles[]` of objects — since its slug is open; see `resolveTemplate`)
-- `place` → `{venues: [{name, location?, mustTry?, …source fields, …Places enrichment}], listTheme?}`
-- `*` → any AI-invented type rendered by `GenericNote`
-- `template:"composed"` → Ask-AI artifact/created note: COMPOSER blocks
-  (`facts/sections/steps/table/checklist`), always rendered by `GenericNote` (its
-  `content_type` is a friendly slug for the pill only, never a fixed template)
+---
+
+## File Structure
+
+```
+backend/
+  main.py, config.py
+  routers/   ingest, process (worker + sweep), notes (PATCH/DELETE/reextract), search,
+             categories (list, delete-with-retag), tokens, client_errors, health
+  services/  firebase, gemini (OpenRouter _chat, extract, extract_from_video, classify),
+             embeddings, usage_meter, dispatch, worker_auth, url_utils, net_guard, enrich (TMDB),
+             apify, sources/ (youtube, social_video, product, reddit, twitter, generic ...)
+  models/note.py
+  scripts/   verify_apify.py, reindex_embeddings.py, ab_baseline.py
+  Dockerfile.vercel, vercel.json (daily sweep cron), requirements.txt, tests/
+frontend/    Vite SPA: routes (feed/home, note detail, search, settings, share target),
+             components/note/templates/*, lib/api.ts, lib/firestore.ts
+infra/       firestore.rules, firestore.indexes.json, vercel.md, setup.sh, build_shortcut.py
+```
 
 ---
 
 ## Commands
 
 ```bash
-# Frontend dev
-cd frontend && npm install && npm run dev
-
-# Backend dev
-cd backend && pip install -r requirements.txt
-uvicorn main:app --reload --port 8080
-
-# (WORKER_SECRET unset locally = inline worker; no self-POST needed)
-
-# Deploy backend (Vercel container; root = backend; env vars per infra/vercel.md)
-cd backend && vercel deploy --prod
-
-# Re-index embeddings after the Vertex -> Qwen switch (infra/vercel.md)
-cd backend && python -m scripts.backfill_content_embeddings --apply --per-minute 60
-# collections: clear topic_embedding first, then python -m scripts.migrate_smart_collections (or Rescan per collection)
-
-# Manual sweep of stale jobs
-curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/process/sweep
-
-# Deploy frontend
+cd frontend && npm install && npm run dev            # frontend
+cd backend && pip install -r requirements.txt && uvicorn main:app --reload --port 8080   # backend (WORKER_SECRET unset = inline worker)
+cd backend && .venv/bin/python -m pytest -q          # tests
+cd backend && vercel deploy --prod                   # backend (env vars: infra/vercel.md)
 cd frontend && npm run build && firebase deploy --only hosting
-
-# Deploy Firestore rules + indexes
-firebase deploy --only firestore
+firebase deploy --only firestore                     # rules + indexes
+cd backend && python -m scripts.reindex_embeddings --apply   # after changing EMBED_MODEL/EMBED_TEXT_VERSION
+curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/process/sweep   # manual sweep
 ```
 
 ---
 
 ## Known Gotchas
 
-- **Vercel limits a request to 300 s**: the worker is one request. `JOB_DEADLINE_S = 270` bounds retries and reel escalation; out-of-budget jobs stay `pending` for the sweep. `CLAIM_STALE_SECONDS` is 6 min for the same reason. Hobby cron is daily (±59 min, no retries).
-- **Worker secret fails closed**: `WORKER_SECRET` empty → `/api/process*` rejects everything (and ingest runs the worker inline for local dev). Deployment Protection must allow the production alias or self-POST, CORS preflight and cron all 401.
-- **Process worker must be idempotent**: duplicate dispatches (sweep, per-user re-dispatch) hit `_claim_job` and get 409; return early if `completed`, and mark permanent failures `failed` instead of raising 5xx.
-- **DeepSeek JSON mode needs the word "json"** in the prompt — `_chat` appends `JSON_SUFFIX`; prompts that omit it (e.g. `COMPOSER_PROMPT`) would 400 otherwise.
-- **`LITE_MODEL` is text-only**: `classify` never sees images; images reach `extract` via `VISION_MODEL`.
-- **Embeddings must be exactly `EMBED_DIM` (768)**: send `dimensions`; if the provider ignores it the vector is truncated and renormalized; the Firestore vector indexes (`notes`, `search_index`) must match. Old Vertex vectors are incompatible — re-index after cutover.
-- **Admin cost is legacy vs stored**: days ≥ `COST_CUTOVER_DATE` (default 2026-10-04, `routers/admin.py`) use stored `tok_cost_usd` / `lifetime_cost_usd`; earlier days use the old per-token formula, so pre-cutover spend drops from a user's lifetime once they have post-cutover usage (daily trend is exact).
-- **yt-dlp from Vercel IPs may be blocked**: if reel T1 success is poor on the first smoke test, go Apify-first for reels (still cents/day). YouTube never depends on our IP (Gemini fetches the URL).
-- **Instagram share links carry `igsh`** (and `/share/...` redirects): canonicalized away by `url_utils.canonical_url` / `sources.acquire`; dedupe and `source_url` use the canonical URL.
-- **Blocking SDK calls**: the OpenAI client, yt-dlp, and `auth.verify_id_token` are synchronous — call them via `await asyncio.to_thread(...)` inside the async routes (`dispatch.enqueue_process_job` too).
-- **Model IDs**: defaults live in `backend/config.py`; verify against the live OpenRouter catalog (`GET /api/v1/models`) before changing — a wrong ID fails immediately.
-- **yt-dlp in Docker**: Requires `ffmpeg` in the image (`Dockerfile.vercel` keeps it); frames/audio extraction uses it.
-- **TanStack Start SSR vs static**: For Firebase Hosting, build as static export. If SSR is needed later, move it to the Vercel container or Vercel itself.
-- **Firestore real-time on mobile web**: `onSnapshot` works on mobile browsers but requires the Firebase JS SDK (not the admin SDK). Keep client-side Firestore calls in `src/integrations/firebase/client.ts`.
-- **Vite config**: The Lovable `@lovable.dev/vite-tanstack-config` wraps Vite + TanStack Start + Tailwind + Nitro. Replacing it requires configuring all four manually — see the TanStack Start docs for the correct Vite plugin order.
+- **Vercel limits a request to 300 s.** The worker is one request; `JOB_DEADLINE_S=270`; `CLAIM_STALE_SECONDS` 6 min. Hobby cron is daily.
+- **Deployment Protection must allow the production alias**, or self-POST, CORS preflight and cron all 401.
+- **Worker must be idempotent**: duplicate dispatches hit `_claim_job` (409); completed = no-op; permanent failures are marked `failed`, not 5xx.
+- **Video request size**: a 25 MB mp4 is ~33 MB base64. `VIDEO_MAX_BYTES` stays 25 MB (Gemini accepted an 80 MB body in the spike); a hard ~120 s `VIDEO_CALL_TIMEOUT_S` lets a fallback fire on timeout if a chain has more than one model.
+- **Without `APIFY_TOKEN`, Instagram reels are never watched; every IG note is caption-only (thin).**
+- **Video duration gate + re-encode**: reels over `MAX_VIDEO_SECONDS` (600) are not sent; YouTube is sent directly only up to `YOUTUBE_MAX_DIRECT_SECONDS` (900; ~8 s latency per minute of video, an 11-min video took 88 s and a 31-min one timed out the 120 s call cap). Files over 25 MB but under 10 min are re-encoded with ffmpeg to fit, so the ffmpeg in `Dockerfile.vercel` must include libx264.
+- **Instagram CDN video URLs expire in hours**; the acquisition cache keeps the URL, not the bytes. Expired -> run the ladder again.
+- **DeepSeek JSON mode needs the word "json"** in the prompt (`_chat` appends `JSON_SUFFIX`). Models without `response_format` (e.g. a re-trialled free omni) rely on the prompt enforcing JSON and the parser repairing it.
+- **Embeddings must be exactly 768 dims**; the `notes` vector index (user_id + embedding) must match. Re-index after changing the embed model.
+- **TMDB**: "Streaming data by JustWatch" attribution is mandatory wherever providers render. `TMDB_BEARER` empty = enrichment no-op.
+- **Blocking SDK calls** (OpenAI client, yt-dlp, `verify_id_token`) go through `asyncio.to_thread`.
+- **Model IDs**: verify against `GET https://openrouter.ai/api/v1/models` before changing; a wrong ID fails immediately.
+- **yt-dlp/ffmpeg**: `Dockerfile.vercel` keeps ffmpeg. yt-dlp from Vercel IPs may be blocked; Apify is the paid fallback.
+- **Firestore real-time on web** needs the JS SDK (client) in `src/integrations/firebase/client.ts`.
 
 ---
 
 ## Reference
 
-- Full spec: `/Users/yashsoni/.claude/plans/i-am-building-the-curried-axolotl.md`
-- Distill backend (reference): `/Users/yashsoni/dev/distill/backend`
-- Lovable frontend (source): `/Users/yashsoni/Downloads/Clip Note`
+- Plan: `/Users/yashsoni/.claude/plans/make-the-app-more-humming-hippo.md`
+- Deploy runbook: `infra/vercel.md`

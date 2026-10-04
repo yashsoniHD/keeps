@@ -1,0 +1,944 @@
+{
+  "surviving_notes": [
+    {
+      "note_id": "25ddea07-cc3a-5de3-9320-206b12bba2d5",
+      "source_url": "https://www.instagram.com/reel/DdyvwuOq3vf/?stkn=bXFuZnZrdXVtODJq",
+      "input_type": "url",
+      "updated_at": "2026-10-04 06:15:58.923715+00:00",
+      "created_at": "2026-10-04 06:15:58.923715+00:00",
+      "embedding_version": 3,
+      "acquisition": "reel_caption",
+      "content_type": "recipe",
+      "source_domain": "instagram.com",
+      "source": "shortcut",
+      "ai_summary": "A healthy iced latte made by blending dates, dark chocolate, and instant coffee into a caramel-like sauce, then layering it with milk and ice for a low-calorie, high-protein coffee drink.",
+      "user_id": "5T5ZEKT6ihgCjadY47mBka30tHg2",
+      "cover_image_url": "https://scontent-iad6-1.cdninstagram.com/v/t51.71878-15/825269882_2215008462408910_2893931808529143041_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=107&ig_cache_key=Mzk5NTQ2NTg3NTc5MDE5OTc3NTIxNDE3OTgzNTMzNjA3NzQ%3D.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6IkNMSVBTLnhwaWRzLjY0MC5zZHIudmlkZW9fbmZyYW1lX2NvdmVyX2ZyYW1lLkMzIn0%3D&_nc_ohc=irLTQ6TdrUwQ7kNvwE47Gjq&_nc_oc=AdrU5IjT8xPAn6jn6zG4rpYitTHr_7CFP-WnKtqEGnp9hgji5IAfXcHr7opmCQFT5do&_nc_zt=23&_nc_ht=scontent-iad6-1.cdninstagram.com&_nc_gid=hv4O1sj7NASolan-dzMgMQ&_nc_ss=70689&oh=00_AQNLtcF_45VdignYqGXYJMfc5E6mBLUnpPcHzQMU_kjyBA&oe=6AC7B824",
+      "template": "recipe",
+      "title": "Date caramel iced latte",
+      "collection_ids": [],
+      "data": {
+        "tips": null,
+        "difficulty": "Easy",
+        "cuisine": null,
+        "totalTime": null,
+        "steps": [
+          "Add dates, dark chocolate, coffee, hot water, salt and vanilla essence to a mixer.",
+          "Blend until smooth and creamy to make your date caramel.",
+          "Add the date caramel to a glass.",
+          "Add ice cubes and pour in chilled low-fat milk.",
+          "Top with whipped coffee and serve chilled."
+        ],
+        "servings": "1",
+        "ingredients": [
+          {
+            "items": [
+              "3 soft dates, deseeded",
+              "1 piece dark chocolate",
+              "1 tbsp instant coffee",
+              "2\u20133 tbsp hot water",
+              "A pinch of salt",
+              "2\u20133 drops vanilla essence",
+              "Ice cubes",
+              "200 ml low-fat milk",
+              "Whipped coffee, for topping"
+            ]
+          }
+        ],
+        "calories": "~190\u2013210 kcal"
+      },
+      "collection_id": null
+    },
+    {
+      "note_id": "6fc3661a-c9f9-5795-bc11-f9c17d60e325",
+      "updated_at": "2026-10-03 12:42:57.157298+00:00",
+      "input_type": "url",
+      "source_url": "https://www.instagram.com/reel/DXOfVzQE08M/?stkn=MWl5MnRrN2Y3M2R2eA==",
+      "created_at": "2026-10-03 12:42:57.157298+00:00",
+      "embedding_version": 3,
+      "collection_id": null,
+      "content_type": "place",
+      "ai_summary": "Meghalaya offers a transformative travel experience with surreal landscapes, including driving through clouds, unreal waterfalls, and living root bridges, creating moments that stay with you.",
+      "user_id": "5T5ZEKT6ihgCjadY47mBka30tHg2",
+      "source_domain": "instagram.com",
+      "source": "shortcut",
+      "cover_image_url": "https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/670628836_17937674391210197_8871281217225430692_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=100&ig_cache_key=Mzg3NzE3NDE2Njc5Mzk2NTMyNDE3OTM3Njc0Mzg4MjEwMTk3.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6IkNMSVBTLnhwaWRzLjEwODAuc2RyLnZpZGVvX2RlZmF1bHRfY292ZXJfZnJhbWUuQzMifQ%3D%3D&_nc_ohc=a0SPtBmQ6VYQ7kNvwGeuK9g&_nc_oc=AdpACh-cA3sGNKyhceA2_6fuNfUOCZKsSTQr8q_KGKwyDpEsAgLS5J7HoADXJMlCxCU&_nc_zt=23&_nc_ht=scontent-iad6-1.cdninstagram.com&_nc_gid=F1bxDb_5P1PYWanvZNz_RQ&_nc_ss=70689&oh=00_AQMQVoNr8NA9R5wC4pc5XDrNGFtmscF0XVKBw5Tutqr6XQ&oe=6AC6B49E",
+      "template": "place",
+      "title": "Meghalaya travel guide",
+      "collection_ids": [],
+      "data": {
+        "facts": [
+          {
+            "label": "Region",
+            "value": "Meghalaya, Northeast India"
+          },
+          {
+            "label": "Experience",
+            "value": "Surreal landscapes, waterfalls, living root bridges"
+          }
+        ],
+        "venues": [
+          {
+            "location": "Meghalaya",
+            "highlights": [
+              "Waterfalls",
+              "Clouds",
+              "Green landscapes"
+            ],
+            "category": "travel destination",
+            "name": "Cherrapunji",
+            "why": "Known for waterfalls and as a travel destination in Meghalaya",
+            "action_links": [
+              {
+                "url": "https://www.google.com/maps/search/?api=1&query=Cherrapunji+Cherrapunji",
+                "kind": "directions",
+                "label": "Directions"
+              }
+            ],
+            "city": "Cherrapunji"
+          },
+          {
+            "location": "Meghalaya",
+            "highlights": [
+              "Travel hub",
+              "Scenic beauty"
+            ],
+            "category": "travel destination",
+            "name": "Shillong",
+            "why": "A key travel destination in Meghalaya",
+            "action_links": [
+              {
+                "url": "https://www.google.com/maps/search/?api=1&query=Shillong+Shillong",
+                "kind": "directions",
+                "label": "Directions"
+              }
+            ],
+            "city": "Shillong"
+          },
+          {
+            "location": "Dawki, Meghalaya",
+            "highlights": [
+              "Glass-like river"
+            ],
+            "category": "natural attraction",
+            "name": "Dawki river",
+            "why": "Features a clear, glass-like river",
+            "action_links": [
+              {
+                "url": "https://www.google.com/maps/search/?api=1&query=Dawki+river+Dawki",
+                "kind": "directions",
+                "label": "Directions"
+              }
+            ],
+            "city": "Dawki"
+          },
+          {
+            "location": "Meghalaya",
+            "highlights": [
+              "Living root bridges",
+              "Hidden villages"
+            ],
+            "category": "natural attraction",
+            "name": "Living root bridges",
+            "why": "Unique natural structures and hidden villages",
+            "action_links": [
+              {
+                "url": "https://www.google.com/maps/search/?api=1&query=Living+root+bridges+Meghalaya",
+                "kind": "directions",
+                "label": "Directions"
+              }
+            ],
+            "city": "Meghalaya"
+          }
+        ],
+        "listTheme": "Meghalaya travel destinations and experiences"
+      },
+      "acquisition": "reel_caption"
+    }
+  ],
+  "links": [
+    {
+      "source_url": "https://www.instagram.com/reel/DdyvwuOq3vf/?stkn=bXFuZnZrdXVtODJq",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "a65e8397-ba57-459c-81a4-0049cd324b7b",
+          "updated_at": "2026-10-04 06:16:19.528698+00:00",
+          "input_type": "url",
+          "note_id": "25ddea07-cc3a-5de3-9320-206b12bba2d5",
+          "created_at": "2026-10-04 06:15:58.481414+00:00",
+          "source": "shortcut",
+          "user_id": "5T5ZEKT6ihgCjadY47mBka30tHg2",
+          "url": "https://www.instagram.com/reel/DdyvwuOq3vf/?stkn=bXFuZnZrdXVtODJq",
+          "destination": {
+            "kind": "note",
+            "note_id": "25ddea07-cc3a-5de3-9320-206b12bba2d5"
+          },
+          "attempt_count": 1,
+          "title": "Date caramel iced latte",
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/reel/DXOfVzQE08M/?stkn=MWl5MnRrN2Y3M2R2eA==",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "87ec9e72-bb55-4f65-8800-03e98a56c567",
+          "updated_at": "2026-10-03 12:43:30.739620+00:00",
+          "input_type": "url",
+          "note_id": "6fc3661a-c9f9-5795-bc11-f9c17d60e325",
+          "created_at": "2026-10-03 12:42:56.542053+00:00",
+          "url": "https://www.instagram.com/reel/DXOfVzQE08M/?stkn=MWl5MnRrN2Y3M2R2eA==",
+          "user_id": "5T5ZEKT6ihgCjadY47mBka30tHg2",
+          "source": "shortcut",
+          "destination": {
+            "note_id": "6fc3661a-c9f9-5795-bc11-f9c17d60e325",
+            "kind": "note"
+          },
+          "attempt_count": 1,
+          "title": "Meghalaya travel guide",
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/p/DZhzon_D9Ml/",
+      "source_domain": "instagram.com",
+      "kind": "post",
+      "jobs": [
+        {
+          "job_id": "19e7525f-53b3-4197-a513-949c1bdf739b",
+          "updated_at": "2026-06-24 11:16:57.084173+00:00",
+          "note_id": "aa3071fb-8b95-44e1-a4e1-801d7aa8ca33",
+          "created_at": "2026-06-24 11:16:02.918164+00:00",
+          "error": null,
+          "user_id": "8KYtOOfc3OQCbRsxwPxoP6LdwCF3",
+          "url": "https://www.instagram.com/p/DZhzon_D9Ml/",
+          "content": null,
+          "note_hint": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/reel/DYrSsjNp56D/?igsh=ZjBjb25janp0aHc5",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "5d9990d5-6ca1-45b5-8204-a31490bfe778",
+          "updated_at": "2026-06-14 05:14:31.826294+00:00",
+          "note_id": "17076c60-eaba-41eb-811a-e2e148315937",
+          "created_at": "2026-06-14 05:14:21.785804+00:00",
+          "error": null,
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "web",
+          "content": null,
+          "url": "https://www.instagram.com/reel/DYrSsjNp56D/?igsh=ZjBjb25janp0aHc5",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/p/Dasqshyisvz/?img_index=9&igsh=MWk2Z3V0c201NG5teA==",
+      "source_domain": "instagram.com",
+      "kind": "post",
+      "jobs": [
+        {
+          "job_id": "a0de7831-4a3a-4dfa-8867-2463c7b5f29a",
+          "updated_at": "2026-07-12 18:15:44.738088+00:00",
+          "input_type": "url",
+          "note_id": "674f4f3c-b17d-566e-a781-e97f61de7fdf",
+          "created_at": "2026-07-12 18:15:20.494806+00:00",
+          "source": "shortcut",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://www.instagram.com/p/Dasqshyisvz/?img_index=9&igsh=MWk2Z3V0c201NG5teA==",
+          "destination": {
+            "kind": "note",
+            "note_id": "674f4f3c-b17d-566e-a781-e97f61de7fdf"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": "Ten monsoon getaway spots in Bengaluru",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/reel/DanP7kktvSE/",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "2e29bd64-1451-4e7e-bc9d-e504f4c2f0ce",
+          "updated_at": "2026-07-28 06:18:08.460841+00:00",
+          "input_type": "url",
+          "note_id": "ab039fda-d119-5ae9-ac8c-a6ccdbed6372",
+          "created_at": "2026-07-28 06:17:50.602232+00:00",
+          "source": "shortcut",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://www.instagram.com/reel/DanP7kktvSE/",
+          "destination": {
+            "note_id": "ab039fda-d119-5ae9-ac8c-a6ccdbed6372",
+            "kind": "note"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": "DIY never-ending infinity birthday card",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/p/DZh8-hWmOHf/?igsh=cXF5bHZ6b3owNTI5",
+      "source_domain": "instagram.com",
+      "kind": "post",
+      "jobs": [
+        {
+          "job_id": "fe91f9e0-9680-4df9-8caf-df53f6e07417",
+          "updated_at": "2026-06-14 17:32:14.098816+00:00",
+          "note_id": "d6f704e0-6e03-4e3d-b4d4-0984cdeb47d6",
+          "created_at": "2026-06-14 17:31:52.852258+00:00",
+          "source": "shortcut",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://www.instagram.com/p/DZh8-hWmOHf/?igsh=cXF5bHZ6b3owNTI5",
+          "content": null,
+          "error": null,
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/reel/DZ-olanz7um/",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "80664519-fe87-41d8-bb7c-d2f7c5890b76",
+          "updated_at": "2026-06-25 15:31:49.046984+00:00",
+          "note_id": "717146c2-79ab-4128-b002-b22aece73120",
+          "created_at": "2026-06-25 15:31:20.207441+00:00",
+          "error": null,
+          "user_id": "8KYtOOfc3OQCbRsxwPxoP6LdwCF3",
+          "url": "https://www.instagram.com/reel/DZ-olanz7um/",
+          "content": null,
+          "note_hint": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/p/DaabJFvE4Pp/?img_index=2&igsh=dWNuY2I5MGMxeDAw",
+      "source_domain": "instagram.com",
+      "kind": "post",
+      "jobs": [
+        {
+          "job_id": "0e76e470-ad08-46fa-824b-a8fb14bd9728",
+          "updated_at": "2026-07-06 05:55:42.805914+00:00",
+          "input_type": "url",
+          "note_id": null,
+          "created_at": "2026-07-06 05:54:56.749061+00:00",
+          "canonical_url": "https://www.instagram.com/p/DaabJFvE4Pp?img_index=2",
+          "url": "https://www.instagram.com/p/DaabJFvE4Pp/?img_index=2&igsh=dWNuY2I5MGMxeDAw",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "shortcut",
+          "destination": {
+            "kind": "app",
+            "app": "places"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "item_count": 37,
+          "media_mime": null,
+          "title": "Places in Bangalore I would take you to eat if I loved you",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/reel/Db1VtFryvbR/",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "d819f6bf-1adc-4958-a03f-b6b4ff93d149",
+          "updated_at": "2026-08-10 03:41:40.365471+00:00",
+          "input_type": "url",
+          "note_id": "d63501c5-e28f-5fdb-a4c7-bef5d90b5c7e",
+          "created_at": "2026-08-10 03:41:20.550222+00:00",
+          "source": "shortcut",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://www.instagram.com/reel/Db1VtFryvbR/",
+          "destination": {
+            "note_id": "d63501c5-e28f-5fdb-a4c7-bef5d90b5c7e",
+            "kind": "note"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": "Twenty common security vulnerabilities in vibe-coded applications",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/p/DaabJFvE4Pp/?img_index=1",
+      "source_domain": "instagram.com",
+      "kind": "post",
+      "jobs": [
+        {
+          "job_id": "29f08a3f-42d1-474a-8abb-87b09560b0a9",
+          "updated_at": "2026-07-05 14:03:22.650512+00:00",
+          "input_type": "url",
+          "note_id": null,
+          "created_at": "2026-07-05 14:02:01.179091+00:00",
+          "canonical_url": "https://www.instagram.com/p/DaabJFvE4Pp?img_index=1",
+          "url": "https://www.instagram.com/p/DaabJFvE4Pp/?img_index=1",
+          "user_id": "DdmwYEYaLAQ8N4nOMidFaq8rrKl1",
+          "source": "shortcut",
+          "destination": {
+            "kind": "app",
+            "app": "places"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "item_count": 37,
+          "media_mime": null,
+          "title": "Places in Bangalore I would take you to eat if I loved you",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.instagram.com/reel/DZxTTXLSi0p/",
+      "source_domain": "instagram.com",
+      "kind": "reel",
+      "jobs": [
+        {
+          "job_id": "0f8ed4b0-7d95-4835-9952-f53361fef31a",
+          "updated_at": "2026-06-22 02:02:00.607594+00:00",
+          "note_id": "1a94cc67-6d85-41fb-b8ec-b764926f0341",
+          "created_at": "2026-06-22 02:01:46.665152+00:00",
+          "error": null,
+          "user_id": "8KYtOOfc3OQCbRsxwPxoP6LdwCF3",
+          "url": "https://www.instagram.com/reel/DZxTTXLSi0p/",
+          "content": null,
+          "note_hint": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://youtube.com/shorts/JsEE5g_6IEw?si=Ko072dN8hm1UeqWL",
+      "source_domain": "youtube.com",
+      "kind": "shorts",
+      "jobs": [
+        {
+          "job_id": "c94f8723-5231-418b-981b-3a4bbd356f7e",
+          "updated_at": "2026-06-29 11:34:18.748876+00:00",
+          "input_type": "url",
+          "note_id": "1b95a353-15c3-4e36-aab6-1619afdcc5e3",
+          "created_at": "2026-06-29 11:33:49.663041+00:00",
+          "url": "https://youtube.com/shorts/JsEE5g_6IEw?si=Ko072dN8hm1UeqWL",
+          "user_id": "kItE5VY4PNaOAoeq5VjiiKcSTVs1",
+          "source": "web",
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": null,
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://youtube.com/watch?v=yuToKYHsAYA&si=lbeOOcmhJBvMCPJC",
+      "source_domain": "youtube.com",
+      "kind": "watch",
+      "jobs": [
+        {
+          "job_id": "d4186a80-87d9-4cae-8a1f-f1cc3c503376",
+          "updated_at": "2026-06-16 11:21:29.845632+00:00",
+          "note_id": "868bfb71-8ec3-455a-9e59-cf0831e85c6e",
+          "created_at": "2026-06-16 11:21:10.835655+00:00",
+          "url": "https://youtube.com/watch?v=yuToKYHsAYA&si=lbeOOcmhJBvMCPJC",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://youtube.com/shorts/TSJI6-nV-t0?si=nPGCPM0tQmgCB70f",
+      "source_domain": "youtube.com",
+      "kind": "shorts",
+      "jobs": [
+        {
+          "job_id": "2966a179-3bb6-42c9-851c-1d4248a53d4b",
+          "updated_at": "2026-07-03 13:58:09.484370+00:00",
+          "input_type": "url",
+          "note_id": "e2dc2eba-5293-5f7e-bf61-d74bc116c030",
+          "created_at": "2026-07-03 13:57:19.312792+00:00",
+          "url": "https://youtube.com/shorts/TSJI6-nV-t0?si=nPGCPM0tQmgCB70f",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "shortcut",
+          "destination": {
+            "kind": "note",
+            "note_id": "e2dc2eba-5293-5f7e-bf61-d74bc116c030"
+          },
+          "attempt_count": 3,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": null,
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": "salvaged: ServerError: 500 INTERNAL. {'error': {'code': 500, 'message': 'Internal error encountered.', 'status': 'INTERNAL'}}",
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        },
+        {
+          "job_id": "ff6d3f95-88d9-453b-a8da-85d5a7ef3385",
+          "updated_at": "2026-07-03 16:49:52.871642+00:00",
+          "input_type": "url",
+          "note_id": null,
+          "created_at": "2026-07-03 14:10:40.242916+00:00",
+          "canonical_url": "https://youtube.com/shorts/TSJI6-nV-t0?si=nPGCPM0tQmgCB70f",
+          "url": "https://youtube.com/shorts/TSJI6-nV-t0?si=nPGCPM0tQmgCB70f",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "shortcut",
+          "destination": {
+            "kind": "app",
+            "app": "recipes",
+            "item_id": "r_b45973cc4d8acd45"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "item_count": 1,
+          "media_mime": null,
+          "title": "Crispy air fried zucchini rings",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://youtube.com/watch?v=DTCyvo6cC54&si=dA8-t5b_0YrRF8kE",
+      "source_domain": "youtube.com",
+      "kind": "watch",
+      "jobs": [
+        {
+          "job_id": "5b36ee0a-0f82-4cbf-a34d-cd0c318dc91a",
+          "updated_at": "2026-06-18 06:20:34.763811+00:00",
+          "note_id": "ac4e2b8a-765c-42ef-8ce5-950e91755386",
+          "created_at": "2026-06-18 06:20:03.809764+00:00",
+          "source": "ai_chat",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "note_hint": "Excision the 3 levels in a table",
+          "content": null,
+          "url": "https://youtube.com/watch?v=DTCyvo6cC54&si=dA8-t5b_0YrRF8kE",
+          "error": null,
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://youtube.com/shorts/wHky8QG27pQ?si=5T0i7LX75fCSC5zN",
+      "source_domain": "youtube.com",
+      "kind": "shorts",
+      "jobs": [
+        {
+          "job_id": "c8823d4b-84c6-407a-b615-1b6f59a99889",
+          "updated_at": "2026-06-15 02:34:38.387836+00:00",
+          "note_id": "2533edcf-6b94-41fc-9d39-b4943be267b2",
+          "created_at": "2026-06-15 02:34:27.444983+00:00",
+          "error": null,
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "shortcut",
+          "content": null,
+          "url": "https://youtube.com/shorts/wHky8QG27pQ?si=5T0i7LX75fCSC5zN",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://x.com/dj_curfew/status/2057522382315929802?s=12",
+      "source_domain": "x.com",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "8113e6b3-b478-43a9-b8dd-6448f2875021",
+          "updated_at": "2026-06-13 15:37:48.481252+00:00",
+          "note_id": "d65fa0b1-bf79-40df-a09a-02de90e78804",
+          "created_at": "2026-06-13 15:37:27.302819+00:00",
+          "source": "shortcut",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "url": "https://x.com/dj_curfew/status/2057522382315929802?s=12",
+          "attempt_count": 1,
+          "status": "completed"
+        },
+        {
+          "job_id": "cdd367d5-aaf6-49d5-be9a-8ceb55d53c52",
+          "updated_at": "2026-06-13 16:42:20.072452+00:00",
+          "note_id": "e3c0b607-f0d9-408d-9b1a-a6453725092f",
+          "created_at": "2026-06-13 16:41:59.267801+00:00",
+          "url": "https://x.com/dj_curfew/status/2057522382315929802?s=12",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        },
+        {
+          "job_id": "ce9282ad-c30f-4dc3-b4ae-6294354cb623",
+          "updated_at": "2026-06-13 15:52:30.942122+00:00",
+          "note_id": "c6b82549-a8c0-4542-a049-227642d4ff75",
+          "created_at": "2026-06-13 15:52:10.092688+00:00",
+          "url": "https://x.com/dj_curfew/status/2057522382315929802?s=12",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        },
+        {
+          "job_id": "e39c20c8-638a-456f-b6ce-4a8c55a0b3cf",
+          "updated_at": "2026-06-13 13:52:49.680066+00:00",
+          "note_id": "fd0c8a07-e081-4477-bc62-6ee75af9720e",
+          "created_at": "2026-06-13 13:52:40.273492+00:00",
+          "url": "https://x.com/dj_curfew/status/2057522382315929802?s=12",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "shortcut",
+          "content": null,
+          "error": null,
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://x.com/gregisenberg/status/2066601447525888209?s=12",
+      "source_domain": "x.com",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "f63ff77d-3433-4ca5-aa5a-ff243e672e2b",
+          "updated_at": "2026-06-16 11:30:12.656964+00:00",
+          "note_id": "dae29734-9de7-4145-b36e-f5cf1066c156",
+          "created_at": "2026-06-16 11:30:01.043660+00:00",
+          "url": "https://x.com/gregisenberg/status/2066601447525888209?s=12",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "source": "shortcut",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://amzn.in/d/0fvav1hX",
+      "source_domain": "amzn.in",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "c6f322ea-00bc-4b7a-aec4-0faf0d4f6138",
+          "updated_at": "2026-06-10 16:23:17.062705+00:00",
+          "note_id": "c3c8d995-2fa5-4fab-8874-e67e39830df0",
+          "created_at": "2026-06-10 16:23:07.174418+00:00",
+          "url": "https://amzn.in/d/0fvav1hX",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "source": "web",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://amzn.in/d/0cK9nT6w",
+      "source_domain": "amzn.in",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "eea45e31-815d-45b5-9fad-9c1db2231325",
+          "updated_at": "2026-06-11 03:50:47.995946+00:00",
+          "note_id": "1f778403-9b29-4c2e-9bbc-ae269ab04f67",
+          "created_at": "2026-06-11 03:50:34.810245+00:00",
+          "error": null,
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "shortcut",
+          "content": null,
+          "url": "https://amzn.in/d/0cK9nT6w",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://share.google/1A58BTcllK2Pmoz4m",
+      "source_domain": "share.google",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "340c37d6-0564-4098-99d3-70dd9fbc503e",
+          "updated_at": "2026-06-13 11:26:18.611171+00:00",
+          "note_id": "7eb25725-6671-473f-92ea-9f4b9a8c3a90",
+          "created_at": "2026-06-13 11:26:06.685660+00:00",
+          "url": "https://share.google/1A58BTcllK2Pmoz4m",
+          "user_id": "PxaGYk75jsX8V1r2D9X6bwmqMS12",
+          "source": "web",
+          "content": null,
+          "error": null,
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:7486097294925307904/?utm_source=share&utm_medium=member_desktop&rcm=ACoAACxHhiUBEyswjTbpD9laAIfbbc4aFR6yY74",
+      "source_domain": "linkedin.com",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "aff2a9c4-6221-44dc-99bc-c5fe1746d2f8",
+          "updated_at": "2026-07-26 11:08:40.956606+00:00",
+          "input_type": "url",
+          "note_id": "be826b63-9551-5029-a602-37535f34137a",
+          "created_at": "2026-07-26 11:08:25.806239+00:00",
+          "source": "web",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://www.linkedin.com/feed/update/urn:li:activity:7486097294925307904/?utm_source=share&utm_medium=member_desktop&rcm=ACoAACxHhiUBEyswjTbpD9laAIfbbc4aFR6yY74",
+          "destination": {
+            "note_id": "be826b63-9551-5029-a602-37535f34137a",
+            "kind": "note"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": "Best practices for scaling Claude Code with layered CLAUDE.md context files",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe",
+      "source_domain": "bbcgoodfood.com",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "1dabf7f7-8bbf-4808-a630-4f143111d149",
+          "updated_at": "2026-06-27 11:54:42.481136+00:00",
+          "input_type": "url",
+          "note_id": "2d0e0f52-824a-477c-b70c-e7284ef65ecd",
+          "created_at": "2026-06-27 11:54:31.366455+00:00",
+          "url": "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe",
+          "user_id": "5T5ZEKT6ihgCjadY47mBka30tHg2",
+          "source": "web",
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": null,
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        },
+        {
+          "job_id": "74c69b2e-cb6a-4799-b6c4-24d1479753ce",
+          "updated_at": "2026-08-07 18:39:43.869009+00:00",
+          "input_type": "url",
+          "note_id": "f8e81b50-93fc-5d06-9cfe-baadaf60e3db",
+          "created_at": "2026-08-07 18:39:31.770395+00:00",
+          "source": "web",
+          "user_id": "7nx3fcoiY1YMjANbXD1hGtutmte2",
+          "url": "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe",
+          "destination": {
+            "kind": "note",
+            "note_id": "f8e81b50-93fc-5d06-9cfe-baadaf60e3db"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": "Best ever chocolate brownies",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.nykaaman.com/puma-ferrari-sptwr-style-unisex-white-backpack/p/13640653",
+      "source_domain": "nykaaman.com",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "edb605a9-7a0e-4033-bc90-8175c895b4de",
+          "updated_at": "2026-06-10 12:40:56.460559+00:00",
+          "note_id": "7fe9391c-8d7f-4b39-8e31-1b7de0ab7a7b",
+          "created_at": "2026-06-10 12:40:48.804909+00:00",
+          "error": null,
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "source": "web",
+          "content": null,
+          "url": "https://www.nykaaman.com/puma-ferrari-sptwr-style-unisex-white-backpack/p/13640653",
+          "attempt_count": 1,
+          "status": "completed"
+        },
+        {
+          "job_id": "f1fa197b-65b5-4f7f-a37d-22ee0b502871",
+          "updated_at": "2026-06-10 12:50:42.995716+00:00",
+          "note_id": "a3b51210-33b0-44eb-a21c-d7fe60fa40b7",
+          "created_at": "2026-06-10 12:50:31.319374+00:00",
+          "source": "web",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://www.nykaaman.com/puma-ferrari-sptwr-style-unisex-white-backpack/p/13640653",
+          "content": null,
+          "error": null,
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://github.com/affaan-m/ECC",
+      "source_domain": "github.com",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "0bd04a1f-ad9f-4bfe-8c4c-12c72a058afe",
+          "updated_at": "2026-07-31 14:40:10.290201+00:00",
+          "input_type": "url",
+          "note_id": "6c1227f2-9893-563a-aa3e-de133ada0bc3",
+          "created_at": "2026-07-31 14:39:50.731902+00:00",
+          "source": "shortcut",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "url": "https://github.com/affaan-m/ECC",
+          "destination": {
+            "note_id": "6c1227f2-9893-563a-aa3e-de133ada0bc3",
+            "kind": "note"
+          },
+          "attempt_count": 1,
+          "media_cover_url": null,
+          "media_mime": null,
+          "title": "ECC agent harness performance optimization system",
+          "media_gcs_uri": null,
+          "process_ai": true,
+          "text": null,
+          "error": null,
+          "note_hint": null,
+          "content": null,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "source_url": "https://pin.it/4G3uy5QGh",
+      "source_domain": "pin.it",
+      "kind": "other",
+      "jobs": [
+        {
+          "job_id": "140c3a2e-0f1b-4344-acc7-7d5ba40fcb26",
+          "updated_at": "2026-06-11 15:59:55.178556+00:00",
+          "note_id": "221742d3-baf5-42b2-8720-2d0b024377d4",
+          "created_at": "2026-06-11 15:59:43.670773+00:00",
+          "url": "https://pin.it/4G3uy5QGh",
+          "user_id": "noENqmZEJYaEld5ps7lMniEI0eY2",
+          "error": null,
+          "content": null,
+          "source": "web",
+          "attempt_count": 1,
+          "status": "completed"
+        }
+      ]
+    }
+  ]
+}

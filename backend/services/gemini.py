@@ -1,18 +1,18 @@
-"""Two-step, per-user-aware, anti-generic note pipeline (OpenRouter models).
+"""Note extraction pipeline (OpenRouter model chains).
 
-Step 1 (lite model): categorize against the user's existing categories — prefer the most
-specific applicable type; `summary` only for genuinely prose content; `general` banned.
+Classify: rules first (shop domains, JSON-LD @type, video sources), then one CLASSIFY_MODELS
+call against the user's existing categories only when rules don't decide.
 
-Step 2 (main model): type-focused extraction. Known types get a focused TYPE_PROMPT carrying
-only that type's schema with field-level guidance. Unknown/invented slugs get the composer
-prompt: rich building blocks (facts/sections/steps/table/checklist/quotes) that GenericNote
-renders with template-grade styling — never a wall of bullets.
+Extract: type-focused prompts. Known types get a TYPE_PROMPT carrying only that type's schema;
+unknown/invented slugs get the composer prompt (facts/sections/steps/table/checklist/quotes).
+Video (reels, YouTube fallback files) goes to VIDEO_MODELS as a base64 `video_url` part; a
+YouTube URL gets ONE YOUTUBE_MODELS attempt, else `VideoUnreadable`.
 
-Note on structured output: `data` is intentionally open-shaped (AI-invented types), so we use
-JSON-object mode and validate with Pydantic afterwards instead of a strict JSON schema.
+Every call passes a model chain via OpenRouter's `models` fallback (free first, paid floor).
+Free endpoints may lack JSON mode, so JSON is enforced by prompt and repaired by a tolerant
+parser plus one "fix this JSON" nudge that re-sends only the bad output, never the payload.
 
-Module/class names keep "gemini" for import stability; models are routed through OpenRouter
-(see config: TEXT/LITE/VISION/YOUTUBE_MODEL). Only YouTube videos go to a Gemini model.
+Module/class names keep "gemini" for import stability.
 """
 import asyncio
 import base64
@@ -21,17 +21,29 @@ import json
 import logging
 import re
 import time
-from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from urllib.parse import urlparse
 
-from openai import AsyncOpenAI, OpenAI
+import httpx
+from openai import APITimeoutError, OpenAI
+from pydantic import ValidationError
 
 from config import settings
-from models.ask import ArtifactNote, AskPlan, CollectionDigest, GroundedAnswer, SynthAnswer
 from models.note import ContentBundle, NoteExtraction
 from services.usage_meter import record_usage
 
 log = logging.getLogger("clipnote.gemini")
+
+
+class ProviderError(ValueError):
+    """OpenRouter answered 200 but with `error` set or no `choices` (every provider failed).
+    A ValueError so callers treat it like any other empty reply."""
+
+
+class VideoUnreadable(Exception):
+    """The video model could not produce a note from this video (or YouTube URL). The caller
+    falls back (YouTube scraper / caption-only note); the message carries the cause."""
 
 
 def normalize_slug(raw: str) -> str:
@@ -57,77 +69,24 @@ def is_entertainment(content_type: str) -> bool:
     return any(kw in slug for kw in ENTERTAINMENT_KEYWORDS)
 
 
-# The shopping content family — the counterpart of ENTERTAINMENT_KEYWORDS.
-# Product slugs are AI-invented and open (`product`, `gadget`, `gift-guide`, `buying-guide`, …),
-# so the family is a keyword matcher. Used only to GATE price-parse enrichment in the worker; it
-# does NOT reroute extraction (a roundup keeps its rich note rendering), and the fan-out itself
-# guards on a usable price/buy URL, so a composer note that merely matches a keyword is skipped.
-# Keep this list in sync with the frontend family matcher.
-SHOPPING_KEYWORDS = (
-    "product", "shopping", "gadget", "deal", "wishlist", "gift", "buying",
-)
-
-
-def is_shopping(content_type: str) -> bool:
-    """True when a content_type slug belongs to the products/shopping family."""
-    slug = normalize_slug(content_type)
-    return any(kw in slug for kw in SHOPPING_KEYWORDS)
-
-
-# The places content family — the dining/going-out counterpart of the other families.
-# Place slugs are AI-invented and open (`place`, `restaurant`, `cafe`, `food-spots`, …), so the
-# family is a keyword matcher. Used to (a) route extraction through the `place` venues[] schema and
-# (b) gate Google-Places enrichment in the worker. Keep this list in sync with the frontend family
-# matcher.
-PLACES_KEYWORDS = (
+# Place family — routes slugs like "restaurants"/"cafes" to the `place` venues[] schema.
+# Whole hyphen-token match (with plural folding) so "bar" doesn't hit "barbell-workout".
+_PLACES_KEYWORDS = (
     "place", "restaurant", "cafe", "bar", "dining", "eatery", "bakery", "dessert",
     "brewery", "pub", "venue", "attraction", "viewpoint", "hotel", "stay", "things-to-do",
 )
 
 
-def is_places(content_type: str) -> bool:
-    """True when a content_type slug belongs to the places/dining family. Matches on whole
-    hyphen-tokens (with simple plural folding) rather than raw substrings, so short keywords like
-    'bar'/'pub' don't false-match 'barbell-workout' or 'public-speaking'."""
+def _is_places(content_type: str) -> bool:
     slug = normalize_slug(content_type)
     tokens = set(slug.split("-"))
-    for kw in PLACES_KEYWORDS:
+    for kw in _PLACES_KEYWORDS:
         if "-" in kw:
-            if kw in slug:  # multi-word keyword, e.g. "things-to-do"
+            if kw in slug:
                 return True
-        elif kw in tokens or (kw + "s") in tokens or any(t.rstrip("s") == kw for t in tokens):
+        elif kw in tokens or any(t.rstrip("s") == kw for t in tokens):
             return True
     return False
-
-
-# The recipe content family — the cooking counterpart of the other families. The
-# `recipe` TYPE_PROMPT already produces structured ingredients/steps, so (like the wishlist) this
-# only GATES enrichment in the worker; it does not reroute extraction. The fan-out itself guards
-# on a usable `data.ingredients`, so a slug that merely matches a keyword without cookable data is
-# skipped. "food"/"dessert" are deliberately excluded — they overlap with the Places family. Keep
-# this list in sync with the frontend family matcher.
-RECIPE_KEYWORDS = ("recipe", "cooking", "baking", "bake", "dish", "meal-prep")
-
-
-def is_recipe(content_type: str) -> bool:
-    """True when a content_type slug belongs to the cooking/recipe family."""
-    slug = normalize_slug(content_type)
-    return any(kw in slug for kw in RECIPE_KEYWORDS)
-
-
-# The itinerary content family — the travel counterpart of the other families. The classifier
-# deliberately separates `itinerary` (a day-by-day trip plan) from `place` (venues), and
-# the `itinerary` TYPE_PROMPT already produces structured days[].stops[], so (like the recipes/
-# wishlist) this only GATES stop-geocoding in the worker; it does not reroute extraction. Enrichment
-# itself guards on a usable `data.days`, so a vague travel slug without a day plan is skipped. Keep
-# this list in sync with the frontend family matcher.
-ITINERARY_KEYWORDS = ("itinerary", "trip", "travel", "tour", "road-trip", "vacation", "getaway")
-
-
-def is_itinerary(content_type: str) -> bool:
-    """True when a content_type slug belongs to the travel/itinerary family."""
-    slug = normalize_slug(content_type)
-    return any(kw in slug for kw in ITINERARY_KEYWORDS)
 
 
 def match_existing(slug: str, existing: list[str]) -> str:
@@ -215,61 +174,6 @@ CATEGORY_CAP_RULE = """
 IMPORTANT: the user's category list is FULL. You MUST return one of their existing
 categories exactly as written — do NOT invent a new slug, even if none is a perfect fit.
 Pick the closest existing category."""
-
-
-COLLECTION_QUERY_SYSTEM = """You expand a user's collection name into a semantic search query.
-The user named a folder for their saved notes; write 2-3 sentences describing what content
-belongs in it — topics, typical note subjects, related terms and synonyms. Be concrete and
-broad within the theme. Return ONLY the description text, no preamble, no quotes.
-Example: "AI" → Artificial intelligence and machine learning: AI tools and products, LLMs and
-chatbots like ChatGPT, ML research papers and tutorials, prompt engineering, AI news."""
-
-
-TITLES_FROM_NOTE_SYSTEM = """You extract the movie and TV show titles named in a saved note.
-Return ONLY valid JSON:
-{"titles":[{"title":str,"year"?:str,"mediaType":"movie|tv|unknown","why"?:"one short line"}]}
-
-Rules:
-- List EVERY distinct film/series named. A roundup ("5 sci-fi films") yields one entry per title.
-- A note about a single work yields one entry — use the work's real name, NOT the note's headline.
-- NEVER invent a title that isn't in the note. If none are identifiable, return {"titles":[]}.
-- `year` only if stated; `mediaType` is your best guess (tv = series/show/anime/miniseries)."""
-
-
-VENUES_FROM_NOTE_SYSTEM = """You extract the places/venues named in a saved note.
-Return ONLY valid JSON:
-{"venues":[{"name":str,"location"?:str,"city"?:str,"category"?:str,"why"?:"one short line"}]}
-
-Rules:
-- List EVERY distinct venue named (a roundup "5 cafes" yields one entry per venue).
-- A note about a single venue yields one entry — use the venue's real name, NOT the note's headline.
-- NEVER invent a venue that isn't in the note. If none are identifiable, return {"venues":[]}.
-- `location`/`city`/`category` only if stated or clearly implied."""
-
-
-DAYS_FROM_NOTE_SYSTEM = """You turn a saved travel note into a structured day-by-day itinerary.
-Return ONLY valid JSON:
-{"destination"?:str,"duration"?:str,"budget"?:str,"bestSeason"?:str,
- "days":[{"day":1,"title"?:str,"stops":[{"time"?:str,"place":str,"note"?:str}]}],
- "tips"?:[str]}
-
-Rules:
-- ONLY produce days if the note describes an actual multi-stop or day-by-day trip/route across a
-  destination. If it is a single spot, a venue roundup ("best cafes in X"), or generic travel tips
-  with no sequence of stops, return {"days":[]} — it is NOT a trip.
-- Build days/stops ONLY from places and details actually named in the note. NEVER invent stops,
-  times, or places. If the note isn't already day-structured but IS a real trip, organize its named
-  stops into sensible days yourself.
-- `place` is required on every stop; `time`/`note` only when stated or clearly implied.
-- This is a faithful re-structuring of the note, not new travel advice."""
-
-
-SUMMARIZE_BACKFILL_SYSTEM = """You write ai_summary for a note that already has a title and
-structured data — you are NOT re-reading the source, only restating what's already extracted.
-Return ONLY the summary text: ONE concise, specific sentence (~15-25 words) capturing the single
-most useful takeaway (mention an actual detail from the data — a dish, destination, title, spec).
-Never restate the content_type generically, never mention "items", "collection", or how many
-things were saved. No markdown, no quotes, no preamble."""
 
 
 _SHARED_RULES = """You are a note extraction engine. The user saves links and never wants to
@@ -453,305 +357,6 @@ steps or day sections; a list of recommendations becomes sections with one headi
 Do NOT flatten everything into one bullet list — that is a failure."""
 
 
-ASK_PLAN_SYSTEM = """You plan how to answer a message in Clipnote, an app where the user saves
-links as structured notes. You receive: the user's message, recent conversation, today's local
-date, and a JSON index of candidate notes (id, type, title, summary, saved date).
-
-Return ONLY valid JSON:
-{"intent":"answer|aggregate|create|save_link","scope":"notes|general","topic":str|null,
- "period":"today|yesterday|this_week|last_week|this_month|recent"|null,
- "content_types":[slug,...],"source":str|null,"exhaustive":bool,
- "output":"prose|itinerary|meal_plan|comparison|checklist","note_ids":[id,...],
- "save_url":str|null,"save_hint":str|null}
-
-How to fill it:
-- scope: "notes" only if the message is about the user's saved notes/content. Use "general"
-  for small talk OR any general-knowledge question you could answer on your own that does not
-  reference their saved content (then note_ids = []). Judge follow-ups from the conversation —
-  "and who directed it?" after a movie note is "notes"; "what's the capital of France",
-  "explain X", "write me a poem" are "general". When unsure between the two, prefer "general"
-  unless the message clearly points at their saved content.
-- intent: "answer" normally; "aggregate" for counting / how-many / breakdown questions;
-  "create" ONLY if the user asks to make/save a NEW note;
-  "save_link" when the message contains a URL (http:// or https://) the user wants to clip/save.
-  Examples of save_link: "save this https://…", "clip this for me: https://…", a bare URL with
-  or without commentary like "save as a workout note: https://…". NOT save_link: asking a
-  question about an already-saved note that happens to include a URL in context.
-- save_url: when intent is save_link, extract the full URL (must start with http:// or https://).
-  Otherwise null.
-- save_hint: when intent is save_link, any instructions the user gave beyond the URL itself
-  (e.g. "focus on the ingredients", "save as a workout note", "note the price"). Otherwise null.
-- period: set when the message is time-scoped ("today", "yesterday", "this week",
-  "lately"/"recently" = recent). Resolve relative to today's date given. Otherwise null.
-- content_types: the note types the message targets — reuse the exact slugs that appear in the
-  index when they fit (e.g. "recipe", "place"). Empty if it spans everything or is unclear.
-- source: set when the user references WHERE a note came from — a website or app — e.g. "my
-  Pinterest notes", "the recipe I saved from Instagram", "that NYT article". Use a short
-  lowercase keyword (pinterest, instagram, youtube, nytimes, amazon). Otherwise null.
-- exhaustive: true when the user wants ALL of something ("all my recipes", "consolidate my trip
-  notes", "compare every laptop", "everything I saved from Pinterest"). For period, source, or
-  exhaustive requests, leave note_ids EMPTY — retrieval fetches the full filtered set itself.
-- output: "prose" by default. Use itinerary/meal_plan/comparison/checklist only when the user
-  explicitly wants that artifact built.
-- note_ids: for an ordinary topic question (no period, not exhaustive), pick the relevant ids
-  from the index, most relevant first, max 12. Use ONLY ids present in the index — never invent.
-
-If nothing in the index is relevant but the message is clearly about their notes, return
-scope="notes" with note_ids=[]."""
-
-
-ASK_ANSWER_NOTES_SYSTEM = """You are Clipnote's assistant. The user saves links as structured notes;
-answer their question using ONLY the saved notes provided.
-Return ONLY valid JSON: {"answer_markdown": str, "cited_note_ids": [str]}
-
-Rules:
-- Ground every claim in the notes. NEVER FABRICATE: if the notes don't contain enough to
-  answer, say so plainly and suggest what they could save — do not fill gaps from general
-  knowledge or the wider internet.
-- Be direct, conversational, and specific: use the real names, prices, timings, and
-  quantities from the notes.
-- Mention note titles naturally when recommending or comparing, so the user knows where
-  each item came from.
-- cited_note_ids: only notes you actually used, most relevant first.
-- Markdown subset: short paragraphs, "- " bullets, numbered lists, **bold**, ### headings,
-  and a simple markdown table ONLY when comparing items. No images, links, or HTML.
-- Use the conversation history to resolve follow-ups; answer the latest question."""
-
-
-ASK_CHAT_SYSTEM = """You are Clipnote's friendly assistant. The user's message is general
-conversation or a general-knowledge question — NOT about their saved notes.
-Return ONLY valid JSON: {"answer_markdown": str, "cited_note_ids": []}
-
-Rules:
-- Answer naturally, helpfully, and concisely from your own knowledge.
-- Do NOT mention the user's notes, searching them, or that none were found — just answer.
-- cited_note_ids is ALWAYS an empty list.
-- Markdown subset only: short paragraphs, "- " bullets, **bold**. No tables, images, links, or HTML.
-- Use the conversation history to resolve follow-ups."""
-
-
-ASK_SYNTH_SYSTEM = """You are Clipnote's assistant. The user wants you to CONSOLIDATE several of
-their saved notes into ONE structured artifact. Build it using ONLY the provided notes.
-
-Return ONLY valid JSON:
-{"answer_markdown": "one short lead-in sentence introducing the artifact",
- "artifact": {"title": str, "ai_summary": "one concise sentence overview",
-              "content_type": "<short slug for the artifact>",
-              "data": { ...blocks below... }},
- "cited_note_ids": [ids of notes you used]}
-
-artifact.data is built from these blocks — use whichever fit:
-  "facts":     [{"label": str, "value": str}]
-  "sections":  [{"heading": str, "items": [str]}]
-  "steps":     [str]
-  "table":     {"columns": [str], "rows": [[str]]}
-  "checklist": [str]
-
-Shape it to the requested OUTPUT kind:
-  - itinerary  → one section per day (heading "Day 1 — ...", items = stops with time/place/why);
-                 add a checklist of bookings/things to carry if useful. content_type "itinerary".
-  - meal_plan  → one section per day listing meals, plus a "Grocery list" checklist that
-                 DEDUPES ingredients across the recipes. content_type "meal-plan".
-  - comparison → a table (one row per item; columns = the attributes compared) and a short
-                 verdict section. content_type "comparison".
-  - checklist  → a single checklist (optionally grouped into sections). content_type "checklist".
-
-Rules:
-- content_type: if one of the user's existing categories (listed in the request) fits the
-  artifact, REUSE it verbatim instead of inventing a near-duplicate; otherwise use the slug
-  suggested above for the OUTPUT kind.
-- NEVER FABRICATE: use only details present in the notes; omit anything missing. A sparse but
-  truthful artifact beats an invented complete-looking one.
-- Be specific: real names, times, prices, quantities from the notes.
-- cited_note_ids: every note that contributed."""
-
-
-ASK_CREATE_SYSTEM = """You are Clipnote's assistant. The user wants you to CREATE a new note from
-this conversation and your own knowledge. Author a genuinely useful, well-structured note.
-
-Return ONLY valid JSON:
-{"title": "concise note title in sentence case",
- "ai_summary": "one concise sentence overview",
- "content_type": "<short category slug>",
- "data": { ...blocks below... }}
-
-data is built from these blocks — use whichever fit (structure mirrors the content; never dump
-one flat bullet list):
-  "facts":     [{"label": str, "value": str}]
-  "sections":  [{"heading": str, "items": [str]}]
-  "steps":     [str]
-  "table":     {"columns": [str], "rows": [[str]]}
-  "checklist": [str]
-
-Rules:
-- Use the conversation to understand exactly what to capture, then fill in helpful, accurate
-  detail from your own knowledge. Be concrete, specific, and skimmable.
-- content_type: a short slug describing the note. If one of the user's existing categories
-  (listed in the request) fits, REUSE it verbatim — do not invent a near-duplicate (e.g. don't
-  emit "travel-tips" when "travel" already exists). Only coin a new slug when none fits. Never
-  "general", "misc", or "other"."""
-
-
-DIGEST_SYSTEM = """You are Clipnote's assistant. Build a DIGEST for one of the user's smart
-collections: a piece of writing that TEACHES what's actually in its saved notes, the way a
-well-read colleague would brief you on a folder of links they'd actually read — not an index,
-not a list of links, not the notes' own titles and summaries restated.
-
-Each note's `data` field (marked CONTENT below) holds the real substance — named tools,
-techniques, steps, places, prompts, numbers — and that is what you are reading and reporting on.
-The note's title/summary (marked metadata below) exist only to identify which note is which; they
-are NEVER something you may copy into your output. If your section body could have been written
-from the title and summary alone, without opening `data`, you have failed at this task.
-
-INTERNAL STEP (do this before writing anything): scan every note's CONTENT and build a mental
-list of every specific named thing across ALL of them — every tool, skill, technique, step,
-prompt, place, or number. Notice which ones repeat or relate across different notes. Only then
-group them into sections and write each section's body from that list.
-
-Return ONLY valid JSON:
-{"intro": "1-2 sentences characterizing what this collection has become",
- "facts": [{"label": str, "value": str}],
- "sections": [{"heading": str,
-               "body": "1-3 short paragraphs of prose, \\n\\n between paragraphs",
-               "items": [{"title": str, "summary": str, "note_id": str}],
-               "source_note_ids": [str]}]}
-
-WORKED EXAMPLE — given two notes: one titled "The top 3 most GOATED skills for Claude" whose
-CONTENT lists three Claude Code skills (a discovery tool, a persistent-memory tool, a security
-scanner, each with what it does), and another titled "How to de-slop every AI output forever"
-whose CONTENT describes a custom skill that runs sub-agents to audit and rewrite AI-generated
-text — a GOOD section looks like this (note the body names the actual tools and draws the
-connection between notes; it does not mention either note's title):
-
-{"heading": "Claude Code skills worth installing",
- "body": "Three skills close the gaps vibe coders hit most often. Find Skills automatically
-   discovers and installs whichever skill fits a given prompt, so you stop hunting through skill
-   directories by hand. Claude-mem gives Claude persistent memory across sessions by compressing
-   project context, past decisions, and preferences, so you're not re-explaining the codebase
-   every time you open a new chat. VibeSec-Skill acts as an AI penetration tester, scanning
-   generated code for hardcoded API keys and weak admin passwords before it ships.\\n\\nA fourth
-   pattern shows up in a separate note: a skill built specifically to de-slop AI writing, using
-   specialized sub-agents to audit and rewrite output rather than a single pass. Paired with the
-   three skills above, the shape of a solid Claude Code setup becomes discovery, memory, security,
-   and output quality, each handled by a dedicated skill instead of one prompt trying to do
-   everything.",
- "items": [
-   {"title": "Find Skills", "summary": "Auto-discovers and installs the right skill for a prompt", "note_id": "<id of that note>"},
-   {"title": "Claude-mem", "summary": "Persistent memory across sessions via context compression", "note_id": "<id of that note>"},
-   {"title": "VibeSec-Skill", "summary": "AI penetration tester for hardcoded secrets and weak auth", "note_id": "<id of that note>"}
- ],
- "source_note_ids": ["<id of first note>", "<id of second note>"]}
-
-A BAD section (do NOT do this — this is v2's failure mode, restating the note instead of reading it):
-{"heading": "AI Tools", "body": "", "items": [
-   {"title": "The top 3 most GOATED skills for Claude", "summary": "Enhance Claude Code with Find Skills, Claude-mem for persistent memory, and VibeSec-Skill for security scanning.", "note_id": "..."}
- ]}
-(That entry just copied the note's title into "title" and its summary into "summary" — it never
-opened CONTENT. Every entry above is a REAL example.)
-
-Rules:
-- `body` is mandatory and is the primary output — write it first, for every section, even ones
-  with items. It must read as synthesis: name the specific things, explain what each does or
-  means, and connect them across notes when more than one note contributes ("this pairs with...",
-  "the same pattern shows up in...", "unlike the note above,..."). 1-3 short paragraphs, plain
-  text, "\\n\\n" between paragraphs, no headings or bullets inside it.
-- `items` is OPTIONAL and reserved for genuinely atomic listables worth their own row (a specific
-  tool, site, or place someone would want to click through to) — many good sections have body
-  prose and an empty items list, because not everything worth explaining is a discrete link-out.
-  Never pad items with vague or duplicate entries just to have some; an empty list is correct
-  when nothing in the section is atomic enough to deserve one.
-  - An item's title must NEVER restate or rephrase the source note's title (see the BAD example).
-    Name the actual thing: "Claude-mem: persistent memory across sessions", never "The top 3 most
-    GOATED skills for Claude".
-  - Merge duplicates across notes into ONE item, citing whichever note covers it in most detail.
-  - Every item MUST carry the exact note_id it came from, chosen ONLY from the NOTE ids given
-    below. Never invent an id, never cite one not in the notes provided.
-- `source_note_ids`: every note id (from the ones provided) that the section's body actually
-  draws on, so the section itself can deep-link and cite even when it has no items.
-- Group into 3-6 sections that are specific and content-derived, never generic buckets like
-  "Articles" or "Notes" — name each section for what's actually in it (e.g. "AI coding tools",
-  "Memory & context systems", "Prompting techniques"). Order sections by usefulness, most
-  useful/most populated first.
-- facts: 2-4 genuinely informative at-a-glance stats (e.g. "Tools catalogued: 14", "Newest
-  save: <title>"). Any number in a fact (a count of tools, notes, items, etc) MUST be one you can
-  literally verify by counting things you actually named in this response or notes actually
-  provided — never estimate or guess a total. When you're not sure a stat is exactly right, drop
-  it; omit any fact that would be filler; return an empty list when nothing meaningful applies.
-- No em-dashes anywhere in intro, facts, body, or item summaries.
-- NEVER FABRICATE: ground every claim, item, and fact in the CONTENT provided; omit anything you
-  can't ground rather than inventing it."""
-
-
-PERSONAL_DIGEST_SYSTEM = """You are Clipnote's assistant. Write a personal WEEK IN REVIEW for one
-user, addressed directly to them ("you saved", "you were into", "you kept coming back to"): a warm,
-brief piece of writing that reflects back what they actually saved and read, the way a friend who'd
-skimmed their whole week of links would tell them what they'd been on about, not an index and not a
-list of the notes' own titles and summaries restated.
-
-Each note's `data` field (marked CONTENT below) holds the real substance (named tools, techniques,
-steps, places, prompts, numbers) and that is what you are reading and reporting on. The note's
-title/summary (marked metadata below) exist only to identify which note is which; they are NEVER
-something you may copy into your output. If a section body could have been written from the titles
-and summaries alone, without opening `data`, you have failed at this task.
-
-INTERNAL STEP (do this before writing anything): scan every note's CONTENT and build a mental list
-of every specific named thing across ALL of them (every tool, skill, technique, step, prompt,
-place, or number). Notice which ones repeat or relate across different notes. Only then group them
-into themes and write each theme's body from that list.
-
-Return ONLY valid JSON:
-{"intro": "1-2 sentences characterizing the themes of the user's week",
- "facts": [{"label": str, "value": str}],
- "sections": [{"heading": str,
-               "body": "1-3 short paragraphs of prose, \\n\\n between paragraphs",
-               "items": [{"title": str, "summary": str, "note_id": str}],
-               "source_note_ids": [str]}]}
-
-Rules:
-- intro: 1-2 sentences, second person, characterizing what the week was about ("This week you went
-  deep on agent tooling and squeezed in two recipes."). Name the actual themes, not "you saved
-  several notes".
-- Group into 2-4 theme sections that are specific and content-derived, never generic buckets like
-  "Articles" or "Notes"; name each for what's actually in it (e.g. "AI coding tools", "Weeknight
-  dinners"). Order sections by how much of the week they represent, biggest first.
-- `body` is mandatory and is the primary output; write it first, for every section. It must read as
-  synthesis in second person: name the specific things, explain what each does or means, and connect
-  them across notes when more than one contributes ("this pairs with...", "the same idea shows up
-  in..."). 1-3 short paragraphs, plain text, "\\n\\n" between paragraphs, no headings or bullets
-  inside it.
-- `items` is OPTIONAL and reserved for genuinely atomic listables worth their own row (a specific
-  tool, site, or place worth clicking through to); many good sections have body-only prose and an
-  empty items list. Never pad items with vague or duplicate entries.
-  - An item's title must NEVER restate or rephrase the source note's title. Name the actual thing.
-  - Merge duplicates across notes into ONE item, citing whichever note covers it in most detail.
-  - Every item MUST carry the exact note_id it came from, chosen ONLY from the NOTE ids given
-    below. Never invent an id, never cite one not in the notes provided.
-- `source_note_ids`: every note id (from the ones provided) the section's body actually draws on, so
-  the section can deep-link and cite even when it has no items.
-- facts: 0-2 QUALITATIVE at-a-glance highlights only (e.g. "Deepest read: <what it was about>",
-  "Kept coming back to: <theme>"). NEVER emit numeric counts of any kind: no "5 notes", no "3
-  recipes", no totals or tallies. Python computes all the counting stats separately; a numeric fact
-  here is always wrong. Omit any fact that would be filler; return an empty list when nothing
-  qualitative stands out.
-- No em-dashes anywhere in intro, facts, body, or item summaries.
-- NEVER FABRICATE: ground every claim, item, and fact in the CONTENT provided; omit anything you
-  can't ground rather than inventing it."""
-
-
-def _history_lines(history: list[dict]) -> str:
-    return "\n".join(f"{t['role']}: {t['text']}" for t in history)
-
-
-def _focal_hint(title: str) -> str:
-    """Steer the answer toward the note the user is currently viewing (Ask opened from a
-    note's page) — primary subject, but not a hard filter ("this note first, then all")."""
-    return (
-        f'CONTEXT: The user is currently viewing the note titled "{title}". Treat it as the '
-        "primary subject and prioritize it in your answer, unless the question is clearly "
-        "about other notes."
-    )
-
-
 def _strip_code_fences(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
@@ -783,27 +388,207 @@ job_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
     "job_deadline", default=None)
 
 
-# USD/s of audio, from OpenRouter's sample $0.000508 / 9.2 s.
-WHISPER_PRICE_PER_SEC = 0.0000553
+
+# ---------- Rules-first classification ----------
+
+_SHOP_HOSTS = ("amazon.", "amzn.", "flipkart.com", "myntra.com", "ajio.com", "nykaa.com",
+               "meesho.com", "ebay.", "etsy.com", "bestbuy.com", "walmart.com")
+_VIDEO_HOSTS = ("youtube.com", "youtu.be", "tiktok.com", "fb.watch")
+
+
+def _host(url: str) -> str:
+    host = (urlparse(url or "").hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_video_source(url: str, bundle: ContentBundle) -> bool:
+    """YouTube / reels / TikTok: the video model reads the video itself and picks the type."""
+    host, path = _host(url), urlparse(url or "").path.lower()
+    return (bundle.strategy.startswith(("reel_", "youtube"))
+            or any(host == h or host.endswith("." + h) for h in _VIDEO_HOSTS)
+            or (("instagram.com" in host or "facebook.com" in host)
+                and any(seg in path for seg in ("/reel/", "/reels/", "/tv/", "/videos/"))))
+
+
+def _jsonld_types(node, depth: int = 0) -> set[str]:
+    """Every schema.org @type in a JSON-LD blob (top level, @graph, and lists)."""
+    if depth > 3:
+        return set()
+    if isinstance(node, list):
+        return set().union(*(_jsonld_types(n, depth + 1) for n in node)) if node else set()
+    if not isinstance(node, dict):
+        return set()
+    t = node.get("@type")
+    found = {x.lower() for x in (t if isinstance(t, list) else [t]) if isinstance(x, str)}
+    return found | _jsonld_types(node.get("@graph"), depth + 1)
+
+
+def rule_category(url: str, bundle: ContentBundle) -> str | None:
+    """Deterministic content_type from domain / page type, or None when rules don't decide.
+    ponytail: a short domain list + two JSON-LD types; extend the tuples as misses show up."""
+    types = _jsonld_types(bundle.structured)
+    if "recipe" in types:
+        return "recipe"
+    host = _host(url)
+    if "product" in types or any(h in host for h in _SHOP_HOSTS):
+        return "product"
+    return None
+
+
+# ---------- Tolerant JSON ----------
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.S)
+
+JSON_NUDGE = ("\n\nYour previous reply (the user message) was not valid JSON for this shape. "
+              "Return the SAME content as ONE valid JSON object — no prose, no code fences.")
+
+
+def parse_json(text: str):
+    """Model reply → JSON. Strips <think> blocks and ``` fences, then falls back to the span
+    from the first '{' to the last '}'. Raises ValueError (JSONDecodeError) when unparseable."""
+    t = _strip_code_fences(_THINK_RE.sub("", text or ""))
+    try:
+        return json.loads(t)
+    except json.JSONDecodeError:
+        i, j = t.find("{"), t.rfind("}")
+        if i < 0 or j <= i:
+            raise
+        return json.loads(t[i:j + 1])
+
+
+def _note_from(obj) -> NoteExtraction:
+    if not isinstance(obj, dict):
+        raise ValueError("reply is not a JSON object")
+    return NoteExtraction.model_validate(obj)
+
+
+# ---------- Any-type prompt (the video model picks content_type itself) ----------
+
+_CATEGORY_RULES = CATEGORY_SYSTEM.split("Rules, in priority order:\n", 1)[1]
+ANY_TYPE_PROMPT = (
+    _SHARED_RULES.replace('"<echo the slug you were given — do not change it>"',
+                          '"<the most specific slug — see Choosing content_type>"')
+    + "\n\nChoosing content_type (lowercase-kebab-case):\n" + _CATEGORY_RULES
+    + "\n\nKnown types — when content_type is one of these, `data` MUST follow its schema:\n"
+    + "\n".join(f"\n=== {k} ==={p[len(_SHARED_RULES):]}" for k, p in TYPE_PROMPTS.items())
+    + "\n\n=== any other content_type ===" + COMPOSER_PROMPT[len(_SHARED_RULES):]
+)
+
+VIDEO_INSTRUCTIONS = (
+    "Watch the attached video end to end. Describe what is SEEN (on-screen text, captions "
+    "burned into the frame, demonstrations, products, dishes, places, quantities) AND what is "
+    "HEARD (speech, narration, voice-over). The caption and top comments are extra context "
+    "from the post; the video itself is the primary source. Extract all relevant information.")
+
+
+THIN_RULE = (
+    "THIN SOURCE: only the post's caption is available — the video itself could not be read. "
+    "Fill ONLY the fields the caption text explicitly supports and leave every other field "
+    "out: no estimated times, quantities, prices, tips, song or title names, or steps that "
+    "the caption does not state. Keep the post's own shape: a list of places stays a list of "
+    "venues — NEVER turn it into a day-by-day itinerary. A short, sparse note is correct here.")
+
+
+def _system_for(content_type: str | None) -> str:
+    """Exact known type → its schema; entertainment/place family → that schema; None → the
+    any-type prompt (model picks); anything else → the open composer."""
+    if not content_type:
+        return ANY_TYPE_PROMPT
+    if content_type in TYPE_PROMPTS:
+        return TYPE_PROMPTS[content_type]
+    if is_entertainment(content_type):
+        return TYPE_PROMPTS["entertainment"]
+    if _is_places(content_type):
+        return TYPE_PROMPTS["place"]
+    return COMPOSER_PROMPT
+
+
+def _call_timeout(cap: float, deadline: float | None = None) -> float:
+    """min(cap, remaining job budget), floored at 15 s."""
+    if deadline is None:
+        deadline = job_deadline.get()
+    if deadline is None:
+        return cap
+    return min(cap, max(15.0, deadline - time.monotonic()))
+
+
+# Video calls leave this much budget for the caption/text fallback + a JSON nudge, and are
+# skipped outright (VideoUnreadable) when less than VIDEO_MIN_BUDGET_S remains.
+VIDEO_RESERVE_S = 60
+VIDEO_MIN_BUDGET_S = 75
+
+
+def _video_timeout(deadline: float | None = None) -> float:
+    """min(VIDEO_CALL_TIMEOUT_S, remaining - VIDEO_RESERVE_S); raises VideoUnreadable when the
+    remaining job budget is under VIDEO_MIN_BUDGET_S."""
+    if deadline is None:
+        deadline = job_deadline.get()
+    if deadline is None:
+        return float(settings.VIDEO_CALL_TIMEOUT_S)
+    remaining = deadline - time.monotonic()
+    if remaining < VIDEO_MIN_BUDGET_S:
+        raise VideoUnreadable(f"only {remaining:.0f}s of job budget left; skipping video call")
+    return min(float(settings.VIDEO_CALL_TIMEOUT_S), remaining - VIDEO_RESERVE_S)
+
+
+def _categories_line(content_type: str | None, categories: list[str] | None) -> str | None:
+    """When the model picks the type, it must see the user's categories to reuse them."""
+    if content_type:
+        return None
+    return f"User's existing categories: {', '.join(categories or []) or 'none yet'}"
+
+
+def _system_with_cap(content_type: str | None, categories: list[str] | None) -> str:
+    system = _system_for(content_type)
+    if not content_type and len(categories or []) >= settings.MAX_USER_CATEGORIES:
+        system += CATEGORY_CAP_RULE
+    return system
+
+
+# OpenRouter streams keep-alive whitespace ahead of non-streaming replies, so httpx's per-read
+# timeout may never fire: every call runs here and is abandoned at a wall-clock deadline.
+# ponytail: an abandoned call keeps its worker until the server finishes or the socket drops;
+# 16 workers is ample at current volume — switch to an async client + cancellation if not.
+_TIMEOUT_REQUEST = httpx.Request("POST", OPENROUTER_BASE_URL + "/chat/completions")
+_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="openrouter")
+
+# max_tokens caps per call type.
+MAX_TOKENS_CLASSIFY = 600
+MAX_TOKENS_NOTE = 8000
+MAX_TOKENS_GROUNDED = 1500
 
 
 class GeminiService:
     def __init__(self):
         key = settings.OPENROUTER_API_KEY or "unset"  # SDK refuses an empty key at import time
-        # SDK retries off: every call site already has its own retry loop — don't stack them.
+        # SDK retries off: OpenRouter's `models` chain + process_job's retry are the retry layers.
         self.client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=key, max_retries=0, timeout=120)
-        self.aclient = AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=key, max_retries=0,
-                                   timeout=120)  # streaming agent only (agent_tools)
 
-    def _chat(self, model: str, system: str, text: str, *, json: bool = True,
-              temperature: float | None = None, images=(), video_url: str | None = None,
-              web: bool = False, timeout: float | None = None) -> str:
-        """One chat completion → the reply text ("" when empty). Meters usage.
+    def _chat(self, models: list[str], system: str, text: str, **kw) -> tuple[str, str]:
+        """`_chat_full` without the finish_reason → (reply text or "", model that answered)."""
+        text_out, used, _ = self._chat_full(models, system, text, **kw)
+        return text_out, used
 
-        json      → JSON-object mode + JSON_SUFFIX + only providers honouring response_format
-        images    → bundle.image_parts dicts ({mime_type, data: bytes}) sent as data URLs
-        video_url → a YouTube URL; pinned to Google AI Studio (the provider that fetches it)
-        web       → OpenRouter web-search plugin (replaces Gemini google_search grounding)
+    def _chat_full(self, models: list[str], system: str, text: str, *, json: bool = True,
+                   temperature: float | None = None, images=(), video_url: str | None = None,
+                   pin_google: bool = False, web: bool = False, timeout: float | None = None,
+                   max_tokens: int = MAX_TOKENS_NOTE,
+                   reserve: float = 15) -> tuple[str, str, str | None]:
+        """One chat completion over a model chain → (reply text or "", model, finish_reason).
+
+        models    → models[0] as `model`, the whole chain as `models` (OpenRouter falls back on
+                    429/5xx/downtime). A client timeout, or a 200 carrying `error` / no
+                    `choices` (OpenRouter's provider-error shape; the SDK doesn't raise), retries
+                    once on models[1:] when at least `reserve` + 15 s of job budget remain, else
+                    raises.
+        json      → JSON_SUFFIX + `response_format` (a soft preference — never removes a model
+                    without JSON mode from the chain; callers parse with `parse_json`)
+        images    → bundle.image_parts dicts ({mime_type, data: bytes}) as data URLs
+        video_url → a YouTube URL or a base64 `data:video/...` URL
+        pin_google→ Google AI Studio only (the provider that fetches YouTube URLs)
+        web       → OpenRouter web-search plugin
+        timeout   → wall-clock seconds (default 120)
+        No `reasoning` param: no chain contains a reasoning-first model any more.
         """
         if video_url or images:
             content: str | list = [{"type": "video_url", "video_url": {"url": video_url}}] if video_url else []
@@ -815,81 +600,106 @@ class GeminiService:
         else:
             content = text
         extra: dict = {}
-        # ponytail: the Qwen instruct defaults (LITE/VISION) have no reasoning mode and none of
-        # their providers list `reasoning`, so sending it alongside require_parameters could
-        # leave zero providers. Upgrade path: drop this check if LITE/VISION move to reasoners.
-        if model not in (settings.LITE_MODEL, settings.VISION_MODEL):
-            extra["reasoning"] = {"enabled": False}
-        provider: dict = {}
-        if json:
-            provider["require_parameters"] = True
-        if video_url:
-            provider.update(order=["google-ai-studio"], allow_fallbacks=False)
-        if provider:
-            extra["provider"] = provider
+        if len(models) > 1:
+            extra["models"] = list(models)
+        if pin_google:
+            extra["provider"] = {"order": ["google-ai-studio"], "allow_fallbacks": False}
         if web:
             extra["plugins"] = [{"id": "web", "max_results": 3}]
         kwargs: dict = {
-            "model": model,
+            "model": models[0],
             "messages": ([{"role": "system", "content": system + (JSON_SUFFIX if json else "")}]
                          if system or json else []) + [{"role": "user", "content": content}],
+            "max_tokens": max_tokens,
             "extra_body": extra,
         }
         if json:
             kwargs["response_format"] = {"type": "json_object"}
         if temperature is not None:
             kwargs["temperature"] = temperature
-        if timeout is not None:
-            kwargs["timeout"] = timeout  # per-call override of the client's 120 s
-        resp = self.client.chat.completions.create(**kwargs)
-        record_usage(model, resp)
-        return (resp.choices[0].message.content if resp.choices else None) or ""
+        wall = timeout if timeout is not None else 120.0
+        kwargs["timeout"] = wall  # httpx connect/read limits; _POOL enforces the wall clock
+        fut = _POOL.submit(self.client.chat.completions.create, **kwargs)
+        try:
+            resp = fut.result(timeout=wall)
+            err = getattr(resp, "error", None)
+            failure: Exception | None = (
+                ProviderError(f"empty reply from {models[0]}: {err or 'no choices'}")
+                if err or not getattr(resp, "choices", None) else None)
+        except (APITimeoutError, FutureTimeout):
+            fut.cancel()  # drops a call still queued behind abandoned ones; no-op once running
+            failure = APITimeoutError(request=_TIMEOUT_REQUEST)
+        if failure is not None:
+            # OpenRouter's own fallback can't fire on a client abort, and an error-shaped 200
+            # means it already gave up — walk the rest of the chain here.
+            dl = job_deadline.get()
+            remaining = None if dl is None else dl - time.monotonic()
+            if len(models) < 2 or (remaining is not None and remaining < reserve + 15):
+                raise failure
+            retry_timeout = wall if remaining is None else min(wall, remaining - reserve)
+            log.warning("model %s failed (%s); retrying on %s", models[0], failure, models[1:])
+            return self._chat_full(models[1:], system, text, json=json, temperature=temperature,
+                                   images=images, video_url=video_url, pin_google=pin_google,
+                                   web=web, timeout=retry_timeout, max_tokens=max_tokens,
+                                   reserve=reserve)
+        used = getattr(resp, "model", None)
+        if not isinstance(used, str) or not used:
+            used = models[0]
+        record_usage(used, resp)
+        choice = resp.choices[0]
+        return (choice.message.content or ""), used, getattr(choice, "finish_reason", None)
 
-    def transcribe(self, path: str, duration_s: float = 0) -> str:
-        """Reel audio file -> transcript text via OpenRouter's Whisper endpoint ("" if empty)."""
-        with open(path, "rb") as f:
-            resp = self.client.audio.transcriptions.create(model=settings.TRANSCRIBE_MODEL, file=f)
-        if not isinstance(getattr(getattr(resp, "usage", None), "cost", None), (int, float)):
-            # Whisper bills per second and reports no tokens: always count the call, estimate $.
-            resp = SimpleNamespace(text=getattr(resp, "text", ""), usage=SimpleNamespace(
-                prompt_tokens=0, completion_tokens=0, cost=duration_s * WHISPER_PRICE_PER_SEC))
-        record_usage(settings.TRANSCRIBE_MODEL, resp)
-        return (getattr(resp, "text", "") or "").strip()
+    def _note_json(self, models: list[str], system: str, prompt: str,
+                   **kw) -> tuple[NoteExtraction, str]:
+        """_chat + tolerant parse; on bad JSON, ONE nudge on TEXT_MODELS that re-sends only the
+        bad reply (never the payload). An empty reply raises — nothing to repair."""
+        text, used, finish = self._chat_full(models, system, prompt, **kw)
+        try:
+            return _note_from(parse_json(text)), used
+        except (ValueError, ValidationError) as e:
+            if not _THINK_RE.sub("", text).strip():  # nothing (or only reasoning) to repair
+                raise ValueError(f"empty reply from {used}") from e
+            if finish == "length":  # truncated (often a looping word): not repairable
+                raise ValueError(f"reply from {used} hit max_tokens") from e
+            log.warning("bad JSON from %s (%s: %s); nudging", used, type(e).__name__, e)
+        fixed, _ = self._chat(settings.TEXT_MODELS, system + JSON_NUDGE, text[:30000],
+                              temperature=0, timeout=_call_timeout(60),
+                              max_tokens=MAX_TOKENS_NOTE)
+        return _note_from(parse_json(fixed)), used
 
-    # ---------- Step 1: categorization (lite model, ~50 output tokens) ----------
+    # ---------- Step 1: categorization ----------
 
     async def classify(self, url: str, bundle: ContentBundle,
                        existing_categories: list[str],
-                       note_hint: str | None = None) -> str:
-        """One lite call that assigns a note's content_type against the user's existing
-        categories. Returns the resolved slug.
-
-        Collection membership is NO LONGER decided here — a classifier call used to also
-        file the note into at most one user-created bucket, but that's now resolved by
-        embedding similarity at ingest (services.collections.match_collections_by_embedding,
-        called from routers/process.py after the note embedding is computed), which lets a
-        note belong to more than one collection instead of the old at-most-one assignment.
-        Dropping collection routing from this prompt also shaves its output tokens."""
-        categories_str = ", ".join(existing_categories) if existing_categories else "none yet"
-        prompt = (
-            f"URL: {url}\n"
-            f"Platform: {bundle.metadata.get('platform', 'web')}\n"
-            f"Content preview: {bundle.preview[:600]}\n"
-            f"User's existing categories: {categories_str}\n"
-        )
-        prompt += (
-            (f"User instruction: {note_hint}\n" if note_hint else "")
-            + "Choose the content_type."
-        )
+                       note_hint: str | None = None) -> str | None:
+        """Resolve a note's content_type. Returns None for video sources (no user hint): the
+        video model picks the type itself (`extract_from_video(type_hint=None)` /
+        `extract(content_type=None)`). Otherwise rules first (shop domains, JSON-LD @type),
+        then one CLASSIFY_MODELS call; the slug is matched against the user's categories."""
+        slug: str | None = None
+        if not note_hint:
+            if is_video_source(url, bundle):
+                return None
+            slug = rule_category(url, bundle)
         at_cap = len(existing_categories) >= settings.MAX_USER_CATEGORIES
-        system = CATEGORY_SYSTEM + (CATEGORY_CAP_RULE if at_cap else "")
-        # Text only: LITE_MODEL is text-only. Images still reach `extract` (VISION_MODEL).
-        text = await asyncio.to_thread(self._chat, settings.LITE_MODEL, system, prompt)
-        try:
-            parsed = json.loads(_strip_code_fences(text))
-            slug = parsed.get("content_type", "summary")
-        except (json.JSONDecodeError, AttributeError):
-            slug = "summary"
+        if slug is None:
+            categories_str = ", ".join(existing_categories) if existing_categories else "none yet"
+            prompt = (
+                f"URL: {url}\n"
+                f"Platform: {bundle.metadata.get('platform', 'web')}\n"
+                f"Content preview: {bundle.preview[:600]}\n"
+                f"User's existing categories: {categories_str}\n"
+                + (f"User instruction: {note_hint}\n" if note_hint else "")
+                + "Choose the content_type."
+            )
+            system = CATEGORY_SYSTEM + (CATEGORY_CAP_RULE if at_cap else "")
+            try:
+                text, _ = await asyncio.to_thread(
+                    self._chat, settings.CLASSIFY_MODELS, system, prompt,
+                    max_tokens=MAX_TOKENS_CLASSIFY, timeout=_call_timeout(45))
+                slug = parse_json(text).get("content_type") or "summary"
+            except (ValueError, AttributeError):
+                slug = "summary"
         resolved = match_existing(slug, existing_categories)
         # Enforce the taxonomy cap in code (the prompt rule is best-effort): at/over the cap a
         # net-new slug is snapped onto the closest existing category, never appended.
@@ -897,123 +707,16 @@ class GeminiService:
             resolved = closest_existing(resolved, existing_categories)
         return resolved
 
-    async def assign_category(self, url: str, bundle: ContentBundle,
-                              existing_categories: list[str],
-                              note_hint: str | None = None) -> str:
-        """Back-compat alias — identical to classify now that collection routing has moved
-        to embedding match at ingest (kept so any external caller of the old name still works)."""
-        return await self.classify(url, bundle, existing_categories, note_hint=note_hint)
+    # ---------- Step 2: type-focused extraction ----------
 
-    # ---------- Backfill: pull titles out of an already-saved note ----------
-
-    async def extract_titles_from_note(self, title: str, ai_summary: str,
-                                       data: dict | None) -> list[dict]:
-        """For the Watchlist backfill: extract the movie/show titles from a note that was
-        already saved (so its `data` predates the entertainment schema and has no titles[]).
-        Works off the STORED text only — no re-scraping. Lite model, JSON mode."""
-        blob = (
-            f"Note title: {title}\n"
-            f"Summary: {ai_summary}\n"
-            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
-        )
-        try:
-            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
-                                           TITLES_FROM_NOTE_SYSTEM, blob)
-            out = json.loads(_strip_code_fences(text))
-            titles = out.get("titles", []) if isinstance(out, dict) else []
-            return [t for t in titles if isinstance(t, dict) and t.get("title")]
-        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
-            log.warning("title backfill extract failed: %s: %s", type(e).__name__, e)
-            return []
-
-    async def expand_collection_query(self, name: str, description: str = "") -> str:
-        """Expand a thin collection name/description into a descriptive semantic query for the
-        backfill embedding. A two-letter name like "AI" embeds almost nothing — the expansion is
-        the difference between sweeping in matching notes and silently matching zero. Lite model,
-        plain text; returns "" on any failure (caller falls back to the raw text)."""
-        prompt = f"Collection name: {name}"
-        if description and description.strip().lower() != name.strip().lower():
-            prompt += f"\nUser's description: {description}"
-        try:
-            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
-                                           COLLECTION_QUERY_SYSTEM, prompt, json=False)
-            return text.strip()
-        except Exception as e:  # noqa: BLE001 — expansion is best-effort.
-            log.warning("collection query expansion failed: %s: %s", type(e).__name__, e)
-            return ""
-
-    async def extract_venues_from_note(self, title: str, ai_summary: str,
-                                       data: dict | None) -> list[dict]:
-        """For the Places backfill: extract the venue names from a note that was already saved
-        (so its `data` predates the venues[] schema). Works off the STORED text only — no
-        re-scraping. Lite model, JSON mode."""
-        blob = (
-            f"Note title: {title}\n"
-            f"Summary: {ai_summary}\n"
-            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
-        )
-        try:
-            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
-                                           VENUES_FROM_NOTE_SYSTEM, blob)
-            out = json.loads(_strip_code_fences(text))
-            venues = out.get("venues", []) if isinstance(out, dict) else []
-            return [v for v in venues if isinstance(v, dict) and v.get("name")]
-        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
-            log.warning("venue backfill extract failed: %s: %s", type(e).__name__, e)
-            return []
-
-    async def extract_days_from_note(self, title: str, ai_summary: str,
-                                     data: dict | None) -> dict:
-        """For the Trips backfill: derive a day-by-day itinerary from a travel note saved before the
-        Trips app existed (so its `data` went through the generic composer, not the itinerary
-        schema, and carries no days[]). Works off the STORED text only — no re-scraping. Returns the
-        itinerary `data` shape (destination/duration/.../days[]/tips); {"days":[]} when the note
-        isn't actually a trip. Lite model, JSON mode."""
-        blob = (
-            f"Note title: {title}\n"
-            f"Summary: {ai_summary}\n"
-            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
-        )
-        try:
-            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
-                                           DAYS_FROM_NOTE_SYSTEM, blob)
-            out = json.loads(_strip_code_fences(text))
-            if not isinstance(out, dict):
-                return {"days": []}
-            days = out.get("days")
-            out["days"] = [d for d in days if isinstance(d, dict) and d.get("stops")] if isinstance(days, list) else []
-            return out
-        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
-            log.warning("days backfill extract failed: %s: %s", type(e).__name__, e)
-            return {"days": []}
-
-    async def summarize_for_backfill(self, title: str, content_type: str,
-                                     data: dict | None) -> str:
-        """For scripts/backfill_summaries.py: regenerate `ai_summary` for a note stuck with a
-        migration-artifact summary ('Added 37 items to your Places collection.', left behind by
-        migrate_items_to_notes.py). Works off the STORED title/data only — no re-scrape. Lite
-        model, plain text. Returns "" on any failure (caller treats that as a skip)."""
-        blob = (
-            f"Title: {title}\n"
-            f"content_type: {content_type}\n"
-            f"Stored data: {json.dumps(data or {}, ensure_ascii=False)[:6000]}"
-        )
-        try:
-            text = await asyncio.to_thread(self._chat, settings.LITE_MODEL,
-                                           SUMMARIZE_BACKFILL_SYSTEM, blob, json=False)
-            return _strip_code_fences(text.strip())
-        except Exception as e:  # noqa: BLE001 — backfill is best-effort per note.
-            log.warning("summary backfill failed for %r: %s: %s", title, type(e).__name__, e)
-            return ""
-
-    # ---------- Step 2: type-focused extraction (main model) ----------
-
-    def _build_prompt(self, url: str, bundle: ContentBundle, content_type: str,
+    def _build_prompt(self, url: str, bundle: ContentBundle, content_type: str | None,
                       note_hint: str | None = None, video_url: str | None = None,
-                      images: bool = False) -> str:
+                      images: bool = False, categories: list[str] | None = None) -> str:
         """The extraction user prompt. The video (YouTube URL) and carousel images are attached
         by `_chat`; `video_url`/`images` only say whether to tell the model about them."""
-        text_prompt = [f"URL: {url}", f"content_type: {content_type}"]
+        text_prompt = [f"URL: {url}", f"content_type: {content_type or '(choose it)'}"]
+        if line := _categories_line(content_type, categories):
+            text_prompt.append(line)
         meta = bundle.metadata
         if meta.get("title"):
             text_prompt.append(f"Source title: {meta['title']}")
@@ -1044,315 +747,91 @@ class GeminiService:
                 "the first slide." if n > 1
                 else "An image from the post is attached — read its text and visuals."
             )
+        if bundle.metadata.get("thin") or bundle.strategy.endswith("_thin"):
+            text_prompt.append(THIN_RULE)
         if note_hint:
             text_prompt.append(f"User instruction for this note: {note_hint}")
         return "\n\n".join(text_prompt)
 
-    def extract(self, url: str, bundle: ContentBundle, content_type: str,
-                note_hint: str | None = None, deadline: float | None = None) -> NoteExtraction:
-        # Exact known type → its schema; else a family slug → that family's schema
-        # (entertainment titles / place venues); else the open composer.
-        if content_type in TYPE_PROMPTS:
-            system = TYPE_PROMPTS[content_type]
-        elif is_entertainment(content_type):
-            system = TYPE_PROMPTS["entertainment"]
-        elif is_places(content_type):
-            system = TYPE_PROMPTS["place"]
-        else:
-            system = COMPOSER_PROMPT
-        # Routing: YouTube → YOUTUBE_MODEL with the URL attached; carousel images →
-        # VISION_MODEL; everything else → TEXT_MODEL. No MEDIA_RESOLUTION_LOW equivalent on
-        # OpenRouter — watch YouTube `usage.cost` on first runs.
+    def extract(self, url: str, bundle: ContentBundle, content_type: str | None,
+                note_hint: str | None = None, deadline: float | None = None,
+                categories: list[str] | None = None) -> NoteExtraction:
+        """One extraction call. Routing: YouTube URL → YOUTUBE_MODELS (Google AI Studio pinned,
+        ONE attempt; any failure raises VideoUnreadable); carousel images → IMAGE_MODELS; else
+        TEXT_MODELS. content_type None → the model picks it (normalized slug). The model that
+        answered is written to bundle.metadata["model"]. Transient failures propagate to
+        process_job's retry; bad JSON gets one nudge. `categories` = the user's existing
+        categories, shown to the model when it picks the type (content_type None)."""
+        system = _system_with_cap(content_type, categories)
         yt = _youtube_uri(bundle)
+        prompt = self._build_prompt(url, bundle, content_type, note_hint, video_url=yt,
+                                    images=bool(bundle.image_parts) and not yt,
+                                    categories=categories)
         if yt:
-            route = (settings.YOUTUBE_MODEL, yt, ())
+            yt_timeout = _video_timeout(deadline)  # raises VideoUnreadable when out of budget
+            try:
+                parsed, used = self._note_json(settings.YOUTUBE_MODELS, system, prompt,
+                                               temperature=0.2, video_url=yt, pin_google=True,
+                                               timeout=yt_timeout, reserve=VIDEO_RESERVE_S)
+            except Exception as e:
+                raise VideoUnreadable(f"{type(e).__name__}: {e}") from e
         elif bundle.image_parts:
-            route = (settings.VISION_MODEL, None, bundle.image_parts)
+            parsed, used = self._note_json(settings.IMAGE_MODELS, system, prompt,
+                                           temperature=0.2, images=bundle.image_parts,
+                                           timeout=_call_timeout(120, deadline))
         else:
-            route = (settings.TEXT_MODEL, None, ())
-        # One retry: providers throw transient 5xx, and a flaky generation can return
-        # unparseable JSON — both deserve a second attempt before failing the job. A YouTube
-        # video the model still can't read gets one last text-only try from title + description.
-        attempts = [route, route]
-        if yt:
-            attempts.append((settings.TEXT_MODEL, None, ()))
-        last_exc: Exception | None = None
-        for i, (model, video_url, images) in enumerate(attempts):
-            # Per-call timeout = min(120, remaining budget); under 15 s left, stop and raise.
-            timeout = None
-            if deadline is None:
-                deadline = job_deadline.get()
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining < 15 and last_exc is not None:
-                    break
-                timeout = min(120, max(15, remaining))
-            try:
-                text = self._chat(
-                    model, system,
-                    self._build_prompt(url, bundle, content_type, note_hint,
-                                       video_url=video_url, images=bool(images)),
-                    temperature=0.2, images=images, video_url=video_url, timeout=timeout,
-                )
-                parsed = NoteExtraction.model_validate_json(_strip_code_fences(text))
-                parsed.content_type = content_type  # enforce Step 1's decision
-                return parsed
-            except Exception as e:
-                last_exc = e
-                if i < len(attempts) - 1:
-                    log.warning("extract attempt %d failed (%s), retrying: %s: %s",
-                                i + 1, model, type(e).__name__, e, extra={"url": url})
-                    time.sleep(2)
-        raise last_exc
+            parsed, used = self._note_json(settings.TEXT_MODELS, system, prompt,
+                                           temperature=0.2, timeout=_call_timeout(120, deadline))
+        parsed.content_type = content_type or normalize_slug(parsed.content_type)
+        bundle.metadata["model"] = used
+        return parsed
 
-    async def extract_async(self, url: str, bundle: ContentBundle, content_type: str,
+    async def extract_async(self, url: str, bundle: ContentBundle, content_type: str | None,
                             note_hint: str | None = None,
-                            deadline: float | None = None) -> NoteExtraction:
+                            deadline: float | None = None,
+                            categories: list[str] | None = None) -> NoteExtraction:
         return await asyncio.to_thread(self.extract, url, bundle, content_type, note_hint,
-                                       deadline)
+                                       deadline, categories)
 
-    # ---------- Ask AI: chat grounded in the user's saved notes ----------
-
-    def _plan_ask(self, question: str, history: list[dict], today: str,
-                  index: list[dict]) -> AskPlan:
-        prompt_parts = [f"Today: {today}", f"Message: {question}"]
-        if history:
-            prompt_parts.append("Recent conversation:\n" + _history_lines(history))
-        prompt_parts.append("Candidate note index (JSON):\n" + json.dumps(index, ensure_ascii=False))
-        for attempt in (1, 2):
-            try:
-                text = self._chat(settings.LITE_MODEL, ASK_PLAN_SYSTEM, "\n\n".join(prompt_parts))
-                return AskPlan.model_validate_json(_strip_code_fences(text))
-            except Exception as e:
-                if attempt == 1:
-                    log.warning("plan_ask attempt 1 failed, retrying: %s: %s",
-                                type(e).__name__, e)
-                    time.sleep(2)
-        # Planning is best-effort: default to a note-scoped answer with no picks, which
-        # degrades to "nothing found" rather than failing the whole ask.
-        return AskPlan(scope="notes")
-
-    async def plan_ask(self, question: str, history: list[dict], today: str,
-                       index: list[dict]) -> AskPlan:
-        return await asyncio.to_thread(self._plan_ask, question, history, today, index)
-
-    def _answer_chat(self, question: str, history: list[dict]) -> GroundedAnswer:
-        prompt_parts = []
-        if history:
-            prompt_parts.append("Conversation so far:\n" + _history_lines(history))
-        prompt_parts.append(f"Message: {question}")
-        last_exc: Exception | None = None
-        for attempt in (1, 2):
-            try:
-                text = self._chat(settings.TEXT_MODEL, ASK_CHAT_SYSTEM,
-                                  "\n\n".join(prompt_parts), temperature=0.4)
-                answer = GroundedAnswer.model_validate_json(_strip_code_fences(text))
-                answer.cited_note_ids = []  # chat mode never cites notes
-                return answer
-            except Exception as e:
-                last_exc = e
-                if attempt == 1:
-                    log.warning("answer_chat attempt 1 failed, retrying: %s: %s",
-                                type(e).__name__, e)
-                    time.sleep(2)
-        raise last_exc
-
-    async def answer_chat(self, question: str, history: list[dict]) -> GroundedAnswer:
-        return await asyncio.to_thread(self._answer_chat, question, history)
-
-    def _answer_from_notes(self, question: str, history: list[dict], notes: list[dict],
-                           focal_title: str | None = None) -> GroundedAnswer:
-        prompt_parts = []
-        if history:
-            prompt_parts.append("Conversation so far:\n" + _history_lines(history))
-        if focal_title:
-            prompt_parts.append(_focal_hint(focal_title))
-        for n in notes:
-            prompt_parts.append(
-                f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
-                f" | {n.get('source_domain', '')}\n"
-                f"summary: {n.get('ai_summary', '')}\n"
-                f"data: {json.dumps(n.get('data', {}), ensure_ascii=False, default=str)[:6000]}"
-            )
-        prompt_parts.append(f"Question: {question}")
-        last_exc: Exception | None = None
-        for attempt in (1, 2):
-            try:
-                text = self._chat(settings.TEXT_MODEL, ASK_ANSWER_NOTES_SYSTEM,
-                                  "\n\n".join(prompt_parts), temperature=0.3)
-                return GroundedAnswer.model_validate_json(_strip_code_fences(text))
-            except Exception as e:
-                last_exc = e
-                if attempt == 1:
-                    log.warning("answer_from_notes attempt 1 failed, retrying: %s: %s",
-                                type(e).__name__, e)
-                    time.sleep(2)
-        raise last_exc
-
-    async def answer_from_notes(self, question: str, history: list[dict], notes: list[dict],
-                                focal_title: str | None = None) -> GroundedAnswer:
-        return await asyncio.to_thread(self._answer_from_notes, question, history, notes,
-                                       focal_title)
-
-    def _synthesize(self, question: str, history: list[dict], notes: list[dict],
-                    output: str, focal_title: str | None = None,
-                    existing_categories: list[str] | None = None) -> SynthAnswer:
-        existing_categories = existing_categories or []
-        prompt_parts = [f"OUTPUT kind requested: {output}"]
-        cats = ", ".join(existing_categories) if existing_categories else "none yet"
-        prompt_parts.append(f"User's existing categories: {cats}")
-        if history:
-            prompt_parts.append("Conversation so far:\n" + _history_lines(history))
-        if focal_title:
-            prompt_parts.append(_focal_hint(focal_title))
-        for n in notes:
-            prompt_parts.append(
-                f"NOTE id={n.get('id')} | {n.get('content_type', '')} | {n.get('title', '')}"
-                f" | {n.get('source_domain', '')}\n"
-                f"summary: {n.get('ai_summary', '')}\n"
-                f"data: {json.dumps(n.get('data', {}), ensure_ascii=False, default=str)[:6000]}"
-            )
-        prompt_parts.append(f"Request: {question}")
-        last_exc: Exception | None = None
-        for attempt in (1, 2):
-            try:
-                text = self._chat(settings.TEXT_MODEL, ASK_SYNTH_SYSTEM,
-                                  "\n\n".join(prompt_parts), temperature=0.3)
-                synth = SynthAnswer.model_validate_json(_strip_code_fences(text))
-                # Final safety net: collapse case/space/plural variants to an existing category.
-                synth.artifact.content_type = match_existing(
-                    synth.artifact.content_type, existing_categories
-                )
-                return synth
-            except Exception as e:
-                last_exc = e
-                if attempt == 1:
-                    log.warning("synthesize attempt 1 failed, retrying: %s: %s",
-                                type(e).__name__, e)
-                    time.sleep(2)
-        raise last_exc
-
-    async def synthesize(self, question: str, history: list[dict], notes: list[dict],
-                         output: str, focal_title: str | None = None,
-                         existing_categories: list[str] | None = None) -> SynthAnswer:
-        return await asyncio.to_thread(self._synthesize, question, history, notes, output,
-                                       focal_title, existing_categories)
-
-    # ---------- Composed digests (smart collections + personal week-in-review) ----------
-
-    def _run_digest(self, header_lines: list[str], notes: list[dict],
-                    system: str) -> CollectionDigest | None:
-        """Shared core behind both digest builders: serialize the fed notes (CONTENT-first, with
-        the per-note data excerpt), call Gemini once (retry once) under `system`, parse into a
-        CollectionDigest, drop entries citing ids outside the fed set, and drop sections left with
-        neither body nor items.
-
-        Best-effort end to end: a failure anywhere in here — including note serialization while
-        assembling the prompt, not just the model call — resolves to `return None` so the caller
-        can keep serving the last cached digest (marked stale) instead of a 500.
-        """
+    def _extract_from_video(self, video_bytes: bytes, mime: str, caption: str,
+                            comments: list[str], type_hint: str | None,
+                            categories: list[str] | None = None) -> NoteExtraction:
+        if not video_bytes:
+            raise VideoUnreadable("empty video")
+        if len(video_bytes) > settings.VIDEO_MAX_BYTES:
+            raise VideoUnreadable(f"video {len(video_bytes)} B > VIDEO_MAX_BYTES")
+        parts = [f"content_type: {type_hint or '(choose it)'}"]
+        if line := _categories_line(type_hint, categories):
+            parts.append(line)
+        if caption:
+            parts.append(f"Post caption:\n{caption[:4000]}")
+        top = [c.strip() for c in comments or [] if c and c.strip()][:20]
+        if top:
+            parts.append("Top comments:\n" + "\n".join(f"- {c[:300]}" for c in top))
+        parts.append(VIDEO_INSTRUCTIONS)
+        timeout = _video_timeout()  # raises VideoUnreadable when out of budget
+        data_url = f"data:{mime or 'video/mp4'};base64,{base64.b64encode(video_bytes).decode()}"
         try:
-            prompt_parts = list(header_lines)
-            for n in notes:
-                # CONTENT (data) comes FIRST and is what the model must read; title/summary are
-                # pushed below and labeled as metadata only, so the model can't take the lazy
-                # path of paraphrasing them instead of opening data (that was v2's failure mode —
-                # the prompt banned title-restatement but data was still an afterthought after
-                # title/summary in the note's own serialization).
-                data_excerpt = json.dumps(
-                    n.get("data", {}), ensure_ascii=False, default=str,
-                )[:settings.DIGEST_NOTE_DATA_EXCERPT_CHARS]
-                prompt_parts.append(
-                    f"NOTE id={n.get('id')}\n"
-                    f"CONTENT (read this): {data_excerpt}\n"
-                    f"metadata (identification only, never copy into output): "
-                    f"type={n.get('content_type', '')} | title={n.get('title', '')} | "
-                    f"source={n.get('source_domain', '')} | summary={n.get('ai_summary', '')}"
-                )
-            last_exc: Exception | None = None
-            for attempt in (1, 2):
-                try:
-                    text = self._chat(settings.TEXT_MODEL, system,
-                                      "\n\n".join(prompt_parts), temperature=0.5)
-                    digest = CollectionDigest.model_validate_json(_strip_code_fences(text))
-                    # Drop any entry the model cited that isn't actually one of the fed notes (a
-                    # hallucinated/foreign id must never deep-link into someone else's note), then
-                    # drop any section left with nothing at all — but a section can be body-only
-                    # (no items), so only drop sections with neither.
-                    valid_ids = {n.get("id") for n in notes}
-                    for section in digest.sections:
-                        section.items = [it for it in section.items if it.note_id in valid_ids]
-                    digest.sections = [
-                        s for s in digest.sections if s.items or s.body.strip()
-                    ]
-                    return digest
-                except Exception as e:
-                    last_exc = e
-                    if attempt == 1:
-                        log.warning("build_digest attempt 1 failed, retrying: %s: %s",
-                                    type(e).__name__, e)
-                        time.sleep(2)
-            log.error("build_digest failed after retry: %s: %s",
-                      type(last_exc).__name__, last_exc)
-            return None
+            parsed, used = self._note_json(
+                settings.VIDEO_MODELS, _system_with_cap(type_hint, categories),
+                "\n\n".join(parts), temperature=0.2, video_url=data_url,
+                timeout=timeout, reserve=VIDEO_RESERVE_S)
         except Exception as e:
-            log.error("build_digest failed: %s: %s", type(e).__name__, e)
-            return None
+            raise VideoUnreadable(f"{type(e).__name__}: {e}") from e
+        parsed.content_type = type_hint or normalize_slug(parsed.content_type)
+        return parsed
 
-    def _build_digest(self, name: str, description: str,
-                      notes: list[dict]) -> CollectionDigest | None:
-        header_lines = [f"Collection name: {name}"]
-        if description:
-            header_lines.append(f"Collection description: {description}")
-        return self._run_digest(header_lines, notes, DIGEST_SYSTEM)
-
-    async def build_digest(self, name: str, description: str,
-                           notes: list[dict]) -> CollectionDigest | None:
-        return await asyncio.to_thread(self._build_digest, name, description, notes)
-
-    def _build_personal_digest(self, display_name: str, window_label: str,
-                               notes: list[dict]) -> CollectionDigest | None:
-        header_lines = [
-            f"User: {display_name or 'there'}",
-            f"Window: {window_label}",
-        ]
-        return self._run_digest(header_lines, notes, PERSONAL_DIGEST_SYSTEM)
-
-    async def build_personal_digest(self, display_name: str, window_label: str,
-                                    notes: list[dict]) -> CollectionDigest | None:
-        return await asyncio.to_thread(
-            self._build_personal_digest, display_name, window_label, notes)
-
-    def _create_note(self, question: str, history: list[dict],
-                     existing_categories: list[str]) -> ArtifactNote:
-        prompt_parts = []
-        if history:
-            prompt_parts.append("Conversation:\n" + _history_lines(history))
-        cats = ", ".join(existing_categories) if existing_categories else "none yet"
-        prompt_parts.append(f"User's existing categories: {cats}")
-        prompt_parts.append(f"Create-note request: {question}")
-        last_exc: Exception | None = None
-        for attempt in (1, 2):
-            try:
-                text = self._chat(settings.TEXT_MODEL, ASK_CREATE_SYSTEM,
-                                  "\n\n".join(prompt_parts), temperature=0.4)
-                artifact = ArtifactNote.model_validate_json(_strip_code_fences(text))
-                artifact.origin = "created"
-                # Final safety net: collapse case/space/plural variants to an existing category.
-                artifact.content_type = match_existing(artifact.content_type, existing_categories)
-                return artifact
-            except Exception as e:
-                last_exc = e
-                if attempt == 1:
-                    log.warning("create_note attempt 1 failed, retrying: %s: %s",
-                                type(e).__name__, e)
-                    time.sleep(2)
-        raise last_exc
-
-    async def create_note(self, question: str, history: list[dict],
-                          existing_categories: list[str] | None = None) -> ArtifactNote:
-        return await asyncio.to_thread(self._create_note, question, history,
-                                       existing_categories or [])
+    async def extract_from_video(self, video_bytes: bytes, mime: str, caption: str,
+                                 comments: list[str], type_hint: str | None,
+                                 categories: list[str] | None = None) -> NoteExtraction:
+        """Reel / downloaded-video file → note, from picture + sound (VIDEO_MODELS chain, base64
+        `video_url` part, VIDEO_CALL_TIMEOUT_S per call). type_hint None → the model picks the
+        content_type, seeing `categories` (the user's existing ones) to reuse. Timeout is
+        min(VIDEO_CALL_TIMEOUT_S, remaining budget - 60 s); under 75 s left, no call is made.
+        Any failure (budget, size cap, API error/timeout, unrepairable JSON) raises
+        VideoUnreadable. The model that answered is on the request meter (`last_model`)."""
+        return await asyncio.to_thread(self._extract_from_video, video_bytes, mime, caption,
+                                       comments, type_hint, categories)
 
     # ---------- Search-grounded page lookup (for bot-blocked pages) ----------
 
@@ -1369,48 +848,20 @@ class GeminiService:
             "and a short factual description. Do not include facts about similar items. "
             "If you cannot find this exact page, reply with just: NOT_FOUND"
         )
-        for attempt in (1, 2):  # transient provider 5xx
-            try:
-                text = self._chat(settings.TEXT_MODEL, "", prompt, json=False,
-                                  temperature=0.1, web=True)
-                text = text.strip()
-                if not text or "NOT_FOUND" in text[:300]:
-                    return None
-                return text
-            except Exception as e:
-                if attempt == 2:
-                    log.warning("search-grounded lookup failed: %s", e, extra={"url": url})
-        return None
+        try:
+            text, _ = self._chat(settings.TEXT_MODELS, "", prompt, json=False, temperature=0.1,
+                                 web=True, max_tokens=MAX_TOKENS_GROUNDED,
+                                 timeout=_call_timeout(60))
+        except Exception as e:
+            log.warning("search-grounded lookup failed: %s", e, extra={"url": url})
+            return None
+        text = _THINK_RE.sub("", text).strip()
+        if not text or "NOT_FOUND" in text[:300]:
+            return None
+        return text
 
     async def search_grounded_page(self, url: str, hint: str = "") -> str | None:
         return await asyncio.to_thread(self._search_grounded_page, url, hint)
-
-    # ---------- General web research (Ask AI agent: research_web tool) ----------
-
-    def _web_research(self, query: str) -> str | None:
-        """General-purpose web research via the OpenRouter web plugin — current/external facts
-        the user's notes don't contain (prices, hours, recent papers, live FX). Distinct from
-        `_search_grounded_page`, which hunts for ONE known URL. Returns concise sourced prose."""
-        if not query.strip():
-            return None
-        prompt = (
-            "Search the web to answer this research request with CURRENT, factual information. "
-            "Be concise and specific: report concrete facts (names, numbers, prices, dates, "
-            "sources) — not filler. If you can't find reliable information, say so plainly.\n\n"
-            f"Request: {query}"
-        )
-        for attempt in (1, 2):  # transient provider 5xx
-            try:
-                text = self._chat(settings.TEXT_MODEL, "", prompt, json=False,
-                                  temperature=0.2, web=True)
-                return text.strip() or None
-            except Exception as e:
-                if attempt == 2:
-                    log.warning("web research failed: %s: %s", e, extra={"query": query[:120]})
-        return None
-
-    async def web_research(self, query: str) -> str | None:
-        return await asyncio.to_thread(self._web_research, query)
 
 
 gemini_service = GeminiService()

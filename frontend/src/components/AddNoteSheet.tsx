@@ -14,7 +14,7 @@ function looksLikeUrl(s: string): boolean {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(t); // bare domain, e.g. nytimes.com/…
 }
 
-// Unified capture composer used by both the Notes feed and the Library home. One field takes a
+// Unified capture composer used by the feed and the global capture FAB. One field takes a
 // link OR free text (auto-detected); attach (text files) sits inline. Purely presentational — the
 // caller supplies the ingest handlers, so each screen wires its own optimistic/confirm behaviour.
 export function AddNoteSheet({

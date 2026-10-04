@@ -37,7 +37,7 @@ def test_run_sends_token_as_header(monkeypatch):
     assert "params" not in seen
 
 
-def test_download_media_keeps_token_out_of_url(monkeypatch, tmp_path):
+def test_download_video_keeps_token_out_of_url(monkeypatch):
     seen = {}
 
     class _Stream:
@@ -61,6 +61,6 @@ def test_download_media_keeps_token_out_of_url(monkeypatch, tmp_path):
     monkeypatch.setattr(sv, "guarded_async_client", lambda **kw: _Client())
     monkeypatch.setattr(sv.settings, "APIFY_TOKEN", "sekret")
     url = "https://api.apify.com/v2/key-value-stores/s/records/v"
-    asyncio.run(sv._download_media(url, str(tmp_path)))
+    assert asyncio.run(sv.download_video(url)) is None
     assert seen["url"] == url and "sekret" not in seen["url"]
     assert seen["headers"]["Authorization"] == "Bearer sekret"

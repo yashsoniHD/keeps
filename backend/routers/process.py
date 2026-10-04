@@ -16,7 +16,6 @@ Failure ladder (a capture must always produce a note):
 """
 import asyncio
 import logging
-import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -31,11 +30,7 @@ import openai
 
 from config import settings
 from models.note import ContentBundle, NoteExtraction
-from services import note_retrieval as nr
-from services import search_index
 from services import sources
-from services.agent_tools import AgentContext, run_agent_collect
-from services.collections import match_collections_by_embedding
 from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
 from services.firebase import (
     add_user_category,
@@ -44,13 +39,11 @@ from services.firebase import (
     flush_usage,
     get_db,
     get_user_categories,
-    get_user_collections,
     touch_user_activity,
 )
 from services.enrich import enrich_note_data
-from services.gemini import (gemini_service, job_deadline, is_itinerary, is_places, is_recipe,
-                             match_existing, normalize_slug)
-from services.item_reconcile import fan_out_note
+from services.gemini import (ProviderError, VideoUnreadable, closest_existing, gemini_service,
+                             job_deadline, match_existing, normalize_slug)
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.worker_auth import verify_worker_secret
 from services.dispatch import enqueue_process_job
@@ -76,28 +69,6 @@ async def _note_embedding(title: str, ai_summary: str = "",
                     type(e).__name__, e)
         return None
 
-
-async def _match_collections(user_id: str, note_id: str,
-                             embedding: Vector | None) -> list[str]:
-    """Smart-collection membership at ingest: pure in-memory cosine match between the note's
-    already-computed embedding and each of the user's collections' `topic_embedding` (no new
-    AI calls). A note with no embedding (embed failure is non-fatal) matches nothing.
-
-    Strictly best-effort: this runs after the paid classify+extract call, so any failure here
-    (e.g. a Firestore hiccup in get_user_collections) must never fall through to the generic
-    exception handler and salvage the job — that would throw away the extraction we already
-    paid for over a purely cosmetic feature. A miss just leaves the note unfiled."""
-    if embedding is None:
-        return []
-    try:
-        collections = await get_user_collections(user_id)
-    except Exception as e:  # noqa: BLE001 — see docstring: never fail the note over this.
-        log.warning("collection matching failed, note will have no collection_ids: %s: %s",
-                    type(e).__name__, e, extra={"user_id": user_id, "note_id": note_id})
-        return []
-    if not collections:
-        return []
-    return match_collections_by_embedding(list(embedding), note_id, collections)
 
 # A transient failure below this many attempts re-raises as 500 (process_job retries it
 # in-process); at the cap it salvages instead — the user gets a note either way.
@@ -158,11 +129,20 @@ async def _claim_job(db, job_ref):
     return await _tx(transaction)
 
 
+class SourceUnreachable(Exception):
+    """Every strategy failed to fetch the source — often a one-off network blip, so it is
+    retried like any transient failure; only the last attempt salvages a bookmark."""
+
+
 def _is_transient(e: Exception) -> bool:
     """Failures with a real chance of succeeding on a retry."""
+    if isinstance(e, SourceUnreachable):
+        return True
     if isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
         return True
     if isinstance(e, openai.APIConnectionError):  # also covers openai timeouts
+        return True
+    if isinstance(e, ProviderError):  # OpenRouter 200 carrying a provider error / no choices
         return True
     if isinstance(e, openai.APIStatusError):
         return e.status_code == 429 or e.status_code >= 500
@@ -268,12 +248,8 @@ async def _salvage_and_complete(db, job_ref, *, job_id: str, user_id: str, url: 
         await add_user_category(user_id, "bookmark")
         if input_type == "url" and url:
             await add_user_source(user_id, _domain_of(url))
-        # Keep even a salvaged bookmark searchable.
-        salvaged = await db.collection("notes").document(note_id).get()
-        if salvaged.exists:
-            await search_index.upsert_for_note(db, note_id, salvaged.to_dict())
     except Exception:
-        pass  # category/source chips + index are cosmetic — never fail the salvage over it
+        pass  # category/source chips are cosmetic — never fail the salvage over it
     await job_ref.update({"status": "completed", "note_id": note_id,
                           "destination": {"kind": "note", "note_id": note_id},
                           "error": error[:500],
@@ -298,81 +274,63 @@ async def _fail_job(job_ref, error: str) -> dict:
     return {"status": "failed", "error": error[:200]}
 
 
-# ---- completeness gate + escalation (reel cascade) ----
-# ponytail: Vercel kills a request at 300 s; leave 30 s of margin. Escalate only when the
-# elapsed time + that tier's cost + 45 s (extract/embed/write) still fits.
+# ponytail: Vercel kills a request at 300 s; leave 30 s of margin.
 JOB_DEADLINE_S = 270
-MAX_ESCALATIONS = 2
-_ESCALATE_COST_S = {"caption": 115, "transcript": 60}  # download+ffmpeg+Whisper / frames+vision
-_FINISH_MARGIN_S = 45
-_QTY = re.compile(r"\d|[½¼¾⅓⅔]|\b(?:one|two|three|half|dash|pinch|handful|cup|tbsp|tsp)\b", re.I)
 
 
-def _is_complete(extracted: NoteExtraction, content_type: str) -> bool:
-    """Pure heuristic: did extraction capture the substance? Never rejects a note — it only
-    decides whether a costlier acquisition tier is worth trying.
-    # ponytail: shape/threshold heuristics (recipe >=3 ingredients, >=50% with quantities,
-    # >=2 steps; place/itinerary >=1 named stop); tune against real reels, don't over-engineer."""
-    data = extracted.data or {}
-    if is_recipe(content_type) or "ingredients" in data:
-        items: list = []
-        for g in data.get("ingredients") or []:
-            items += (g.get("items") or []) if isinstance(g, dict) else [g]
-        items = [i if isinstance(i, str) else str(i) for i in items]
-        quantified = sum(1 for i in items if _QTY.search(i))
-        return (len(items) >= 3 and quantified * 2 >= len(items)
-                and len(data.get("steps") or []) >= 2)
-    if is_places(content_type) or "venues" in data:
-        return any(isinstance(v, dict) and v.get("name") for v in data.get("venues") or [])
-    if is_itinerary(content_type) or "days" in data:
-        return any(isinstance(st, dict) and st.get("place")
-                   for d in data.get("days") or [] if isinstance(d, dict)
-                   for st in d.get("stops") or [])
-    return bool((extracted.ai_summary or "").strip())
+async def _extract_from_video(bundle: ContentBundle, video: bytes, mime: str,
+                              content_type: str | None,
+                              categories: list[str] | None) -> NoteExtraction:
+    return await gemini_service.extract_from_video(
+        video, mime, bundle.metadata.get("caption") or bundle.text or "",
+        list(bundle.metadata.get("comments") or []), content_type, categories=categories)
 
 
-def _can_escalate(bundle: ContentBundle, start: float, done: int) -> bool:
-    if done >= MAX_ESCALATIONS or not bundle.strategy.startswith("reel_"):
-        return False
-    cost = _ESCALATE_COST_S.get(bundle.metadata.get("tier", "caption"))
-    if cost is None:  # already at the last tier
-        return False
-    # Request-level deadline when set (survives in-process retries); else this attempt's start.
-    end = job_deadline.get() or start + JOB_DEADLINE_S
-    if time.monotonic() + cost + _FINISH_MARGIN_S >= end:
-        log.info("skipping escalation: over time budget", extra={"strategy": bundle.strategy})
-        return False
-    return True
-
-
-async def _escalate(url: str, bundle: ContentBundle, start: float, done: int) -> ContentBundle | None:
-    if not _can_escalate(bundle, start, done):
-        return None
-    try:
-        return await sources.escalate(url, bundle)
-    except Exception as e:  # noqa: BLE001 — a failed tier keeps the best partial
-        log.warning("escalation failed: %s: %s", type(e).__name__, e, extra={"url": url})
-        return None
-
-
-async def _extract_with_escalation(url: str, bundle: ContentBundle, content_type: str,
-                                   note_hint: str | None, start: float, done: int = 0):
-    """Extract; while the result is incomplete, climb the reel cascade and re-extract (same
-    content_type, extract only). Returns (extracted, bundle). The first extract may raise as
-    before; later ones never lose the earlier result."""
-    extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
-    while not _is_complete(extracted, content_type):
-        nb = await _escalate(url, bundle, start, done)
-        if nb is None:
-            break
-        done += 1
-        bundle = nb
+async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
+                   note_hint: str | None, categories: list[str] | None = None
+                   ) -> tuple[NoteExtraction, ContentBundle]:
+    """Video bytes → the video model; a YouTube URL → the model watches it, falling back to the
+    scraper on VideoUnreadable; everything else → the text/vision extract. A video the model
+    can't read degrades to a thin caption-only note — a save never fails for a missing video."""
+    video = bundle.metadata.pop("video_bytes", None)
+    mime = bundle.metadata.pop("video_mime", None) or "video/mp4"
+    if video:
         try:
-            extracted = await gemini_service.extract_async(url, bundle, content_type, note_hint)
-        except Exception as e:  # noqa: BLE001 — keep the best partial
-            log.warning("re-extract after escalation failed: %s: %s", type(e).__name__, e)
-            break
-    return extracted, bundle
+            return (await _extract_from_video(bundle, video, mime, content_type, categories),
+                    bundle)
+        except VideoUnreadable as e:
+            log.info("video unreadable, extracting from caption: %s", e, extra={"url": url})
+            if not ((bundle.text or "").strip() or bundle.metadata.get("caption")
+                    or bundle.image_parts):
+                # Nothing but a URL + platform left: a text extract would invent the note.
+                # Raise → the salvage path writes an honest bookmark instead.
+                raise ValueError(f"video unreadable and no caption to fall back on: {e}")
+            bundle.metadata["thin"] = True
+            bundle = bundle.model_copy(update={"strategy": bundle.strategy + "_thin"})
+    if bundle.strategy == "youtube_direct":
+        try:
+            return (await gemini_service.extract_async(url, bundle, content_type, note_hint,
+                                                       categories=categories), bundle)
+        except VideoUnreadable as e:
+            log.info("youtube unreadable, running fallback scraper: %s", e,
+                     extra={"url": url, "event": "youtube_fallback"})
+            bundle = await sources.youtube.fallback(url, bundle)
+            if bundle.kind == "metadata_only":  # nothing to extract from → salvage bookmark
+                raise ValueError("youtube unreadable and the fallback found no content")
+            return await _extract(url, bundle, content_type, note_hint, categories)
+    return (await gemini_service.extract_async(url, bundle, content_type, note_hint,
+                                               categories=categories), bundle)
+
+
+def _hm(seconds: int) -> str:
+    h, m = divmod(round(seconds / 60), 60)
+    return f"{h} h {m} m" if h and m else f"{h} h" if h else f"{m} m"
+
+
+def too_long_note(duration: int, limit: int, built_from: str = "caption") -> str:
+    """'Video is 2 h 14 m, over the 10-minute limit; note built from the caption.'"""
+    length = f"Video is {_hm(duration)}" if duration else "Video is too long"
+    return f"{length}, over the {limit // 60}-minute limit; note built from the {built_from}."
 
 
 def _verify_oidc(request: Request) -> None:
@@ -449,9 +407,12 @@ async def redispatch_stale(docs) -> int:
             await doc.reference.update({"status": "failed", "updated_at": now,
                                         "error": job.get("error") or "Timed out before processing."})
             continue
-        path = "/api/process-agent" if job.get("kind") == "agent_task" else "/api/process"
+        if job.get("kind") == "agent_task":  # deep agent tasks were removed with Ask AI
+            await doc.reference.update({"status": "failed", "updated_at": now,
+                                        "error": "Agent tasks are no longer supported."})
+            continue
         try:
-            await asyncio.to_thread(enqueue_process_job, doc.id, path)
+            await asyncio.to_thread(enqueue_process_job, doc.id)
             n += 1
         except Exception as e:  # noqa: BLE001 — one bad dispatch must not stop the sweep
             log.error("sweep re-dispatch failed: %s: %s", type(e).__name__, e,
@@ -545,7 +506,6 @@ async def _process_job(job_id: str) -> dict:
     # (a failed/salvaged job still incurred AI cost that must be attributed).
     meter = start_metering()
     bundle: ContentBundle | None = None
-    job_start = time.monotonic()
     try:
         # 1. Acquire content per input_type. URLs go through the source-aware resolver;
         #    typed text is already in hand.
@@ -572,6 +532,11 @@ async def _process_job(job_id: str) -> dict:
         # stub. Do NOT hand it to Gemini — it would confidently hallucinate a whole note from
         # the URL slug (a real 404 produced a full fake recipe). Write an honest is_fallback
         # bookmark and stop: no classify, no extract, no mini-app fan-out.
+        if bundle.strategy == "unreachable" and attempt < MAX_TRANSIENT_ATTEMPTS:
+            # A one-off fetch failure (a retry moments later usually scrapes fine): retry
+            # in-process before settling for a bookmark. BlockedURLError / private_or_blocked
+            # never get here.
+            raise SourceUnreachable(f"source unreachable: {url}")
         if bundle.kind == "metadata_only" or bundle.strategy == "unreachable":
             if target_note_id:
                 log.warning("re-extract source unreachable, failing without clobbering the note",
@@ -591,41 +556,47 @@ async def _process_job(job_id: str) -> dict:
             # categorises it themselves (and can edit the body later). Still embedded below
             # for search — that's not "AI structuring", just retrieval.
             extracted = _raw_text_extraction(job.get("text") or "", title)
+            schema_slug = extracted.content_type
             cover_image_url = None
         else:
-            # 2. Classify against this user's own categories (one lite call, content_type only —
-            #    smart-collection membership is resolved later, by embedding match, not here).
+            # 2. Classify against this user's own categories (one lite call, content_type only).
             existing = await get_user_categories(user_id)
-            # Gate (a): a reel with a thin preview would be misclassified — climb one tier first.
-            escalations = 0
-            if (bundle.strategy.startswith("reel_") and not bundle.image_parts
-                    and len(bundle.text or "") < sources.social_video.THIN_CHARS):
-                if (nb := await _escalate(url, bundle, job_start, escalations)) is not None:
-                    bundle, escalations = nb, escalations + 1
-                elif not (bundle.text or "").strip() and not bundle.image_parts:
-                    # Nothing escalated and nothing usable: extracting would invent a note.
-                    log.warning("thin reel, escalation failed", extra={
-                        "job_id": job_id, "user_id": user_id, "url": url})
-                    return await (_fail_reextract if target_note_id else _fail_job)(
-                        job_ref, "private_or_blocked")
             content_type = await gemini_service.classify(url, bundle, existing, note_hint)
 
-            # 3. Type-focused extraction (structured data only — never HTML); gate (b)
-            #    escalates the reel cascade when the result is incomplete.
-            extracted, bundle = await _extract_with_escalation(
-                url, bundle, content_type, note_hint, job_start, escalations)
+            # 3. Type-focused extraction (structured data only — never HTML).
+            # The user's categories go to the extractor too: for video sources (classify → None)
+            # the model picks the type and should reuse one of them.
+            extracted, bundle = await _extract(url, bundle, content_type, note_hint, existing)
 
             if not extracted.data or len(str(extracted.data)) < 40:
                 raise ValueError("Extraction produced empty or suspiciously short data")
 
             # The extractor is told to ECHO the classified slug; if it drifted to a brand-new
             # category, snap it back to the classifier's choice (which already honours the
-            # MAX_USER_CATEGORIES cap). Keeps content_type/template/search-index/add_user_category
+            # MAX_USER_CATEGORIES cap). Keeps content_type/template/add_user_category
             # all consistent and guarantees the taxonomy never grows past the cap here.
-            if (extracted.content_type != content_type
+            # `template` follows the schema the data was BUILT for — taken before any snapping, so
+            # a recipe reel snapped onto "summary" at the category cap still renders as a recipe.
+            schema_slug = normalize_slug(extracted.content_type or content_type or "summary")
+            if content_type is None:
+                # Video sources: the model picked the type. Snap the *category* onto the user's
+                # taxonomy (and onto the closest existing slug when the category cap is full).
+                slug = match_existing(extracted.content_type or "summary", existing)
+                if slug not in existing and len(existing) >= settings.MAX_USER_CATEGORIES:
+                    slug = closest_existing(slug, existing)
+                extracted.content_type = slug
+            elif (extracted.content_type != content_type
                     and match_existing(extracted.content_type, existing) not in existing):
                 extracted.content_type = content_type
 
+            # No video reached the model (caption/cover only): flag it so the UI can say so.
+            if bundle.metadata.get("thin") or bundle.metadata.get("too_long"):
+                extracted.data["thin"] = True
+            if bundle.metadata.get("too_long"):
+                extracted.data["note"] = too_long_note(
+                    bundle.metadata.get("duration") or 0,
+                    bundle.metadata.get("max_seconds") or settings.MAX_VIDEO_SECONDS,
+                    bundle.metadata.get("built_from") or "caption")
             cover_image_url = bundle.images[0] if bundle.images else None
         # source_url/domain only describe URL captures; a typed note has
         # no web source, so they stay "" (the same empty-source convention AI notes use) and
@@ -645,33 +616,17 @@ async def _process_job(job_id: str) -> dict:
             cover_image_url = cover_override or cover_image_url
 
         # Every capture is a note. A re-extract targets the existing note (overwrite in place)
-        # and must preserve owner-set state — created_at plus any flag the owner toggled through
-        # a dedicated action (favorite/pinned/public) — while still regenerating everything AI
-        # produced (title/summary/data/content_type/cover). `collection_ids`/`collection_id`
-        # need no special-casing: `_match_collections` below re-derives them for this SAME
-        # note_id, and pin/exclude overrides are keyed by note_id on the collection doc, so a
-        # manually pinned/excluded note stays pinned/excluded automatically. `user_note` lives
-        # in a separate annotations/{note_id} doc and is untouched by this write.
+        # and keeps its created_at while regenerating everything AI produced.
         note_id = target_note_id or _stable_id("note", job_id)
         created_at = now
-        preserved: dict = {}
         if target_note_id:
             existing = await db.collection("notes").document(note_id).get()
             if existing.exists:
                 old = existing.to_dict() or {}
                 created_at = old.get("created_at") or now
-                for field in ("is_favorite", "is_public", "pinned_at"):
-                    if field in old:
-                        preserved[field] = old[field]
         # Embed title + summary + the (now enriched) data so search matches the note's content,
         # not just its headline.
         embedding = await _note_embedding(extracted.title, extracted.ai_summary, extracted.data)
-        # Smart-bucket membership: pure in-memory cosine match against the user's collections'
-        # topic_embedding (no new AI calls). A note can now belong to more than one collection;
-        # the legacy scalar `collection_id` is kept coherent (first match, or null) for the
-        # not-yet-migrated frontend/API surface.
-        collection_ids = await _match_collections(user_id, note_id, embedding)
-        collection_id = collection_ids[0] if collection_ids else None
         note_doc = {
             "user_id": user_id,
             "input_type": input_type,
@@ -680,42 +635,25 @@ async def _process_job(job_id: str) -> dict:
             # `content_type` is the *editable* category (icon/colour/filter) and may be
             # recategorised by the owner; the render template must NOT follow it, or the
             # data fields (which match this schema) would stop rendering. Set once, here.
-            "template": extracted.content_type,
+            "template": schema_slug,
             "title": extracted.title,
             "ai_summary": extracted.ai_summary,
             "source_url": source_url,
             "source_domain": source_domain,
             "source": source,
             "cover_image_url": cover_image_url,
-            # Smart-bucket membership by embedding match; collection_id is the legacy scalar
-            # (deprecated shim, first match or null) kept coherent with collection_ids.
-            "collection_ids": collection_ids,
-            "collection_id": collection_id,
             "data": firestore_safe(extracted.data),
             "acquisition": bundle.strategy,
             "created_at": created_at,
             "updated_at": now,
-            **preserved,   # re-extract only: is_favorite/is_public/pinned_at carried over
         }
         if embedding is not None:
             note_doc["embedding"] = embedding
             note_doc["embedding_version"] = EMBED_TEXT_VERSION
         await db.collection("notes").document(note_id).set(note_doc)
-        # Keep the note searchable + Clip-AI-answerable (reuse its embedding, no second embed call).
-        await search_index.upsert_for_note(db, note_id, note_doc, embedding)
         await add_user_category(user_id, extracted.content_type)
         if source_domain:
             await add_user_source(user_id, source_domain)
-        # Fan the note out into its mini-app family (watch/place_items) so it
-        # shows on the walls and the poster deep-links resolve. `note_doc.data` already carries
-        # the enriched payload from enrich_note_data above, so this re-runs no Gemini extraction
-        # and no fresh TMDB/Places spend. Idempotent (stable item ids) and best-effort — the
-        # note is written; a fan-out failure must not fail the job.
-        try:
-            await fan_out_note(user_id, note_id, note_doc)
-        except Exception as e:  # noqa: BLE001 — belt over fan_out_note's own per-family catch.
-            log.warning("mini-app fan-out failed: %s: %s", type(e).__name__, e,
-                        extra={"job_id": job_id, "user_id": user_id, "url": url})
         destination = {"kind": "note", "note_id": note_id}
         await job_ref.update({"status": "completed", "note_id": note_id,
                               "destination": destination,
@@ -772,105 +710,5 @@ async def _process_job(job_id: str) -> dict:
             return {"status": "failed", "error": str(e)[:200]}
 
     finally:
-        sources.cleanup(bundle)
         # Attribute token spend even when the job re-raised for a retry.
-        await flush_usage(user_id, meter)
-
-
-@router.post("/process-agent/{job_id}")
-async def process_agent_job(job_id: str, request: Request):
-    """Deep async agent worker: runs the orchestrator headlessly for a heavy multi-note task
-    (e.g. a PRD over 15 notes) and writes the result as a note. Same worker-secret auth + idempotency as the
-    URL pipeline. Deep tasks don't retry-storm: any failure marks the job failed (HTTP 200)."""
-    _verify_oidc(request)
-
-    db = get_db()
-    job_ref = db.collection("jobs").document(job_id)
-    job, early = await _claim_job(db, job_ref)
-    if early is not None:
-        return early
-
-    user_id: str = job["user_id"]
-    req: dict = job.get("agent_request") or {}
-    question: str = req.get("question", "")
-    history: list = req.get("history", [])
-    selected: list = req.get("selected_note_ids", []) or []
-    tz: int = req.get("tz_offset_minutes", 0)
-    now = datetime.now(timezone.utc)
-
-    meter = start_metering()
-    try:
-        pool = (await nr.fetch_notes_by_ids(db, user_id, selected) if selected
-                else await nr.candidate_pool(db, user_id, question))
-        focal = None
-        if req.get("note_id"):
-            found = await nr.fetch_notes_by_ids(db, user_id, [req["note_id"]])
-            focal = found[0] if found else None
-
-        ctx = AgentContext(
-            db=db, user_id=user_id, question=question, history=history, pool=pool,
-            tz_offset_minutes=tz, now_utc=now, focal=focal, selected_note_ids=selected,
-            max_grounded=settings.DEEP_MAX_NOTES, max_rounds=settings.DEEP_MAX_ROUNDS,
-        )
-        result = await run_agent_collect(ctx)
-        if result.get("error") and ctx.artifact is None and not result.get("text"):
-            raise RuntimeError(result["error"])
-
-        # Prefer the structured artifact the agent built; else wrap its prose answer.
-        if ctx.artifact is not None:
-            title = ctx.artifact.title or (question[:80] or "Agent result")
-            ai_summary = ctx.artifact.ai_summary or ""
-            content_type = ctx.artifact.content_type or "summary"
-            data = ctx.artifact.data or {}
-        else:
-            title = (question[:80] or "Agent result")
-            ai_summary = ""
-            content_type = "summary"
-            data = {"sections": [{"heading": "Result",
-                                  "items": [result.get("text") or "No content generated."]}]}
-
-        slug = match_existing(normalize_slug(content_type), await get_user_categories(user_id))
-        new_id = _stable_id("agent-note", job_id)
-        embedding = await _note_embedding(title, ai_summary, data)
-        collection_ids = await _match_collections(user_id, new_id, embedding)
-        collection_id = collection_ids[0] if collection_ids else None
-        note_doc = {
-            "user_id": user_id,
-            "content_type": slug,
-            "template": "composed",
-            "title": title,
-            "ai_summary": ai_summary,
-            "source_url": "",
-            "source_domain": "",
-            "source": "ai",
-            "cover_image_url": None,
-            "data": firestore_safe(data),
-            "acquisition": "ai_deep_task",
-            # AI-authored notes still get matched by embedding, same as any other note.
-            "collection_ids": collection_ids,
-            "collection_id": collection_id,
-            "source_note_ids": list(dict.fromkeys(ctx.cited_ids))[:50],
-            "created_at": now,
-            "updated_at": datetime.now(timezone.utc),
-        }
-        if embedding is not None:
-            note_doc["embedding"] = embedding
-            note_doc["embedding_version"] = EMBED_TEXT_VERSION
-        await db.collection("notes").document(new_id).set(note_doc)
-        await search_index.upsert_for_note(db, new_id, note_doc, embedding)
-        await add_user_category(user_id, slug)
-        await job_ref.update({"status": "completed", "note_id": new_id,
-                              "destination": {"kind": "note", "note_id": new_id},
-                              "title": title,
-                              "updated_at": datetime.now(timezone.utc)})
-        log.info("deep agent task completed", extra={"job_id": job_id, "user_id": user_id})
-        return {"status": "completed", "note_id": new_id}
-
-    except Exception as e:
-        log.error("deep agent task failed: %s: %s", type(e).__name__, e,
-                  extra={"job_id": job_id, "user_id": user_id}, exc_info=True)
-        await job_ref.update({"status": "failed", "error": f"{type(e).__name__}: {e}"[:500],
-                              "updated_at": datetime.now(timezone.utc)})
-        return {"status": "failed", "error": str(e)[:200]}
-    finally:
         await flush_usage(user_id, meter)

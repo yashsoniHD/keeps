@@ -6,7 +6,7 @@ import { ingest, ingestText } from "@/lib/api";
 import { AddNoteSheet } from "@/components/AddNoteSheet";
 
 // App-wide capture, lifted above the router <Outlet /> so the bottom-nav's + button can open
-// the same New-note sheet from ANY route (mini-app walls, note detail, search…), not just the
+// the same New-note sheet from ANY route (note detail, search…), not just the
 // feed. The feed keeps its own in-feed FAB + handlers untouched (optimistic cards live there);
 // this provider is the off-feed path. On submit it fires the same ingest helpers the feed uses,
 // then lands the user on the feed so the processing card is visible.
@@ -39,9 +39,12 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
     const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     setShowAdd(false);
     setError(null);
-    ingest(url).catch((e) =>
-      setError(e instanceof Error ? e.message : "Couldn't start the capture."),
-    );
+    ingest(url)
+      .then((r) => {
+        if (r.status === "completed" && r.note_id)
+          navigate({ to: "/notes/$noteId", params: { noteId: r.note_id } }); // already saved
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't start the capture."));
     goToFeed();
   };
   const onSubmitText = async (text: string, title?: string, processAI = true) => {

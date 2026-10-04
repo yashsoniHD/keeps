@@ -2,11 +2,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ClipLoader } from "@/components/ClipMark";
-import { getNote, getAnnotation, watchJob } from "@/lib/firestore";
+import { getNote, watchJob } from "@/lib/firestore";
 import { deleteNote, reextractNote, ApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
-import { useAsk } from "@/contexts/ask-context";
-import { useCategoryMeta } from "@/contexts/category-meta";
 import { NoteContent } from "@/components/NoteContent";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { AppShell } from "@/components/AppShell";
@@ -20,9 +18,7 @@ export const Route = createFileRoute("/notes/$noteId")({ component: NoteDetail }
 function NoteDetail() {
   const { noteId } = Route.useParams();
   const { user, loading } = useAuth();
-  useCategoryMeta(); // reflect category icon/colour overrides on the note view + badge
   const navigate = useNavigate();
-  const { setFocalNote } = useAsk();
   const [note, setNote] = useState<Note | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -39,14 +35,12 @@ function NoteDetail() {
     if (user && noteId) {
       setLoadError(false);
       getNote(noteId)
-        .then(async (n) => {
+        .then((n) => {
           if (!n || n.user_id !== user.uid) {
             setNotFound(true);
             return;
           }
-          // Merge the private annotation (separate owner-only doc) onto the note.
-          const userNote = await getAnnotation(noteId).catch(() => "");
-          setNote({ ...n, user_note: userNote });
+          setNote(n);
           analytics.noteViewed(n.content_type);
         })
         .catch((err) => {
@@ -58,12 +52,6 @@ function NoteDetail() {
         });
     }
   }, [user, noteId]);
-
-  // Scope the global Ask-AI FAB to this note while it's open ("this note first, then all").
-  useEffect(() => {
-    if (note) setFocalNote({ id: note.id, title: note.title });
-    return () => setFocalNote(null);
-  }, [note, setFocalNote]);
 
   // Re-extract: re-run the note's source through the pipeline (owner-only). The worker
   // overwrites this same note in place, so we watch the job and refetch on completion. Also
@@ -90,10 +78,7 @@ function NoteDetail() {
         setReextracting(false);
         if (job.status === "completed") {
           const n = await getNote(noteId).catch(() => null);
-          if (n && n.user_id === user.uid) {
-            const userNote = await getAnnotation(noteId).catch(() => "");
-            setNote({ ...n, user_note: userNote });
-          }
+          if (n && n.user_id === user.uid) setNote(n);
         } else {
           setReextractError(GENERIC_REEXTRACT_FAILURE);
         }

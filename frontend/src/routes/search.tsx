@@ -1,20 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Search as SearchIcon, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Loader2, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { useAsk } from "@/contexts/ask-context";
 import { searchNotes, type SearchResult } from "@/lib/api";
 import { goToNote } from "@/lib/nav";
 import { noteAccent, noteIcon } from "@/lib/note-meta";
-import { FOCUS_RING, PRESS } from "@/lib/ui";
-import { PillButton } from "@/components/shared/PillButton";
+import { FOCUS_RING } from "@/lib/ui";
 import { AppShell } from "@/components/AppShell";
 
-// Global semantic search across everything saved (GET /api/search over the search_index).
+// Global search across everything saved (GET /api/search, keyword + vector over notes).
 // One flat, relevance-ranked list of notes; each row opens /notes/$id.
 export const Route = createFileRoute("/search")({ component: SearchScreen });
 
-const MIN_CHARS = 2;
+const MIN_CHARS = 3; // the backend rejects shorter queries
 const DEBOUNCE_MS = 300;
 
 type Status = "idle" | "searching" | "done" | "error";
@@ -54,7 +52,6 @@ function ResultRow({ hit, onOpen }: { hit: SearchResult; onOpen: () => void }) {
 
 function SearchScreen() {
   const { user, loading } = useAuth();
-  const { openChat } = useAsk();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -131,19 +128,6 @@ function SearchScreen() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-6 md:px-8">
-        {/* Clip AI hand-off: exact keyword search not finding it? Ask over the whole corpus.
-            Mirrors the escape hatch the feed search used to offer. */}
-        {trimmed.length >= MIN_CHARS && (
-          <PillButton
-            type="button"
-            onClick={() => openChat(trimmed)}
-            aria-label={`Ask Clip AI about ${trimmed}`}
-            className="mb-4 w-full"
-          >
-            <Sparkles className="h-4 w-4" aria-hidden />
-            Ask Clip AI about “{trimmed}”
-          </PillButton>
-        )}
         {trimmed.length < MIN_CHARS ? (
           <div className="flex flex-col items-center gap-3 py-24 text-center text-ink-soft">
             <SearchIcon className="h-8 w-8" />

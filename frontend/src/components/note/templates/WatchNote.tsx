@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { Clapperboard, Film, Tv, Star } from "lucide-react";
 import type { Note, WatchProvider } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
@@ -78,57 +77,34 @@ function PosterCardBody({ t, accent }: { t: TitleEntry; accent: Accent }) {
   );
 }
 
-// A tappable poster card. When the title resolved to a TMDB id it deep-links to the full
-// watchlist detail page (deterministic doc id: `m_`/`t_` + tmdb_id); otherwise it opens the
-// in-note detail dialog as a fallback (no watchlist doc exists to link to).
-function PosterCard({
-  t,
-  accent,
-  itemId,
-  onOpen,
-}: {
-  t: TitleEntry;
-  accent: Accent;
-  itemId: string | null;
-  onOpen: () => void;
-}) {
-  const cardClass = `group flex flex-col rounded-2xl text-left ${FOCUS_RING}`;
-  if (itemId) {
-    return (
-      <Link to="/watchlist/$itemId" params={{ itemId }} className={cardClass}>
-        <PosterCardBody t={t} accent={accent} />
-      </Link>
-    );
-  }
+// A tappable poster card: opens the in-note detail dialog.
+function PosterCard({ t, accent, onOpen }: { t: TitleEntry; accent: Accent; onOpen: () => void }) {
   return (
-    <button type="button" onClick={onOpen} className={cardClass}>
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`group flex flex-col rounded-2xl text-left ${FOCUS_RING}`}
+    >
       <PosterCardBody t={t} accent={accent} />
     </button>
   );
 }
 
-// The watchlist doc id for a title, or null if it never resolved to a TMDB entry. Mirrors the
-// backend key (services/watchlist.py `_doc_id`): tv → `t_`, everything else → `m_`.
-function watchItemId(t: TitleEntry): string | null {
-  if (!t.tmdb_id) return null;
-  return `${t.mediaType === "tv" ? "t" : "m"}_${t.tmdb_id}`;
-}
-
-// The rich detail view: backdrop/poster hero, genres, overview, why-it-was-saved. Opens in a
-// dialog only for titles with no TMDB id (which can't deep-link to a watchlist detail page).
+// The rich detail view: backdrop/poster hero, genres, overview, why-it-was-saved, in a dialog.
 function TitleDetail({ t, accent }: { t: TitleEntry; accent: Accent }) {
   const genres = t.genres ?? [];
   return (
     <div>
       {t.backdrop_url ? (
         <div className="relative -mx-6 -mt-6 aspect-video overflow-hidden sm:rounded-t-lg">
-          <img src={t.backdrop_url} alt="" className="h-full w-full object-cover" />
+          <img src={t.backdrop_url} alt="" loading="lazy" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
           {/* Top scrim so the dialog's built-in close button stays legible over bright posters. */}
           <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/40 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 flex items-end gap-4 p-5">
             {t.poster_url && (
               <img
+                loading="lazy"
                 src={t.poster_url}
                 alt=""
                 className="w-20 shrink-0 rounded-xl border border-white/20 shadow-lg"
@@ -198,7 +174,6 @@ export function WatchNote({ note }: { note: Note }) {
             key={`${t.title}-${i}`}
             t={t}
             accent={accent}
-            itemId={watchItemId(t)}
             onOpen={() => setOpenIndex(i)}
           />
         ))}

@@ -1,1 +1,0 @@
-import{c as s}from"./index-BjOoREfE.js";const i=[["path",{d:"M5 12h14",key:"1ays0h"}],["path",{d:"M12 5v14",key:"s699le"}]],e=s("plus",i),c="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";export{c as F,e as P};

@@ -66,29 +66,13 @@ async def client_errors(request: Request):
 from routers.ingest import router as ingest_router      # noqa: E402
 from routers.process import router as process_router    # noqa: E402
 from routers.notes import router as notes_router        # noqa: E402
-from routers.jobs import router as jobs_router          # noqa: E402
 from routers.tokens import router as tokens_router      # noqa: E402
-from routers.ask import router as ask_router            # noqa: E402
-from routers.admin import router as admin_router        # noqa: E402
 from routers.search import router as search_router      # noqa: E402
 from routers.categories import router as categories_router  # noqa: E402
-from routers.conversations import router as conversations_router  # noqa: E402
-from routers.digest import router as digest_router              # noqa: E402
-from routers.collections import router as collections_router    # noqa: E402
-from routers.watch_items import router as watch_items_router  # noqa: E402
-from routers.place_items import router as place_items_router  # noqa: E402
 
 app.include_router(ingest_router, prefix="/api")
 app.include_router(process_router, prefix="/api")
 app.include_router(notes_router, prefix="/api")
-app.include_router(jobs_router, prefix="/api")
 app.include_router(tokens_router, prefix="/api")
-app.include_router(ask_router, prefix="/api")
-app.include_router(admin_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
-app.include_router(conversations_router, prefix="/api")
-app.include_router(digest_router, prefix="/api")
-app.include_router(collections_router, prefix="/api")
-app.include_router(watch_items_router, prefix="/api")
-app.include_router(place_items_router, prefix="/api")

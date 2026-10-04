@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "@tanstack/react-router";
-import { LayoutGrid, ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check } from "lucide-react";
 import { noteAccent, noteIcon } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 
@@ -216,21 +215,5 @@ function CategoryOverflowButton({
           document.body,
         )}
     </div>
-  );
-}
-
-// Top-bar button that opens the Collections page — the five mini-apps plus the user's own
-// smart collections. Now a real route (/collections) rather than a full-screen overlay, so
-// mini-app back buttons have somewhere to return to.
-export function CollectionsMenu() {
-  return (
-    <Link
-      to="/collections"
-      aria-label="Open collections"
-      title="Collections"
-      className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-    >
-      <LayoutGrid className="h-4 w-4" />
-    </Link>
   );
 }

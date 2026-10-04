@@ -14,18 +14,18 @@ Competitor documentation establishes available patterns, not measured efficacy. 
 
 ## 2. Navigation and screen inventory
 
-Use three persistent destinations: **Library · Search · Ask**. Save is a labeled action above the tab bar. Keep each tab's scroll, filters and navigation history when switching. This follows Apple's distinction between destinations and actions. [Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars)
+Use three persistent destinations: **Notes · Collections · Ask**. Notes opens **Your library**, with a labeled **Search** button beside the title. Search opens its own screen within the Notes navigation flow. Save is a labeled action above the tab bar. Keep each tab's scroll, filters and navigation history when switching. This follows Apple's distinction between destinations and actions. [Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars)
 
 | Surface | Primary job | Important content and exits |
 |---|---|---|
 | Welcome/auth | Begin with a real save | One sentence, illustrative note, sign-in, preserved inbound link |
-| Library / Notes | Recognize and reopen | All/type filters, one Continue reading card, Recently saved, Save |
-| Library / Collections | Browse by purpose | User collections, counts, create; no mandatory setup |
+| Notes / Your library | Recognize and reopen | Header Search, All/type filters, one Continue reading card, Recently saved, Save |
+| Collections | Browse by purpose | Dedicated tab, user collections, counts, create; no mandatory setup |
 | Collection detail | Use a coherent set | Notes, search within, Ask this collection, membership controls |
 | Save sheet | Accept a link | URL preview, Save, optional context, Cancel |
 | Saved acknowledgement | Confirm durable receipt | Preparing status, Done, View progress |
 | Note detail | Read and act | Structured content, provenance, favorite, collection, edit, source |
-| Search | Find existing notes | Query, filters, match snippets, Ask about these results |
+| Search screen | Find existing notes | Opens from Your library header; query, filters, match snippets, Ask about these results |
 | Ask | Explain or compose | Scope, examples, answer, citations, follow-up, Save as note |
 | Supporting sheets | Make a short decision | Filters, collections, note actions, answer preview |
 | Settings | Manage personal choices | Account, region, capture setup, digest, plan, privacy/data actions |
@@ -54,7 +54,7 @@ MDN marks `share_target` as limited and experimental; it requires an installed P
 1. Receive or paste the URL. Show domain and available title/thumbnail without waiting for rich metadata. If shared text contains several URLs, ask which one to save.
 2. Tap **Save link**. Lock repeat submissions while the request is active. Optional personal context stays collapsed initially; type and collection are unnecessary.
 3. After durable server acknowledgement, show **Link saved. Preparing your note.** Include Done and View progress. Only now may the interface say **You can close this**.
-4. Show a pending row immediately in Library with the same identity and URL. Completion updates that row in place. Do not move the reader away from another note or reset their scroll.
+4. Show a pending row immediately in Notes with the same identity and URL. Completion updates that row in place. Do not move the reader away from another note or reset their scroll.
 5. Opening the ready note reveals useful content. Offer optional collection assignment after the content is available. Show a readiness announcement in-app without automatically requesting push permission.
 
 Use indeterminate feedback when actual progress is unknown. Do not invent percentages or claim stages the server cannot observe. [Apple loading](https://developer.apple.com/design/human-interface-guidelines/loading), [Progress indicators](https://developer.apple.com/design/human-interface-guidelines/progress-indicators)
@@ -95,7 +95,7 @@ All notes works with zero collections; avoid an Unsorted badge implying unfinish
 
 ### Find an existing note
 
-Search accepts remembered title fragments, creators, concepts and source text available in the stored note. Results show title, concise matching excerpt, type, source and saved date; collections form a separate result group. Filters: Type, Collection, Source and Saved date. Active selections remain visible and removable. Preserve query/filter/scroll state after opening a result. [Apple search fields](https://developer.apple.com/design/human-interface-guidelines/search-fields), [Raindrop Search](https://help.raindrop.io/using-search)
+Tap Search beside **Your library** to open a dedicated search screen and focus the query field. Back returns to the previous Notes position. Collection detail can open the same screen with that collection preselected; Back then returns to the collection. Search accepts remembered title fragments, creators, concepts and source text available in the stored note. Results show title, concise matching excerpt, type, source and saved date; collections form a separate result group. Filters: Type, Collection, Source and Saved date. Active selections remain visible and removable. Preserve query/filter/scroll state after opening a result. [Apple search fields](https://developer.apple.com/design/human-interface-guidelines/search-fields), [Raindrop Search](https://help.raindrop.io/using-search)
 
 An empty result explains the current scope and offers Clear filters or a revised query. A note still indexing remains discoverable through its saved metadata where supported. Search never silently substitutes a generated answer for the results list.
 
@@ -111,7 +111,7 @@ Absent evidence receives a direct explanation. General conversation is labeled G
 
 ## 8. Returning without pressure
 
-Library shows recent saves and, when available, one Continue reading card for an explicitly opened note. Hide the card when there is no history; dismissal persists. This is continuation, not a recommendation engine. Collections and favorites provide intentional return paths.
+The Notes tab's Your library screen shows recent saves and, when available, one Continue reading card for an explicitly opened note. Hide the card when there is no history; dismissal persists. This is continuation, not a recommendation engine. The Collections tab and favorites provide intentional return paths.
 
 The weekly digest should give a concrete reason to reopen: Three dinners you saved this week. Link directly to relevant notes. Ask for email preference after demonstrated value; show frequency and unsubscribe controls. Do not send empty digests. Fabric's scheduled Recap establishes a comparable pattern, not evidence of retention uplift. [Fabric Recap](https://fabric.so/product/recap)
 
@@ -134,7 +134,7 @@ Choose minimum 44 CSS px hit regions on web and 44 pt targets natively. Apple re
 
 Use semantic headings, labeled icons, visible focus and meaningful status announcements. Modal focus enters the sheet, stays within it and returns to the trigger. Keyboard Escape/visible Cancel closes safely; dirty drafts survive interruption. Selected filters expose state. No action depends only on gesture, color or hover. At 200% text, content reflows and controls stay reachable above the keyboard and safe areas. [Apple VoiceOver](https://developer.apple.com/design/human-interface-guidelines/voiceover), [Layout](https://developer.apple.com/design/human-interface-guidelines/layout)
 
-On tablet/desktop, replace the bottom bar with a stable side rail and optionally show list plus detail. Keep reading width comfortable, preserve the same destinations and support keyboard operation. Avoid stretching mobile cards across the entire desktop.
+On tablet/desktop, replace the bottom bar with a stable Notes / Collections / Ask side rail and optionally show list plus detail. Keep Search beside the Your library heading, retain a comfortable reading width and support keyboard operation. Avoid stretching mobile cards across the entire desktop.
 
 ## 10. Cross-flow state contract
 

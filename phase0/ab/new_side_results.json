@@ -1,0 +1,1682 @@
+{
+ "chains": {
+  "VIDEO_MODELS": [
+   "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+   "google/gemini-2.5-flash-lite"
+  ],
+  "YOUTUBE_MODELS": [
+   "google/gemini-2.5-flash-lite"
+  ],
+  "IMAGE_MODELS": [
+   "google/gemma-4-26b-a4b-it:free",
+   "inclusionai/ling-3.0-flash-vl"
+  ],
+  "TEXT_MODELS": [
+   "nvidia/nemotron-3-super-120b-a12b:free",
+   "deepseek/deepseek-v3.2"
+  ],
+  "CLASSIFY_MODELS": [
+   "google/gemma-4-26b-a4b-it:free",
+   "qwen/qwen3-30b-a3b-instruct-2507"
+  ]
+ },
+ "total_cost_usd": 0.1047,
+ "results": [
+  {
+   "url": "https://www.instagram.com/reel/DdyvwuOq3vf/?stkn=bXFuZnZrdXVtODJq",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": true,
+   "acquire_s": 2.1,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "recipe",
+   "title": "Date caramel iced latte",
+   "summary": "A healthy iced latte made with date caramel from blended dates, dark chocolate, instant coffee, and vanilla, topped with whipped coffee and low-fat milk.",
+   "data": {
+    "totalTime": "10 min",
+    "servings": "1",
+    "difficulty": "Easy",
+    "cuisine": "Beverage",
+    "calories": "190\u2013210 kcal",
+    "ingredients": [
+     {
+      "items": [
+       "3 soft dates, deseeded",
+       "1 piece dark chocolate",
+       "1 tbsp instant coffee",
+       "2\u20133 tbsp hot water",
+       "A pinch of salt",
+       "2\u20133 drops vanilla essence",
+       "Ice cubes",
+       "200 ml low-fat milk",
+       "Whipped coffee, for topping"
+      ]
+     }
+    ],
+    "steps": [
+     "Add dates, dark chocolate, coffee, hot water, salt and vanilla essence to a mixer.",
+     "Blend until smooth and creamy to make your date caramel.",
+     "Add the date caramel to a glass.",
+     "Add ice cubes and pour in chilled low-fat milk.",
+     "Top with whipped coffee and serve chilled."
+    ],
+    "tips": [
+     "For a richer texture, use full-fat milk or a plant-based alternative like oat milk.",
+     "Adjust sweetness by adding more or fewer dates.",
+     "Ensure dates are soft for easy blending; soak in warm water if needed."
+    ]
+   },
+   "data_chars": 884,
+   "outcome": "note",
+   "latency_s": 4.8,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/reel/DXOfVzQE08M/?stkn=MWl5MnRrN2Y3M2R2eA==",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": true,
+   "acquire_s": 2.1,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "itinerary",
+   "title": "Meghalaya travel guide",
+   "summary": "Meghalaya offers immersive experiences like driving through clouds, visiting living root bridges, and standing before surreal waterfalls, creating lasting emotional impressions.",
+   "data": {
+    "destination": "Meghalaya, India",
+    "duration": null,
+    "budget": null,
+    "bestSeason": null,
+    "days": [
+     {
+      "day": 1,
+      "title": "Meghalaya highlights",
+      "stops": [
+       {
+        "time": null,
+        "place": "Living root bridges",
+        "note": "Experience the unique living root bridges that offer more than just views"
+       },
+       {
+        "time": null,
+        "place": "Waterfalls",
+        "note": "Stand before waterfalls that look unreal and feel deeply immersive"
+       },
+       {
+        "time": null,
+        "place": "Cherrapunji",
+        "note": "Explore one of the wettest places on Earth with lush, surreal landscapes"
+       },
+       {
+        "time": null,
+        "place": "Dawki River",
+        "note": "See glass-like rivers with crystal-clear waters"
+       },
+       {
+        "time": null,
+        "place": "Shillong",
+        "note": "Visit the capital city known for its scenic beauty and culture"
+       }
+      ]
+     }
+    ],
+    "tips": null
+   },
+   "data_chars": 753,
+   "outcome": "note",
+   "latency_s": 7.9,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/p/DZhzon_D9Ml/",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 3.5,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "product",
+   "title": "99 Claude commands cheat sheet",
+   "summary": "A cheat sheet with 99 Claude AI prompts for writing, learning, content creation, career growth, planning, brainstorming, meetings, and decision-making.",
+   "data": {
+    "price": "Free",
+    "brand": "Ankush AI Growth",
+    "buyUrl": "https://www.instagram.com/p/DZhzon_D9Ml/",
+    "specs": [
+     {
+      "label": "Number of commands",
+      "value": "99"
+     },
+     {
+      "label": "Categories covered",
+      "value": "Writing & Editing, Learning & Research, Content Creation, Career Growth, Planning & Productivity, Brainstorming, Meetings & Notes, Better Decision-Making"
+     }
+    ],
+    "pros": [
+     "Covers 8 major use cases",
+     "Instant access via comment",
+     "Saves time figuring out prompts"
+    ],
+    "cons": [
+     "Requires commenting to access",
+     "No direct download link in post"
+    ],
+    "verdict": "Ideal for Claude AI users wanting to improve prompt effectiveness across personal and professional tasks."
+   },
+   "data_chars": 659,
+   "outcome": "note",
+   "latency_s": 5.1,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/reel/DYrSsjNp56D/?igsh=ZjBjb25janp0aHc5",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 5.0,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "entertainment",
+   "title": "Movies you could watch 1000 times and never get bored of",
+   "summary": "The reel poses a question about endlessly rewatchable films, mentioning Lord of the Rings and Harry Potter as examples in the hashtags.",
+   "data": {
+    "titles": [
+     {
+      "title": "Lord of the Rings",
+      "why": "Could be watched 1000 times and never get boring"
+     },
+     {
+      "title": "Harry Potter",
+      "why": "Could be watched 1000 times and never get boring"
+     }
+    ],
+    "listTheme": "Movies you could watch 1000 times and never get bored of"
+   },
+   "data_chars": 262,
+   "outcome": "note",
+   "latency_s": 7.8,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/p/Dasqshyisvz/?img_index=9&igsh=MWk2Z3V0c201NG5teA==",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 4.9,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "place",
+   "title": "Monsoon getaways in Bengaluru",
+   "summary": "An Instagram post invites users to share their favorite monsoon getaway spots in Bengaluru for rainy-day recommendations.",
+   "data": {
+    "venues": []
+   },
+   "data_chars": 14,
+   "outcome": "salvage:short_data",
+   "latency_s": 5.5,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/reel/DanP7kktvSE/",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 4.9,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "diy-project",
+   "title": "Never ending infinity birthday card",
+   "summary": "A DIY tutorial shows how to make an interactive infinity-fold birthday card using paper folding techniques for a reusable gift.",
+   "data": {
+    "steps": [
+     "Cut paper into strips",
+     "Fold strips in an accordion pattern",
+     "Connect ends to form an infinite loop",
+     "Decorate with birthday-themed elements",
+     "Write personalized messages on visible panels"
+    ]
+   },
+   "data_chars": 207,
+   "outcome": "note",
+   "latency_s": 6.3,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/p/DZh8-hWmOHf/?igsh=cXF5bHZ6b3owNTI5",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 3.9,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "book",
+   "title": "Raj shamani's build don't talk ebook",
+   "summary": "Get Raj Shamani's Build, Don't Talk eBook by commenting 'BOOK' on this Instagram post about practical business learning from top podcasts.",
+   "data": {
+    "author": "Raj Shamani",
+    "premise": "An eBook offering practical business insights from top entrepreneurs, CEOs, investors, and industry leaders through curated podcast recommendations covering startups, sales, marketing, networking, money, and entrepreneurship.",
+    "keyIdeas": [
+     "Learn directly from founders, CEOs, investors, creators, and industry leaders",
+     "Gain real-world business insights and actionable strategies you can apply immediately",
+     "Access practical knowledge without exams or theory overload",
+     "Build a business, personal brand, or create wealth through weekly podcast learning",
+     "Top 5 business podcasts teach more practical lessons than many traditional classrooms"
+    ],
+    "whoShouldRead": "Anyone serious about building a business, personal brand, or creating wealth who prefers practical learning over traditional education"
+   },
+   "data_chars": 842,
+   "outcome": "note",
+   "latency_s": 6.3,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/reel/DZ-olanz7um/",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 1.7,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "place",
+   "title": "4 Jaipur stores worth your money",
+   "summary": "Meenal Rastogi highlights four Jaipur stores\u2014Bagh by Vadodara Season, Anokhi, Memsaab Prints, and MDK Jewellers\u2014each praised for specific products like luxe cloth, varied prints, bathrobes, and elegant jewellery.",
+   "data": {
+    "facts": [
+     {
+      "label": "City",
+      "value": "Jaipur"
+     },
+     {
+      "label": "Count",
+      "value": "4 stores"
+     }
+    ],
+    "venues": [
+     {
+      "name": "Bagh by Vadodara Season",
+      "location": "Jaipur",
+      "city": "Jaipur",
+      "category": "clothing store",
+      "cuisine": null,
+      "priceForTwo": null,
+      "mustTry": [
+       "festive collection"
+      ],
+      "goodFor": null,
+      "bestTime": null,
+      "reservationNeeded": null,
+      "highlights": [
+       "cloth quality is so good",
+       "festive collection stays minimal and luxe"
+      ],
+      "tips": null,
+      "why": "My favourite stop",
+      "website": null,
+      "instagram": "@baghindia",
+      "bookingUrl": null,
+      "phone": null
+     },
+     {
+      "name": "Anokhi",
+      "location": "Jaipur",
+      "city": "Jaipur",
+      "category": "clothing store",
+      "cuisine": null,
+      "priceForTwo": null,
+      "mustTry": null,
+      "goodFor": null,
+      "bestTime": null,
+      "reservationNeeded": null,
+      "highlights": [
+       "print and design variety is unreal",
+       "you will not walk out empty-handed"
+      ],
+      "tips": null,
+      "why": null,
+      "website": null,
+      "instagram": "@anokhijaipur",
+      "bookingUrl": null,
+      "phone": null
+     },
+     {
+      "name": "Memsaab Prints",
+      "location": "Shop no. 155, Jaipur",
+      "city": "Jaipur",
+      "category": "home textiles store",
+      "cuisine": null,
+      "priceForTwo": null,
+      "mustTry": [
+       "bathrobes",
+       "bedding",
+       "cushion covers"
+      ],
+      "goodFor": null,
+      "bestTime": null,
+      "reservationNeeded": null,
+      "highlights": [
+       "skip the hyped dresses. Go for the bathrobes, bedding and cushion covers instead"
+      ],
+      "tips": null,
+      "why": null,
+      "website": null,
+      "instagram": "@memsaabprints",
+      "bookingUrl": null,
+      "phone": null
+     },
+     {
+      "name": "MDK Jewellers",
+      "location": "Jaipur",
+      "city": "Jaipur",
+      "category": "jewellery store",
+      "cuisine": null,
+      "priceForTwo": null,
+      "mustTry": null,
+      "goodFor": null,
+      "bestTime": null,
+      "reservationNeeded": null,
+      "highlights": [
+       "designs are so elegant they look straight out of a luxury brand"
+      ],
+      "tips": null,
+      "why": "heaven for jewellery lovers",
+      "website": null,
+      "instagram": "@jaipur_jewellery_junction",
+      "bookingUrl": null,
+      "phone": null
+     }
+    ],
+    "listTheme": "Jaipur shopping guide"
+   },
+   "data_chars": 1927,
+   "outcome": "note",
+   "latency_s": 6.5,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/reel/Db1VtFryvbR/",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 2.9,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "guide",
+   "title": "Vulnerability fixing guide via Claude",
+   "summary": "Comment \"Hacked\" to receive a guide that helps fix vulnerabilities when pasted into Claude.",
+   "data": {
+    "facts": [
+     {
+      "label": "Trigger phrase",
+      "value": "\"Hacked\""
+     },
+     {
+      "label": "Tool to use",
+      "value": "Claude"
+     },
+     {
+      "label": "Purpose",
+      "value": "Fix vulnerabilities"
+     },
+     {
+      "label": "Hashtags",
+      "value": "#ai #claude #vibecoding #claudecode"
+     }
+    ]
+   },
+   "data_chars": 233,
+   "outcome": "note",
+   "latency_s": 3.9,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/p/DaabJFvE4Pp/?img_index=1",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 1.6,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "place",
+   "title": "Last minute recommendations in Bangalore",
+   "summary": "Tariny shares five last-minute Bangalore spots including Bar Spirit Forward for late-night energy, Dali & Gala for crafted cocktails, Beyond Burger Inc. for smash burgers, Shyamji Chole Bhature for Delhi-style chole bhature, and Maverick & Farmer Coffee for work-from-cafe vibes.",
+   "data": {
+    "venues": [
+     {
+      "name": "Bar Spirit Forward",
+      "location": "Bangalore",
+      "city": "Bangalore",
+      "category": "bar",
+      "mustTry": [],
+      "goodFor": [
+       "late night"
+      ],
+      "bestTime": "after 11 PM",
+      "why": "peak Bangalore energy when the clock hits 11 & the bartenders start to sing into the mic"
+     },
+     {
+      "name": "Dali & Gala",
+      "location": "Bangalore",
+      "city": "Bangalore",
+      "category": "bar",
+      "mustTry": [],
+      "goodFor": [
+       "date"
+      ],
+      "why": "incredibly crafted cocktails, whimsical interiors & such a stunning date spot"
+     },
+     {
+      "name": "Beyond Burger Inc.",
+      "location": "Bangalore",
+      "city": "Bangalore",
+      "category": "burger joint",
+      "mustTry": [],
+      "goodFor": [
+       "burger lovers"
+      ],
+      "why": "if you\u2019re into American smash burgers this IS the place to be"
+     },
+     {
+      "name": "Shyamji Chole Bhature",
+      "location": "Bangalore",
+      "city": "Bangalore",
+      "category": "north indian restaurant",
+      "mustTry": [
+       "chole bhature"
+      ],
+      "goodFor": [
+       "craving delhi food"
+      ],
+      "why": "Dilli ki yaadein taaza"
+     },
+     {
+      "name": "Maverick & Farmer Coffee (Ulsoor)",
+      "location": "Ulsoor, Bangalore",
+      "city": "Bangalore",
+      "category": "cafe",
+      "mustTry": [],
+      "goodFor": [
+       "work from cafe"
+      ],
+      "why": "dare I say the best work-from-cafe vibe"
+     }
+    ]
+   },
+   "data_chars": 1154,
+   "outcome": "note",
+   "latency_s": 4.7,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.instagram.com/reel/DZxTTXLSi0p/",
+   "events": [
+    "ig_embed_fallthrough"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 1.6,
+   "strategy": "reel_caption",
+   "via": "ig_embed",
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "reel_caption",
+   "thin": true,
+   "content_type": "entertainment",
+   "title": "Try these three funk songs",
+   "summary": "The reel recommends three funk songs for motivation and trending reels, though specific song titles are not named in the content.",
+   "data": {
+    "titles": [
+     {
+      "title": "Try these Three funk songs",
+      "why": "Recommended for motivation and trending reels"
+     }
+    ],
+    "listTheme": "funk songs for motivation"
+   },
+   "data_chars": 151,
+   "outcome": "note",
+   "latency_s": 3.4,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": true,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://youtube.com/shorts/JsEE5g_6IEw?si=Ko072dN8hm1UeqWL",
+   "events": [
+    "youtube_fallback",
+    "video_unreadable: youtube unreadable, running fallback scraper: InternalServerError: Error code: 502 - {'error': {'message': 'Provider returned error', 'code': 502, 'metadata': {'raw': '{\\n  \"error\": {\\n    \"code\": 403"
+   ],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.7,
+   "strategy": "youtube_direct",
+   "via": null,
+   "kind": "video_uri",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "youtube_fallback",
+   "thin": true,
+   "content_type": "summary",
+   "title": "The 8 secret foods every woman needs",
+   "summary": "The video highlights eight essential foods for women's health, emphasizing self-nourishment as an act of love and promoting a 21-Day Ultimate Health Challenge starting December 1st.",
+   "data": {
+    "medium": "video",
+    "videoLength": "shorts",
+    "tldr": "The video emphasizes that women often neglect their own nutrition while caring for others, and introduces eight secret foods essential for women's health to feel light, energetic, and alive. It promotes self-nourishment as an act of love and invites women to join a 21-Day Ultimate Health Challenge starting December 1st with flexible timing and pay-as-you-want contribution.",
+    "keyPoints": [
+     "Women frequently prioritize others' meals over their own nutritional needs.",
+     "Self-nourishment is framed as an act of love, not vanity.",
+     "Healing oneself enables healing others around us.",
+     "Eight specific foods are presented as essential for women's health and vitality.",
+     "The 21-Day Ultimate Health Challenge begins December 1st to support women's health transformation.",
+     "Past participants have experienced life transformations from attending the workshop.",
+     "The challenge offers multiple time slots and a pay-as-you-want contribution model.",
+     "Viewers are encouraged to join via the link in the bio and share with women they care about."
+    ]
+   },
+   "data_chars": 1095,
+   "outcome": "note",
+   "latency_s": 7.1,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": true
+  },
+  {
+   "url": "https://youtube.com/watch?v=yuToKYHsAYA&si=lbeOOcmhJBvMCPJC",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.8,
+   "strategy": "youtube_direct",
+   "via": null,
+   "kind": "video_uri",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "youtube_direct",
+   "thin": false,
+   "content_type": "summary",
+   "title": "How to de-slop AI output with a custom skill",
+   "summary": "This video introduces a custom skill for AI output quality control, addressing issues like AI slop, factual inaccuracies, and brand misalignment.",
+   "data": {
+    "medium": "video",
+    "videoLength": "11:22",
+    "tldr": "The video explains the concept of 'AI slop' \u2013 output that is technically correct but doesn't meet quality standards or brand guidelines. The creator, Ben AI, introduces a custom skill designed to de-slop AI output by running it through universal and company-specific checks. This skill helps identify issues like AI writing tells, factual inaccuracies, inconsistencies, and voice misalignment, providing suggestions for improvement. The skill can be downloaded for free and personalized for individual or company use, aiming to ensure AI outputs are consistently high-quality and aligned with brand standards.",
+    "keyPoints": [
+     "AI slop refers to AI-generated content that is technically correct but fails to meet quality standards, brand guidelines, or specific context.",
+     "The subjectivity of 'slop' necessitates a standardized de-sloping process, especially in business contexts.",
+     "The de-slop skill automates checks for AI writing tells, factual accuracy, consistency, artifacts, readability, voice, company fit, and completeness.",
+     "It includes both universal checks and company-specific checks to ensure alignment with brand voice, strategy, and facts.",
+     "The skill provides a verdict and suggestions for improvement, helping users refine AI outputs before they are published.",
+     "The de-slop skill can be downloaded for free and personalized to fit individual or company needs.",
+     "The creator also offers a 'De-Slop Builder' skill to help users create their own personalized de-slop skills.",
+     "The video references an a16z article on 'Institutional AI vs Individual AI' which discusses the productivity paradox of AI adoption."
+    ],
+    "quotes": [
+     {
+      "text": "Verify a finished output against universal slop and company standards before it ships. Flags AI slop, false facts, off-voice or off-brand writing, and off-strategy claims in a single scorecard table, each row naming what is off, the source standard, and a suggestion. It detects and suggests, and applies fixes to the output. Use when the user says 'de-slop', 'de-slop this', 'check this before it ships', 'is this good to send', 'run de-slop', 'stop check', or has produced an email, post, deck, reply, proposal, or doc and wants it checked first."
+     }
+    ],
+    "actionItems": [
+     "Download the free De-Slop skill from the link in the description.",
+     "Personalize the skill for your own use or your company's standards.",
+     "Integrate the de-slop process into your workflow to ensure high-quality AI outputs.",
+     "Explore the AI Accelerator for more AI templates and tech help.",
+     "Consider the 'De-Slop Builder' skill for creating custom de-slop skills."
+    ]
+   },
+   "data_chars": 2653,
+   "outcome": "note",
+   "latency_s": 54.6,
+   "models": {
+    "google/gemini-2.5-flash-lite": 1
+   },
+   "cost_usd": 0.025176,
+   "free_calls": 0,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://youtube.com/shorts/TSJI6-nV-t0?si=nPGCPM0tQmgCB70f",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.8,
+   "strategy": "youtube_direct",
+   "via": null,
+   "kind": "video_uri",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "youtube_direct",
+   "thin": false,
+   "content_type": "recipe",
+   "title": "Crispy air-fried zucchini rings",
+   "summary": "Make crispy zucchini rings by coating them in batter and crushed cornflakes, then air-frying for 10-15 minutes.",
+   "data": {
+    "totalTime": "approx. 30 min",
+    "servings": "4",
+    "difficulty": "Easy",
+    "ingredients": [
+     {
+      "group": "For the zucchini rings",
+      "items": [
+       "3 zucchine",
+       "300g flour",
+       "300g water",
+       "100g cornflakes",
+       "Oil, salt, pepper, and spices to taste"
+      ]
+     },
+     {
+      "group": "For the sauce",
+      "items": [
+       "Cooked zucchini scraps",
+       "100g 0% Greek yogurt",
+       "Oil, salt, pepper, mint, and lemon juice to taste"
+      ]
+     }
+    ],
+    "steps": [
+     "Wash zucchini and cut into slices, not too thick or thin.",
+     "Use a small cutter or knife to cut circles from the zucchini slices.",
+     "Cook the inner zucchini discs in a pan with a little oil and salt until soft.",
+     "Prepare the batter by mixing flour, water, and salt until smooth.",
+     "Crush cornflakes in a bowl.",
+     "Dip the zucchini rings in the batter, then coat them in crushed cornflakes.",
+     "Cook in an air fryer for 10-15 minutes at 180-200\u00b0C until golden brown (times may vary). Alternatively, bake in the oven at the same temperature.",
+     "While cooking, prepare the sauce by blending cooked zucchini with Greek yogurt, salt, pepper, and desired spices."
+    ],
+    "tips": [
+     "These are lighter than traditional fried onion rings.",
+     "Can also be made with onions.",
+     "Serve with the sauce while watching a movie."
+    ]
+   },
+   "data_chars": 1203,
+   "outcome": "note",
+   "latency_s": 12.8,
+   "models": {
+    "google/gemini-2.5-flash-lite": 1
+   },
+   "cost_usd": 0.001815,
+   "free_calls": 0,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://youtube.com/watch?v=DTCyvo6cC54&si=dA8-t5b_0YrRF8kE",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 1.0,
+   "strategy": "youtube_direct",
+   "via": null,
+   "kind": "video_uri",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "youtube_direct",
+   "thin": false,
+   "content_type": "summary",
+   "title": "Every level of a claude code second brain explained",
+   "summary": "This video explains five levels of building a Claude Code second brain, from simple file routing to autonomous agents, focusing on finding the right level for your needs.",
+   "data": {
+    "medium": "video",
+    "videoLength": "29:59",
+    "tldr": "This video breaks down five levels of building a Claude Code second brain, from a simple CLAUDE.md router to an always-on autonomous system. The goal is to find the lowest level that solves your pain, rather than forcing a higher level. The levels are: Level 1 (Folder + CLAUDE.md), Level 2 (Curated Wiki), Level 3 (Semantic Search), Level 4 (Knowledge Graph), and Level 5 (Always-on Brain-OS).",
+    "keyPoints": [
+     "Level 1 involves a simple folder structure and CLAUDE.md file for basic routing and information retrieval.",
+     "Level 2 builds on Level 1 by creating a curated wiki, asking Claude for an index, and using Smart Connections for auto-memory.",
+     "Level 3 utilizes semantic search, allowing for meaning-based searches rather than just keyword matching.",
+     "Level 4 involves knowledge graphs, which represent relationships between entities and are useful for complex queries.",
+     "Level 5, the 'Always-on Brain-OS' or 'gbrain', is an autonomous system that runs agents and consolidates information without user intervention.",
+     "The key is to find the lowest level that solves your specific pain point, rather than forcing a more complex system.",
+     "The video provides a framework for building your second brain based on context, connections, capabilities, and cadence."
+    ],
+    "quotes": [
+     {
+      "text": "The goal isn't to climb to level five. It's to find the lowest level that actually solves your pain so you stop re-explaining things and your agent always knows where to look.",
+      "timestamp": "0:47"
+     },
+     {
+      "text": "Start with the question, not the tech.",
+      "timestamp": "1:39"
+     },
+     {
+      "text": "Two jobs. One that matters. Saving Finding. Notes IN. Everyone obsesses here. Notes OUT. where it falls apart. The ladder measures one thing: can you find it again?",
+      "timestamp": "1:55"
+     },
+     {
+      "text": "Complexity climbs as you go up, not cost. Most people land at 1-3.",
+      "timestamp": "4:06"
+     },
+     {
+      "text": "No pain, no climb.",
+      "timestamp": "13:35"
+     }
+    ],
+    "actionItems": [
+     "Start with Level 1: LI folder + CLAUDE.md",
+     "Ask Claude for an index",
+     "Install Smart Connections (free) for Level 3",
+     "Consider building a knowledge graph for Level 4 if your questions involve relationship chains.",
+     "Consider building a gbrain for Level 5 if you run agents offline vs 5,00The video description also mentions a free AI OS course and paid courses for further learning."
+    ]
+   },
+   "data_chars": 2377,
+   "outcome": "note",
+   "latency_s": 101.2,
+   "models": {
+    "google/gemini-2.5-flash-lite": 1
+   },
+   "cost_usd": 0.067431,
+   "free_calls": 0,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://youtube.com/shorts/wHky8QG27pQ?si=5T0i7LX75fCSC5zN",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.8,
+   "strategy": "youtube_direct",
+   "via": null,
+   "kind": "video_uri",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": null,
+   "final_strategy": "youtube_direct",
+   "thin": false,
+   "content_type": "summary",
+   "title": "How to pitch like a billionaire",
+   "summary": "Pitching relies on emotional connection, not just data; focus on vision and address objections proactively.",
+   "data": {
+    "medium": "video",
+    "videoLength": "0:47",
+    "tldr": "Pitching effectively involves leading with a strong vision, not your background or roadmap. Investors are driven by emotions like fear and greed, so your pitch should trigger greed and be concise. Proactively identify and address potential objections to build confidence and avoid confusion.",
+    "keyPoints": [
+     "Startup founders should communicate their vision first, before discussing background, credentials, or product roadmaps.",
+     "90% of an investor's decision is based on emotions and narratives; reasoning comes later.",
+     "Complexity induces fear, so keep pitches simple and jargon-free.",
+     "Investors bounce between fear and greed; the goal is to trigger greed quickly.",
+     "Lead with the biggest statement you can make, not your background or roadmap, but the vision.",
+     "Engineer takeaways by presenting data as talking points that convince others.",
+     "Start with all the reasons to invest and reduce them to 3-5 'lures'.",
+     "Address the 10-15 hardest objections you can think of and keep adding to this list.",
+     "Develop 10-15 'burning questions' investors might have and answer them proactively.",
+     "Never invest in someone who feels confused.",
+     "These pitching principles apply to fundraising, B2B sales, website copy, and job interviews."
+    ],
+    "quotes": [
+     {
+      "text": "Not your background. Not your roadmap. The vision.",
+      "timestamp": "00:16"
+     },
+     {
+      "text": "Investors bounce between fear and greed.",
+      "timestamp": "00:11"
+     },
+     {
+      "text": "90% of an investor's decision is based on emotions and narratives",
+      "timestamp": "00:08"
+     },
+     {
+      "text": "Keep things simple and jargon free. Complexity induces fear",
+      "timestamp": "00:09"
+     },
+     {
+      "text": "Lead with the Biggest Statement You Can Make. Not your background. Not your roadmap. The vision.",
+      "timestamp": "00:15"
+     },
+     {
+      "text": "Write down the 10-15 hardest objections you can think of and have Appendix slides with lots of detail",
+      "timestamp": "00:28"
+     },
+     {
+      "text": "Develop 10 and 15 \"burning questions\" investors might have ... and keep adding!",
+      "timestamp": "00:30"
+     },
+     {
+      "text": "Kill the objections early and make it emotional. Then logical.",
+      "timestamp": "00:41"
+     }
+    ],
+    "actionItems": [
+     "Identify and articulate your vision clearly.",
+     "Prepare 3-5 key 'lures' or reasons to invest.",
+     "List 10-15 potential objections and prepare answers.",
+     "Anticipate investor questions and have answers ready.",
+     "Apply these pitching principles to various scenarios like sales and interviews."
+    ]
+   },
+   "data_chars": 2457,
+   "outcome": "note",
+   "latency_s": 16.9,
+   "models": {
+    "google/gemini-2.5-flash-lite": 1
+   },
+   "cost_usd": 0.002349,
+   "free_calls": 0,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://x.com/dj_curfew/status/2057522382315929802?s=12",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 1.2,
+   "strategy": "twitter_syndication",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "business",
+   "final_strategy": "twitter_syndication",
+   "thin": false,
+   "content_type": "business",
+   "title": "ClickUp reduces headcount by 22% to build a 100x organization",
+   "summary": "ClickUp cut 22% of staff to shift toward a 100x org model where top engineers and PMs orchestrate AI agents, with savings funding $1M salary bands for high-impact roles.",
+   "data": {
+    "facts": [
+     {
+      "label": "Headcount reduction",
+      "value": "22%"
+     },
+     {
+      "label": "Proposed salary band for 100x impact",
+      "value": "$1 million cash/year"
+     },
+     {
+      "label": "Core roles in 100x org",
+      "value": "Builders (10x engineers, 10x PMs), Agent Managers, Front-liners"
+     }
+    ]
+   },
+   "data_chars": 258,
+   "outcome": "note",
+   "latency_s": 4.6,
+   "models": {
+    "qwen/qwen3-30b-a3b-instruct-2507": 1,
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 7.3e-05,
+   "free_calls": 1,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://x.com/gregisenberg/status/2066601447525888209?s=12",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 1.3,
+   "strategy": "twitter_syndication",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "career",
+   "final_strategy": "twitter_syndication",
+   "thin": false,
+   "content_type": "career",
+   "title": "How a 19-year-old makes $200,000+ building AI apps without coding",
+   "summary": "A 19-year-old who started at TJ Maxx a year ago now earns over $200,000 annually by building AI apps, emphasizing the importance of passion, a simple 'gotcha feature,' and strategic onboarding for monetization.",
+   "data": {
+    "facts": [
+     {
+      "label": "Age",
+      "value": "19"
+     },
+     {
+      "label": "Annual income",
+      "value": "$200,000+"
+     },
+     {
+      "label": "Previous job (1 year ago)",
+      "value": "TJ Maxx"
+     },
+     {
+      "label": "Example app revenue (same month)",
+      "value": "Hated app: $35, Loved app: $17,000"
+     },
+     {
+      "label": "Example app views (hated app)",
+      "value": "1.8M"
+     },
+     {
+      "label": "Monetization target in deck",
+      "value": "$10k/month"
+     }
+    ],
+    "sections": [
+     {
+      "heading": "Core strategy principles",
+      "items": [
+       "Pick an idea you're actually passionate about (proven by huge revenue difference between apps).",
+       "Build one 'gotcha feature' anyone understands in 5 seconds (e.g., take a picture of food, get calories).",
+       "Gotcha features that include AI are working a lot right now.",
+       "90% of distribution is nailing the gotcha feature."
+      ]
+     },
+     {
+      "heading": "Onboarding & monetization",
+      "items": [
+       "Onboarding is where the money is.",
+       "Educate, add social proof, personalize to create sunk cost.",
+       "Hit users with FOMO right before the paywall."
+      ]
+     },
+     {
+      "heading": "Instagram as a tool",
+      "items": [
+       "Your IG is both a sales funnel for users and your credibility when pitching influencers.",
+       "Use three demos, a clean bio, and collab posts."
+      ]
+     },
+     {
+      "heading": "Distribution tactics",
+      "items": [
+       "Distribution is a numbers game.",
+       "Tailor your feed to your ideal customer.",
+       "Scroll and DM all day.",
+       "Hire a VA.",
+       "Get creators on the phone fast."
+      ]
+     }
+    ]
+   },
+   "data_chars": 1359,
+   "outcome": "note",
+   "latency_s": 47.1,
+   "models": {
+    "qwen/qwen3-30b-a3b-instruct-2507": 1,
+    "deepseek/deepseek-v3.2": 1
+   },
+   "cost_usd": 0.000517,
+   "free_calls": 0,
+   "paid_calls": 2,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://amzn.in/d/0fvav1hX",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 3.2,
+   "strategy": "product_direct",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "product",
+   "final_strategy": "product_direct",
+   "thin": false,
+   "content_type": "product",
+   "title": "Btag SF-400 Digital Kitchen Weighing Scale",
+   "summary": "The Btag SF-400 digital kitchen scale offers 10kg capacity with 1g precision, tare function, and multi-unit conversion for \u20b9219 with a 4.0-star rating.",
+   "data": {
+    "price": "\u20b9219",
+    "brand": "Btag",
+    "rating": "4.0",
+    "buyUrl": "https://amzn.in/d/0fvav1hX",
+    "specs": [
+     {
+      "label": "Capacity",
+      "value": "10kg"
+     },
+     {
+      "label": "Precision",
+      "value": "1g"
+     },
+     {
+      "label": "Units",
+      "value": "grams, ounces, pounds"
+     },
+     {
+      "label": "Warranty",
+      "value": "1 year (6+6 months)"
+     },
+     {
+      "label": "Display",
+      "value": "LCD"
+     },
+     {
+      "label": "Color",
+      "value": "White"
+     }
+    ],
+    "pros": [
+     "High precision sensor system accurate from 1g to 10kg",
+     "Tare function for net ingredient weight",
+     "Multi-unit conversion between grams, ounces, and pounds",
+     "Durable ABS plastic construction with easy-to-clean surface"
+    ],
+    "cons": [
+     "No specific cons mentioned in the source"
+    ],
+    "verdict": "Ideal for home cooks and bakers needing precise measurements for cooking, baking, meal prep, and portion control."
+   },
+   "data_chars": 785,
+   "outcome": "note",
+   "latency_s": 7.9,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://amzn.in/d/0cK9nT6w",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 3.3,
+   "strategy": "product_direct",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "product",
+   "final_strategy": "product_direct",
+   "thin": false,
+   "content_type": "product",
+   "title": "Btag SF-400 Digital Kitchen Weighing Scale | 10Kg x 1g Precision | 1 year (6+6 months) warranty | Food Scale with LCD Display for Cooking, Baking, Meal Prep & Healthy Diet | (White)",
+   "summary": "The Btag SF-400 digital kitchen scale offers 10kg capacity with 1g precision, tare function, and multi-unit conversion for \u20b9219 with a 4.0-star rating from over 6,000 reviews.",
+   "data": {
+    "price": "\u20b9219",
+    "brand": "Btag",
+    "rating": "4.0",
+    "buyUrl": "https://amzn.in/d/0cK9nT6w",
+    "specs": [
+     {
+      "label": "Capacity",
+      "value": "10kg"
+     },
+     {
+      "label": "Precision",
+      "value": "1g"
+     },
+     {
+      "label": "Units",
+      "value": "grams, ounces, pounds"
+     },
+     {
+      "label": "Warranty",
+      "value": "1 year (6+6 months)"
+     },
+     {
+      "label": "Display",
+      "value": "LCD"
+     },
+     {
+      "label": "Color",
+      "value": "White"
+     }
+    ],
+    "pros": [
+     "High precision 1g accuracy up to 10kg",
+     "Tare function for net weight measurement",
+     "Multi-unit conversion (g, oz, lb)",
+     "Durable ABS plastic construction",
+     "Easy to clean smooth surface"
+    ],
+    "cons": [
+     "No mention of auto-off feature",
+     "No backlight mentioned for LCD display"
+    ],
+    "verdict": "Ideal for home cooks and bakers needing accurate, affordable kitchen measurements with essential tare and unit conversion functions."
+   },
+   "data_chars": 804,
+   "outcome": "note",
+   "latency_s": 6.0,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://share.google/1A58BTcllK2Pmoz4m",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 2.3,
+   "strategy": "google_share",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "article",
+   "final_strategy": "google_share",
+   "thin": false,
+   "content_type": "article",
+   "title": "Is Vibe Coding Already Dead? Even Karpathy Is Moving On",
+   "summary": "Forbes reports that vibe coding\u2014AI-assisted natural language programming\u2014is declining as Andrej Karpathy shifts focus, signaling a broader industry move toward more structured AI development practices.",
+   "data": {
+    "facts": [
+     {
+      "label": "Author",
+      "value": "Jodie Cook"
+     },
+     {
+      "label": "Publication",
+      "value": "Forbes"
+     },
+     {
+      "label": "Date",
+      "value": "June 12, 2026"
+     },
+     {
+      "label": "Subject",
+      "value": "Decline of vibe coding and Andrej Karpathy's shift in focus"
+     }
+    ]
+   },
+   "data_chars": 239,
+   "outcome": "note",
+   "latency_s": 5.6,
+   "models": {
+    "qwen/qwen3-30b-a3b-instruct-2507": 1,
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 9.5e-05,
+   "free_calls": 1,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.linkedin.com/feed/update/urn:li:activity:7486097294925307904/?utm_source=share&utm_medium=member_desktop&rcm=ACoAACxHhiUBEyswjTbpD9laAIfbbc4aFR6yY74",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.7,
+   "strategy": "web_scrape",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "article",
+   "final_strategy": "web_scrape",
+   "thin": false,
+   "content_type": "article",
+   "title": "Claude Code deployments succeed through layered CLAUDE.md context architecture",
+   "summary": "Successful Claude Code deployments in large codebases rely on layered CLAUDE.md files where root-level defines global invariants and subdirectory files capture local exceptions, reducing friction by scoping context to the working directory.",
+   "data": {
+    "facts": [
+     {
+      "label": "Core insight",
+      "value": "AI performs better when context is treated as architecture rather than documentation"
+     },
+     {
+      "label": "Key pattern",
+      "value": "Layered CLAUDE.md files with root-level globals and subdirectory overrides for local conventions"
+     },
+     {
+      "label": "Failure mode",
+      "value": "Stale rules loading into every session become drag on model performance over time"
+     },
+     {
+      "label": "Inheritance model",
+      "value": "Model gives higher weight to context nearest the working directory, enabling CSS-like cascading for AI instructions"
+     },
+     {
+      "label": "Best practice",
+      "value": "Each subdirectory CLAUDE.md captures only what's different; root holds global invariants"
+     }
+    ]
+   },
+   "data_chars": 680,
+   "outcome": "note",
+   "latency_s": 3.0,
+   "models": {
+    "qwen/qwen3-30b-a3b-instruct-2507": 1,
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 4e-05,
+   "free_calls": 1,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.bbcgoodfood.com/recipes/best-ever-chocolate-brownies-recipe",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.1,
+   "strategy": "web_json_ld",
+   "via": null,
+   "kind": "structured",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "recipe",
+   "final_strategy": "web_json_ld",
+   "thin": false,
+   "content_type": "recipe",
+   "title": "Best ever chocolate brownies recipe",
+   "summary": "A super easy brownie recipe yielding 16 squares with a shiny, papery crust after 25 minutes baking at 180C.",
+   "data": {
+    "totalTime": "1 hour",
+    "prepTime": "25 min",
+    "cookTime": "35 min",
+    "servings": "16 squares",
+    "difficulty": "Easy",
+    "cuisine": "American",
+    "calories": "150 calories",
+    "ingredients": [
+     {
+      "group": null,
+      "items": [
+       "185g unsalted butter",
+       "185g best dark chocolate",
+       "85g plain flour",
+       "40g cocoa powder",
+       "50g white chocolate",
+       "50g milk chocolate",
+       "3 large eggs",
+       "275g golden caster sugar"
+      ]
+     }
+    ],
+    "steps": [
+     "Cut 185g unsalted butter into small cubes and tip into a medium bowl. Break 185g dark chocolate into small pieces and drop into the bowl.",
+     "Fill a small saucepan about a quarter full with hot water, then sit the bowl on top so it rests on the rim of the pan, not touching the water. Put over a low heat until the butter and chocolate have melted, stirring occasionally to mix them.",
+     "Remove the bowl from the pan. Alternatively, cover the bowl loosely with cling film and put in the microwave for 2 minutes on High. Leave the melted mixture to cool to room temperature.",
+     "While you wait for the chocolate to cool, position a shelf in the middle of your oven and turn the oven on to 180C/160C fan/gas 4.",
+     "Using a shallow 20cm square tin, cut out a square of kitchen foil (or non-stick baking parchment) to line the base. Tip 85g plain flour and 40g cocoa powder into a sieve held over a medium bowl. Tap and shake the sieve so they run through together and you get rid of any lumps.",
+     "Chop 50g white chocolate and 50g milk chocolate into chunks on a board.",
+     "Break 3 large eggs into a large bowl and tip in 275g golden caster sugar. With an electric mixer on maximum speed, whisk the eggs and sugar. They will look thick and creamy, like a milk shake. This can take 3-8 minutes, depending on how powerful your mixer is. You\u2019ll know it\u2019s ready when the mixture becomes really pale and about double its original volume. Another check is to turn off the mixer, lift out the beaters and wiggle them from side to side. If the mixture that runs off the beaters leaves a trail on the surface of the mixture in the bowl for a second or two, you\u2019re there.",
+     "Pour the cooled chocolate mixture over the eggy mousse, then gently fold together with a rubber spatula. Plunge the spatula in at one side, take it underneath and bring it up the opposite side and in again at the middle. Continue going under and over in a figure of eight, moving the bowl round after each folding so you can get at it from all sides, until the two mixtures are one and the colour is a mottled dark brown. The idea is to marry them without knocking out the air, so be as gentle and slow as you like.",
+     "Hold the sieve over the bowl of eggy chocolate mixture and resift the cocoa and flour mixture, shaking the sieve from side to side, to cover the top evenly.",
+     "Gently fold in this powder using the same figure of eight action as before. The mixture will look dry and dusty at first, and a bit unpromising, but if you keep going very gently and patiently, it will end up looking gungy and fudgy. Stop just before you feel you should, as you don\u2019t want to overdo this mixing.",
+     "Finally, stir in the white and milk chocolate chunks until they\u2019re dotted throughout.",
+     "Pour the mixture into the prepared tin, scraping every bit out of the bowl with the spatula. Gently ease the mixture into the corners of the tin and paddle the spatula from side to side across the top to level it.",
+     "Put in the oven and set your timer for 25 mins. When the buzzer goes, open the oven, pull the shelf out a bit and gently shake the tin. If the brownie wobbles in the middle, it\u2019s not quite done, so slide it back in and bake for another 5 minutes until the top has a shiny, papery crust and the sides are just beginning to come away from the tin. Take out of the oven.",
+     "Leave the whole thing in the tin until completely cold, then, if you\u2019re using the brownie tin, lift up the protruding rim slightly and slide the uncut brownie out on its base. If you\u2019re using a normal tin, lift out the brownie with the foil (or parchment). Cut into quarters, then cut each quarter into four squares and finally into triangles.",
+     "They\u2019ll keep in an airtight container for a good two weeks and in the freezer for up to a month."
+    ]
+   },
+   "data_chars": 4222,
+   "outcome": "note",
+   "latency_s": 4.7,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.0,
+   "free_calls": 1,
+   "paid_calls": 0,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://www.nykaaman.com/puma-ferrari-sptwr-style-unisex-white-backpack/p/13640653",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 5.6,
+   "strategy": "product_direct",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "product",
+   "final_strategy": "product_direct",
+   "thin": false,
+   "content_type": "product",
+   "title": "Puma Ferrari SPTWR Style Unisex White Backpack",
+   "summary": "A white unisex backpack featuring Puma and Ferrari branding with SPTWR style design, available on Nykaa.",
+   "data": {
+    "brand": "Puma",
+    "specs": [
+     {
+      "label": "Color",
+      "value": "White"
+     },
+     {
+      "label": "Gender",
+      "value": "Unisex"
+     },
+     {
+      "label": "Style",
+      "value": "SPTWR"
+     },
+     {
+      "label": "Collaboration",
+      "value": "Ferrari"
+     }
+    ],
+    "pros": [],
+    "cons": []
+   },
+   "data_chars": 216,
+   "outcome": "note",
+   "latency_s": 8.6,
+   "models": {
+    "nvidia/nemotron-3-super-120b-a12b:free": 2,
+    "qwen/qwen3-30b-a3b-instruct-2507": 1
+   },
+   "cost_usd": 0.007039,
+   "free_calls": 2,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://github.com/affaan-m/ECC",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 0.9,
+   "strategy": "web_scrape",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "product",
+   "final_strategy": "web_scrape",
+   "thin": false,
+   "content_type": "product",
+   "title": "ECC 2.2.3 agent harness optimization system for AI coding assistants",
+   "summary": "ECC 2.2.3 provides MIT-licensed agent harness optimization with 68 agents, 293 skills, and guided setup for Claude Code, Codex, and Kimi Code via npm package ecc-universal.",
+   "data": {
+    "price": "Free (OSS MIT-licensed)",
+    "brand": "ECC",
+    "buyUrl": "https://github.com/affaan-m/ECC",
+    "specs": [
+     {
+      "label": "Version",
+      "value": "2.2.3"
+     },
+     {
+      "label": "Release Date",
+      "value": "2026-10-01"
+     },
+     {
+      "label": "License",
+      "value": "MIT"
+     },
+     {
+      "label": "Supported Harnesses",
+      "value": "Claude Code, Codex, Kimi Code, Cursor, OpenCode, Gemini, Zed, GitHub Copilot, Antigravity, Qwen, and others"
+     },
+     {
+      "label": "Agents",
+      "value": "68"
+     },
+     {
+      "label": "Skills",
+      "value": "293"
+     },
+     {
+      "label": "Legacy Command Shims",
+      "value": "94"
+     },
+     {
+      "label": "Node.js Requirement",
+      "value": "18 or newer"
+     },
+     {
+      "label": "Git Requirement",
+      "value": "Required for Claude plugin setup"
+     },
+     {
+      "label": "Claude Code Requirement",
+      "value": "2.1 or newer on PATH"
+     }
+    ]
+   },
+   "data_chars": 717,
+   "outcome": "note",
+   "latency_s": 4.4,
+   "models": {
+    "qwen/qwen3-30b-a3b-instruct-2507": 1,
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 7.4e-05,
+   "free_calls": 1,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  },
+  {
+   "url": "https://pin.it/4G3uy5QGh",
+   "events": [],
+   "apify_runs": 0,
+   "acq_cache_hit": false,
+   "acquire_s": 2.0,
+   "strategy": "web_scrape",
+   "via": null,
+   "kind": "text",
+   "has_video_bytes": false,
+   "image_parts": 0,
+   "classified": "recipe",
+   "final_strategy": "web_scrape",
+   "thin": false,
+   "content_type": "recipe",
+   "title": "Mango Sago",
+   "summary": "A refreshing summer dessert made with Alphonso mango, coconut milk, condensed milk, and boiled sago pearls, served with ice and tender coconut pieces.",
+   "data": {
+    "totalTime": "15 min",
+    "prepTime": "10 min",
+    "cookTime": "5 min",
+    "servings": "2",
+    "difficulty": "Easy",
+    "cuisine": "Indian",
+    "ingredients": [
+     {
+      "items": [
+       "1 Alphonso mango",
+       "1/2 cup coconut water",
+       "1/4 cup coconut milk",
+       "2 tbsp condensed milk",
+       "1/4 cup sabudana/sago (washed and boiled for 2-3 min)",
+       "1/2 cup regular milk",
+       "Lots of ice",
+       "1/4 cup tender coconut pieces",
+       "1/4 cup mango chunks"
+      ]
+     }
+    ],
+    "steps": [
+     "Scoop the mango and puree it in a blender with coconut water.",
+     "Add coconut milk, condensed milk, regular milk, and blend until smooth.",
+     "Add boiled sago pearls, tender coconut pieces, and mango chunks to the mixture.",
+     "Add lots of ice and blend briefly for a chilled texture.",
+     "Serve immediately in glasses."
+    ],
+    "tips": [
+     "Use ripe Alphonso mango for best flavor.",
+     "Boil sago pearls just until translucent to avoid overcooking.",
+     "Adjust sweetness with more or less condensed milk as needed."
+    ]
+   },
+   "data_chars": 913,
+   "outcome": "note",
+   "latency_s": 11.4,
+   "models": {
+    "qwen/qwen3-30b-a3b-instruct-2507": 1,
+    "nvidia/nemotron-3-super-120b-a12b:free": 1
+   },
+   "cost_usd": 0.000106,
+   "free_calls": 1,
+   "paid_calls": 1,
+   "ig_embed_fallthrough": false,
+   "youtube_fallback": false
+  }
+ ]
+}

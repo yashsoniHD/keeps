@@ -99,13 +99,10 @@ def wire_worker(fake_db, monkeypatch):
     async def cats(uid):
         return []
 
-    async def cols(uid):
-        return []
-
     async def classify(url, bundle, existing, note_hint=None):
         return "summary"
 
-    async def extract(url, bundle, ct, note_hint=None):
+    async def extract(url, bundle, ct, note_hint=None, **_):
         return NoteExtraction(content_type=ct, title="Re-extracted title",
                               ai_summary="Fresh summary with plenty of detail.",
                               cover_image_prompt="",
@@ -119,12 +116,10 @@ def wire_worker(fake_db, monkeypatch):
         return d, None
 
     monkeypatch.setattr(process_mod, "get_user_categories", cats)
-    monkeypatch.setattr(process_mod, "get_user_collections", cols)
     monkeypatch.setattr(process_mod, "add_user_category", _noop)
     monkeypatch.setattr(process_mod, "add_user_source", _noop)
     monkeypatch.setattr(process_mod, "touch_user_activity", _noop)
     monkeypatch.setattr(process_mod, "_note_embedding", _noop)
-    monkeypatch.setattr(process_mod, "fan_out_note", _noop)
     monkeypatch.setattr(process_mod, "enrich_note_data", fake_enrich)
     monkeypatch.setattr(process_mod.gemini_service, "classify", classify)
     monkeypatch.setattr(process_mod.gemini_service, "extract_async", extract)
@@ -153,27 +148,20 @@ async def test_worker_overwrites_target_note_and_preserves_created_at(fake_db, w
     assert [k for k in fake_db.docs if k[0] == "notes"] == [("notes", "existing")]
 
 
-async def test_worker_preserves_owner_flags_on_overwrite(fake_db, wire_worker):
-    """A favorited + publicly-shared note must stay favorited + public after a re-extract —
-    only AI-generated content (title/summary/data/content_type/cover) is regenerated."""
-    pinned_at = datetime(2024, 6, 1, tzinfo=timezone.utc)
+async def test_worker_drops_removed_owner_flags_on_overwrite(fake_db, wire_worker):
+    """Favorites/pins/public links were removed: a re-extract no longer carries them over."""
     fake_db.seed("notes", "existing", {
         "user_id": "u", "content_type": "recipe", "title": "Old title",
         "source_url": "https://x.com/a", "created_at": OLD,
-        "is_favorite": True, "is_public": True, "pinned_at": pinned_at,
+        "is_favorite": True, "is_public": True, "pinned_at": OLD,
     })
     fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
                                "url": "https://x.com/a", "target_note_id": "existing"})
 
-    res = await process_mod.process_job("j", DummyRequest())
-    assert res["status"] == "completed"
-
+    await process_mod.process_job("j", DummyRequest())
     note = fake_db.docs[("notes", "existing")]
-    assert note["title"] == "Re-extracted title"   # AI content regenerated
-    assert note["content_type"] == "summary"       # AI content regenerated
-    assert note["is_favorite"] is True              # owner-set flag preserved
-    assert note["is_public"] is True                # owner-set flag preserved
-    assert note["pinned_at"] == pinned_at           # owner-set flag preserved
+    assert note["title"] == "Re-extracted title" and note["created_at"] == OLD
+    assert not {"is_favorite", "is_public", "pinned_at"} & set(note)
 
 
 async def test_worker_does_not_fabricate_owner_flags_when_absent(fake_db, wire_worker):
@@ -233,6 +221,10 @@ async def test_reextract_unreachable_source_does_not_clobber(fake_db, monkeypatc
         return ContentBundle(kind="metadata_only", metadata={"title": "x"},
                              strategy="unreachable")
     monkeypatch.setattr(process_mod.sources, "acquire", unreachable)
+
+    async def no_sleep(d):  # the unreachable source is retried in-process first
+        pass
+    monkeypatch.setattr(process_mod.asyncio, "sleep", no_sleep)
 
     fake_db.seed("notes", "existing", {
         "user_id": "u", "content_type": "recipe", "title": "Good recipe",

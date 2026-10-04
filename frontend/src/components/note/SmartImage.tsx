@@ -54,6 +54,7 @@ export function SmartImage({
         src={src}
         alt=""
         aria-hidden
+        loading={loading}
         className="absolute inset-0 h-full w-full scale-110 object-cover opacity-70 blur-xl"
       />
       <div className="absolute inset-0 bg-ink/5 dark:bg-black/25" />

@@ -197,6 +197,38 @@ async def _redispatch_own_stale(db, user_id: str) -> None:
                     extra={"user_id": user_id})
 
 
+async def _existing_note(db, user_id: str, url: str) -> str | None:
+    """Exact-duplicate capture: this user already has a (non-bookmark) note for this canonical
+    URL. One indexed equality lookup; a salvaged is_fallback bookmark doesn't count, so re-saving
+    a link that failed the first time still retries it. Best-effort — any error is a miss."""
+    try:
+        async for snap in (db.collection("notes").where("user_id", "==", user_id)
+                           .where("source_url", "==", url).limit(1).stream()):
+            if not (snap.to_dict() or {}).get("is_fallback"):
+                return snap.id
+    except Exception as e:  # noqa: BLE001
+        log.warning("duplicate lookup failed: %s: %s", type(e).__name__, e,
+                    extra={"user_id": user_id, "url": url})
+    return None
+
+
+async def _completed_duplicate_job(db, user_id: str, body: IngestRequest,
+                                   note_id: str) -> JobStatus:
+    """Write an already-completed job pointing at the existing note, so the frontend's job
+    watcher resolves exactly as it does for a fresh save — no caps charged, no AI spend."""
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    await db.collection("jobs").document(job_id).set({
+        "user_id": user_id, "input_type": "url", "url": body.url, "source": body.source,
+        "status": "completed", "note_id": note_id,
+        "destination": {"kind": "note", "note_id": note_id}, "duplicate": True,
+        "error": None, "attempt_count": 0, "created_at": now, "updated_at": now,
+    })
+    log.info("duplicate capture, returning existing note",
+             extra={"job_id": job_id, "user_id": user_id, "url": body.url})
+    return JobStatus(job_id=job_id, status="completed", note_id=note_id)
+
+
 @router.post("/ingest", response_model=JobStatus)
 async def ingest(request: Request, user_id: str = Depends(require_user)):
     try:
@@ -220,6 +252,8 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
             raise HTTPException(status_code=400, detail="This URL points at a private address and can't be saved.")
 
     db = get_db()
+    if body.input_type == "url" and (dup := await _existing_note(db, user_id, body.url)):
+        return await _completed_duplicate_job(db, user_id, body, dup)
     out = await _create_job(db, user_id, body)
     # Fire-and-forget: up to 10 sequential dispatches must not delay the response.
     _bg_tasks.add(t := asyncio.create_task(_redispatch_own_stale(db, user_id)))

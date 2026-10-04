@@ -1,12 +1,14 @@
-"""YouTube: transcript-first, with the model reading the URL itself when that's cheaper/only way.
+"""YouTube: the model watches the video directly; a fallback scraper takes over when it can't.
 
-Google fetches the video for YOUTUBE_MODEL, not our IP, so direct analysis is the reliable path.
-One 8 s watch-page fetch (`ytInitialPlayerResponse`) supplies duration, title, description and
-caption-track URLs; oEmbed is the fallback when the page is blocked. Routing:
-  <= 180 s (Shorts)                 -> youtube_direct (YOUTUBE_MODEL reads the URL, ~$0.002)
-  longer + transcript >= 200 chars  -> youtube_transcript (text bundle, TEXT_MODEL)
-  longer, no transcript, <= MAX     -> youtube_direct
-  longer than MAX_VIDEO_SECONDS     -> Apify subtitles, else description-only text
+Primary: `youtube_direct` — YOUTUBE_MODEL reads the URL (Google fetches it, not our IP). One 8 s
+watch-page fetch (`ytInitialPlayerResponse`, oEmbed fallback) supplies title/description/thumbnail
+for classification plus the caption tracks the fallback needs.
+
+When extraction raises `services.gemini.VideoUnreadable` (age/region/members-only, error) — or the
+video is over settings.YOUTUBE_MAX_DIRECT_SECONDS — routers/process.py calls `fallback()`:
+  captions from the watch page (free) → text bundle
+  else the Apify YouTube actor: a direct mp4 → video bundle for the video model,
+  else its subtitles → text bundle; else description + thumbnail (marked thin).
 """
 import html
 import json as _json
@@ -22,7 +24,6 @@ from models.note import ContentBundle
 log = logging.getLogger("clipnote.sources")
 
 _DOMAINS = ("youtube.com", "youtu.be", "music.youtube.com")
-SHORT_SECONDS = 180
 MIN_TRANSCRIPT_CHARS = 200
 PAGE_TIMEOUT_SECONDS = 8.0
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -110,61 +111,86 @@ async def _fetch_transcript(tracks: list[dict]) -> str | None:
     return text[:28000] or None
 
 
-async def _apify_subtitles(url: str) -> str | None:
-    """>MAX_VIDEO_SECONDS with no free transcript: one capped Apify call for subtitles."""
-    from services import apify
-    from services.firebase import reserve_apify_slot
-
-    if not settings.APIFY_TOKEN or apify.actor_kind(url) is None or not await reserve_apify_slot():
-        return None
-    result = await apify.fetch(url)
-    return (result or {}).get("subtitles") or None
-
-
-async def acquire(url: str) -> ContentBundle:
+async def _metadata(url: str) -> tuple[dict, list[dict], str | None]:
+    """(metadata, caption tracks, thumbnail) from the watch page, oEmbed when it's blocked."""
     vid = m.group(1) if (m := _VIDEO_ID_RE.search(url)) else None
     page = None
     if vid:
         try:
             page = await _watch_page(vid)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.info("watch page failed (%s); falling back to oEmbed", str(e)[:120])
     if page is None:
         page = {"duration": 0, "tracks": [], "description": "",
-                "thumbnail": f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg" if vid else None}
+                "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg" if vid else None}
         try:
             oe = await _oembed(url)
             page.update(title=oe.get("title"), author=oe.get("author_name"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("oEmbed also failed: %s", e)
+    meta = {"title": page.get("title") or "Untitled", "author": page.get("author"),
+            "platform": "youtube", "duration": page.get("duration") or 0,
+            "description": page.get("description") or ""}
+    return meta, page.get("tracks") or [], page.get("thumbnail")
 
-    duration = page["duration"]
-    metadata = {
-        "title": page.get("title") or "Untitled",
-        "author": page.get("author"),
-        "platform": "youtube",
-        "duration": duration,
-        "description": page.get("description") or "",
-    }
-    images = [page["thumbnail"]] if page.get("thumbnail") else []
 
-    def text_bundle(text: str, via: str) -> ContentBundle:
+async def acquire(url: str) -> ContentBundle:
+    meta, tracks, thumb = await _metadata(url)
+    images = [thumb] if thumb else []
+    if meta["duration"] > settings.YOUTUBE_MAX_DIRECT_SECONDS:
+        return await fallback(url, metadata=meta, tracks=tracks, images=images)
+    # Tracks ride along (not persisted) so fallback() needn't refetch the watch page.
+    return ContentBundle(kind="video_uri", video_uri=url, images=images,
+                         metadata={**meta, "caption_tracks": tracks}, strategy="youtube_direct")
+
+
+async def fallback(url: str, bundle: ContentBundle | None = None, *, metadata: dict | None = None,
+                   tracks: list[dict] | None = None, images: list[str] | None = None
+                   ) -> ContentBundle:
+    """The scraper used when the model can't read the video. Never raises; with nothing at all
+    to build a note from it returns a `metadata_only` bundle (→ salvage bookmark)."""
+    from services import apify
+    from services.sources.social_video import download_video, to_seconds, too_long
+
+    if bundle is not None:
+        metadata = dict(bundle.metadata)
+        tracks = metadata.pop("caption_tracks", None) or []
+        images = bundle.images
+    elif metadata is None:
+        metadata, tracks, thumb = await _metadata(url)
+        images = [thumb] if thumb else []
+    images = images or []
+    meta = {**metadata}
+
+    def text_bundle(text: str, via: str, thin: bool = False) -> ContentBundle:
         return ContentBundle(kind="text", text=text, images=images,
-                             metadata={**metadata, "via": via}, strategy="youtube_transcript")
+                             metadata={**meta, "via": via, **({"thin": True} if thin else {})},
+                             strategy="youtube_fallback")
 
-    def direct() -> ContentBundle:
-        return ContentBundle(kind="video_uri", video_uri=url, images=images, metadata=metadata,
-                             strategy="youtube_direct")
-
-    if not duration and "/shorts/" not in url:  # page blocked, length unknown: don't risk a
-        return text_bundle(metadata["description"] or metadata["title"], "description")  # long video
-    if duration <= SHORT_SECONDS:  # Shorts, or an unknown-length /shorts/ link
-        return direct()
-    transcript = await _fetch_transcript(page["tracks"]) if page["tracks"] else None
+    transcript = await _fetch_transcript(tracks) if tracks else None
     if transcript and len(transcript) >= MIN_TRANSCRIPT_CHARS:
         return text_bundle(transcript, "captions")
-    if duration <= settings.MAX_VIDEO_SECONDS:
-        return direct()
-    if subs := await _apify_subtitles(url):
+
+    result = await apify.fetch_capped(url) or {}
+    duration = to_seconds(meta.get("duration")) or to_seconds(result.get("duration"))
+    # The mp4 path obeys the same file limit as reels: no multi-hour downloads.
+    if (result.get("video_url") and not too_long(duration)
+            and (video := await (download_video(result["video_url"], duration) if duration
+                                 else download_video(result["video_url"])))):
+        return ContentBundle(kind="text", text=meta.get("description") or None, images=images,
+                             metadata={**meta, "via": "apify", "video_bytes": video[0],
+                                       "video_mime": video[1],
+                                       "caption": meta.get("description") or ""},
+                             strategy="youtube_fallback_video")
+    if subs := result.get("subtitles"):
         return text_bundle(subs, "apify")
-    return text_bundle(metadata["description"] or metadata["title"], "description")
+    title = meta.get("title") if meta.get("title") not in (None, "", "Untitled") else None
+    if not (meta.get("description") or title):
+        # Never extract from the bare URL (the model would invent the video): a metadata-only
+        # bundle makes process.py salvage an honest bookmark instead.
+        return ContentBundle(kind="metadata_only", text=None, images=images,
+                             metadata={**meta, "via": "none"}, strategy="youtube_fallback")
+    if duration > settings.YOUTUBE_MAX_DIRECT_SECONDS:  # so the note can say why it's thin
+        meta.update(too_long=True, duration=duration,
+                    max_seconds=settings.YOUTUBE_MAX_DIRECT_SECONDS, built_from="description")
+    return text_bundle(meta.get("description") or title, "description", thin=True)

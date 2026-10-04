@@ -1,15 +1,28 @@
 // Minimal service worker: required for PWA installability (which puts Clipnote in the
-// OS share sheet via the manifest's share_target). Network-first passthrough — Firestore
-// handles its own offline cache; we don't want stale app shells.
+// OS share sheet via the manifest's share_target). It only handles the share POST and
+// caches hashed static assets. Everything else (index.html, API, Firestore, images) is not
+// intercepted at all, so it goes network-direct with no SW hop and no stale app shell.
+const SHARE_CACHE = "clipnote-shared";
+const STATIC_CACHE = "clipnote-static-v1";
+
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener("activate", (event) =>
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.filter((k) => k !== SHARE_CACHE && k !== STATIC_CACHE).map((k) => caches.delete(k)),
+        ),
+      )
+      .then(() => self.clients.claim()),
+  ),
+);
 
 // Where a shared payload (url/text/title) is parked between the POST share and the /share
 // page reading it. The SW catches the POST, stashes the payload in the Cache, and redirects to
 // a GET the page can read. Cache (not an in-memory map) so the payload survives if the SW
 // restarts or the user has to sign in first.
-const SHARE_CACHE = "clipnote-shared";
-
 async function stashShare(request) {
   const form = await request.formData();
   const id = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
@@ -26,8 +39,19 @@ async function stashShare(request) {
   return Response.redirect(new URL(`/share?shared=${id}`, self.location.origin).href, 303);
 }
 
+// Vite's /assets/* files are content-hashed, so cache-first is always correct for them.
+async function cacheFirst(request) {
+  const cache = await caches.open(STATIC_CACHE);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const res = await fetch(request);
+  if (res.ok) cache.put(request, res.clone());
+  return res;
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return; // API, Firestore, CDNs: network-direct
 
   // The POST share lands here: stash it, then redirect to the readable GET page.
   if (event.request.method === "POST" && url.pathname === "/share") {
@@ -44,8 +68,8 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
-  // iOS Safari mishandles file downloads that pass through respondWith (saves them as
-  // .html) — let the browser handle the .shortcut file natively.
-  if (url.pathname.endsWith(".shortcut")) return;
-  event.respondWith(fetch(event.request));
+  if (event.request.method === "GET" && url.pathname.startsWith("/assets/")) {
+    event.respondWith(cacheFirst(event.request));
+  }
+  // Anything else falls through untouched (no respondWith).
 });

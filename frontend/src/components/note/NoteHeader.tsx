@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Pencil, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowLeft, Pencil, RefreshCw } from "lucide-react";
 import type { Note } from "@/lib/types";
 import { formatDate } from "@/lib/note-meta";
 import { updateNote } from "@/lib/api";
-import { useAsk } from "@/contexts/ask-context";
-import { FOCUS_RING } from "@/lib/ui";
 import { CategoryEditor } from "./CategoryEditor";
 import { SourcePill } from "./SourcePill";
-import { ShareButton } from "./ShareButton";
 import { DeleteButton } from "@/components/NoteCard";
 
 // Grow a textarea to fit its content so a long title doesn't scroll inside a fixed box.
@@ -150,7 +147,7 @@ function ReextractButton({
   );
 }
 
-// The top action row of the owner note view (Back · Ask · Re-extract · Share · Delete). Kept
+// The top action row of the owner note view (Back · Re-extract · Delete). Kept
 // separate from the meta/title block so NoteContent can hold it full-width above a side-by-side
 // portrait-cover hero while the pills + title move into the hero's right column.
 export function NoteActions({
@@ -166,9 +163,6 @@ export function NoteActions({
 }) {
   const router = useRouter();
   const canGoBack = useCanGoBack();
-  // The note-detail route registers this note as the Ask focal scope (setFocalNote), so
-  // opening the chat here lands scoped to it ("this note first, then all").
-  const { openChat } = useAsk();
   // Back returns to wherever the note was opened from (home feed, search, …). Falls back to
   // home when there's no history — e.g. a shared /notes/{id} link opened cold.
   const goBack = () => {
@@ -187,19 +181,9 @@ export function NoteActions({
         Back
       </button>
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => openChat()}
-          aria-label="Ask about this note"
-          title="Ask about this note"
-          className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-        >
-          <Sparkles className="h-4 w-4 text-summary" aria-hidden />
-        </button>
         {onReextract && note.source_url && (
           <ReextractButton onReextract={onReextract} running={reextracting} />
         )}
-        <ShareButton note={note} />
         {onDelete && <DeleteButton onDelete={onDelete} />}
       </div>
     </div>

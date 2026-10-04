@@ -1,12 +1,9 @@
-"""GET /api/search — semantic search over the user's notes via Firestore Vector Search.
+"""GET /api/search — keyword + semantic search over the caller's own `notes`.
 
-Embeds the query (RETRIEVAL_QUERY), then runs a KNN `find_nearest` against the
-`notes.embedding` field, pre-filtered to the caller's own notes. Returns the same
-lightweight projection the feed/ask citations use — never the heavy `data` map or the
-embedding vector itself.
-
-Requires the Firestore vector index on `notes.embedding` (COSINE, user_id prefix) —
-see infra/. Notes written before embeddings shipped won't match until backfilled.
+Keyword pass: one projected read of the user's newest notes, case-insensitive substring on
+title/summary (Firestore has no substring index). Semantic pass: KNN `find_nearest` on
+`notes.embedding`, pre-filtered by user_id (index: user_id + embedding, see infra/). Results are
+merged (title hits, summary hits, then semantic) and deduped. Never returns `data`/embedding.
 """
 import logging
 from datetime import datetime, timezone
@@ -17,23 +14,22 @@ from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 from google.cloud.firestore_v1.vector import Vector
 
 from config import settings
-from services import search_index
 from services.auth_dep import require_user
 from services.embeddings import embedding_service
-from services.firebase import flush_usage, get_db
+from services.firebase import get_db
 from services.source_alias import source_matches
-from services.usage_meter import start_metering
 
 log = logging.getLogger("clipnote.search")
 
 router = APIRouter(tags=["search"])
 
-# Same fields as the feed card / ask citation — enough to render a result, no `data`.
-RESULT_FIELDS = ("id", "content_type", "title", "ai_summary", "source_domain", "cover_image_url")
+MIN_QUERY_LEN = 3
+KEYWORD_SCAN_LIMIT = 500  # ponytail: newest 500 notes only; add a real text index if users outgrow it
+KEYWORD_FIELDS = ["title", "ai_summary", "content_type", "cover_image_url", "source_domain", "created_at"]
 
 
 def _project(doc_id: str, d: dict) -> dict:
-    """Project a note doc. `ref_id` = the note id the UI routes to (/notes/$id)."""
+    """Hit shape the frontend expects (SearchResult). `ref_id` = note id the UI routes to."""
     return {
         "id": doc_id,
         "content_type": d.get("content_type", ""),
@@ -45,51 +41,32 @@ def _project(doc_id: str, d: dict) -> dict:
     }
 
 
-def _project_index(d: dict) -> dict:
-    """Project a search_index hit (one per note). Older index docs predate the stored
-    content_type and fall back to "" — a backfill re-index fills them in."""
-    ref_id = d.get("ref_id", "")
-    return {
-        "id": ref_id,
-        "content_type": d.get("content_type", ""),
-        "title": d.get("title", ""),
-        "ai_summary": d.get("summary", ""),
-        "source_domain": "",
-        "cover_image_url": d.get("cover_image_url"),
-        "ref_id": ref_id,
-    }
-
-
 async def _keyword_hits(db, user_id: str, q: str, *,
-                        match_source: bool) -> tuple[list[dict], list[dict]]:
-    """One pass over the user's newest notes collecting cheap exact-intent matches Firestore
-    can't do server-side (no substring index):
-      - source hits: notes saved from a named brand ("pinterest" → pin.it links), brand-aware
-        via source_alias so short-link domains count. Only when `match_source` (the query looks
-        like a brand name — see the caller's gating).
-      - title hits: notes whose title contains the query as a substring.
-    Returns (source_hits, title_hits), each capped at SEARCH_LIMIT, in one Firestore read."""
+                        match_source: bool = False) -> tuple[list[dict], list[dict]]:
+    """(source_hits, text_hits): brand-aware source_domain matches (when `match_source`), then
+    title substring hits followed by summary substring hits, over the user's newest notes."""
     query = (
-        db.collection("notes").where("user_id", "==", user_id)
-        .order_by("created_at", direction="DESCENDING").limit(300)
+        db.collection("notes").where("user_id", "==", user_id).select(KEYWORD_FIELDS)
+        .order_by("created_at", direction="DESCENDING").limit(KEYWORD_SCAN_LIMIT)
     )
     ql = q.lower()
     source_hits: list[dict] = []
     title_hits: list[dict] = []
+    summary_hits: list[dict] = []
     async for doc in query.stream():
         d = doc.to_dict() or {}
-        if match_source and len(source_hits) < settings.SEARCH_LIMIT and \
-                source_matches(d.get("source_domain", ""), q):
+        if match_source and source_matches(d.get("source_domain", ""), q):
             source_hits.append(_project(doc.id, d))
-        if len(title_hits) < settings.SEARCH_LIMIT and ql in d.get("title", "").lower():
+        if ql in (d.get("title") or "").lower():
             title_hits.append(_project(doc.id, d))
-    return source_hits, title_hits
+        elif ql in (d.get("ai_summary") or "").lower():
+            summary_hits.append(_project(doc.id, d))
+    return source_hits, [*title_hits, *summary_hits]
 
 
 async def _enforce_search_caps(db, user_id: str) -> None:
-    """Transactional per-user daily counter on search_count. Each search embeds the query —
-    a paid Vertex call (tiny, but real and previously unbounded) — so it gets the same
-    counter treatment as every other paid path. Raises 429 at the limit."""
+    """Transactional per-user daily counter on search_count (each search embeds the query — a
+    paid call). Raises 429 at the limit."""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     transaction = db.transaction()
 
@@ -107,59 +84,42 @@ async def _enforce_search_caps(db, user_id: str) -> None:
 
 @router.get("/search")
 async def search(
-    q: str = Query(..., min_length=1, max_length=200),
+    q: str = Query(..., max_length=200),
     user_id: str = Depends(require_user),
 ):
     q = q.strip()
-    if not q:
-        return {"results": []}
+    if len(q) < MIN_QUERY_LEN:
+        raise HTTPException(400, f"Query must be at least {MIN_QUERY_LEN} characters.")
 
     db = get_db()
     await _enforce_search_caps(db, user_id)
-    # Meter the query embedding so search spend shows up in the admin dashboard.
-    meter = start_metering()
-    try:
-        # Cheap exact-intent matches vector search alone misses: a one-word query is often a
-        # source name ("pinterest" — a recipe note isn't semantically "pinterest"), and a short
-        # query is often a literal title fragment. One Firestore pass collects both, surfaced
-        # ahead of the semantic results.
-        source_hits: list[dict] = []
-        title_hits: list[dict] = []
-        if len(q) <= 40:
-            try:
-                match_source = " " not in q and len(q) <= 20
-                source_hits, title_hits = await _keyword_hits(
-                    db, user_id, q, match_source=match_source)
-            except Exception as e:
-                log.warning("keyword lookup failed: %s: %s", type(e).__name__, e,
-                            extra={"user_id": user_id})
 
-        vector_hits: list[dict] = []
-        try:
-            query_vec = await embedding_service.embed_query(q)
-        except Exception as e:
-            log.error("query embedding failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
-            query_vec = None
+    source_hits: list[dict] = []
+    text_hits: list[dict] = []
+    try:
+        source_hits, text_hits = await _keyword_hits(
+            db, user_id, q, match_source=" " not in q and len(q) <= 20)
+    except Exception as e:
+        log.warning("keyword lookup failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
+
+    vector_hits: list[dict] = []
+    try:
+        query_vec = await embedding_service.embed_query(q)
         if query_vec:
-            vector_query = db.collection(search_index.COLLECTION).where(
-                "user_id", "==", user_id).find_nearest(
+            vector_query = db.collection("notes").where("user_id", "==", user_id).find_nearest(
                 vector_field="embedding",
                 query_vector=Vector(query_vec),
                 distance_measure=DistanceMeasure.COSINE,
-                # Over-fetch: keyword hits above may dedup away several KNN results, so pull a few
-                # extra to still fill SEARCH_LIMIT after the merge.
-                limit=settings.SEARCH_LIMIT + 10,
+                limit=settings.SEARCH_LIMIT + 10,  # over-fetch: keyword hits dedupe some away
             )
-            vector_hits = [_project_index(doc.to_dict() or {}) async for doc in vector_query.stream()]
+            vector_hits = [_project(doc.id, doc.to_dict() or {}) async for doc in vector_query.stream()]
+    except Exception as e:
+        log.error("semantic search failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
 
-        # Source matches first (exact intent), then title substrings, then semantic — deduped by
-        # underlying doc id and capped.
-        seen, results = set(), []
-        for d in (*source_hits, *title_hits, *vector_hits):
-            if d["id"] in seen:
-                continue
+    seen: set[str] = set()
+    results: list[dict] = []
+    for d in (*source_hits, *text_hits, *vector_hits):
+        if d["id"] not in seen:
             seen.add(d["id"])
             results.append(d)
-        return {"results": results[: settings.SEARCH_LIMIT]}
-    finally:
-        await flush_usage(user_id, meter)
+    return {"results": results[: settings.SEARCH_LIMIT]}

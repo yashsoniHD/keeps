@@ -8,15 +8,18 @@ A saved video becomes something you can use. The first successful experience is 
 
 ## Chosen structure
 
-Three persistent destinations: **Library · Search · Ask**. **Save** is an action above the tab bar, not a destination. Library contains Notes and Collections. Search finds existing notes; Ask explains, compares, or composes from them. Both accept natural language, but the UI makes their outcomes explicit.
+Three persistent destinations: **Notes · Collections · Ask**. Notes opens **Your library**, with a **Search** button beside its title. **Save** is an action above the tab bar. Search opens a dedicated screen from the header and finds existing notes. Ask explains, compares, or composes from them. Both accept natural language, but the UI makes their outcomes explicit.
 
 ```
-Library                 Search                   Ask
-Your library      Find a saved idea         Ask your library
-Notes | Collections     [Remember anything…]     [All notes v]
-All Recipes Places      Type / source / date     Suggested questions
-Continue reading        Matched note cards       Answer + source notes
-Recently saved + Save   Ask about these results  Save answer as a note
+Notes                     Collections              Ask
+Your library   [Search]   Your collections         Ask your library
+All Recipes Places       Collection list          [All notes v]
+Continue reading          Create collection        Suggested questions
+Recently saved + Save     Open / search / ask      Answer + source notes
+                                                   Save answer as a note
+
+Search opens from Your library:
+[Remember anything…] → filters → matched notes → Ask about these results
 ```
 
 The Save action opens a sheet: URL → save acknowledgement → background processing → a new note. Filing is optional. The source link survives extraction failure.
@@ -32,6 +35,6 @@ The Save action opens a sheet: URL → save acknowledgement → background proce
 
 ## Review against the brief
 
-A dashboard with statistics and five content-specific apps was rejected: it makes saving require classification and fragments retrieval. A chat-only home was rejected: it hides the user's saved objects. A masonry grid was rejected as the default on phones: summaries become hard to compare and tap order less clear. Chosen: a readable list, one bounded continuation module, and explicit search/ask destinations.
+A dashboard with statistics and five content-specific apps was rejected: it makes saving require classification and fragments retrieval. A chat-only home was rejected: it hides the user's saved objects. A masonry grid was rejected as the default on phones: summaries become hard to compare and tap order less clear. Chosen: a readable notes list, one bounded continuation module, direct Collections and Ask tabs, and Search beside Your library.
 
 Apple conventions inform navigation and readability; this remains a web prototype, not a claim to reproduce native iOS components. New resurfacing and offline behavior are proposals requiring implementation. The research files and final specification will record evidence, tradeoffs, and platform limits.

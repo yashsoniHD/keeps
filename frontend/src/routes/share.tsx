@@ -76,19 +76,25 @@ function SharePage() {
 
     (async () => {
       try {
+        let dupNoteId: string | undefined;
+        const ingestLink = async (link: string) => {
+          const r = await ingest(link);
+          if (r.status === "completed") dupNoteId = r.note_id; // exact duplicate: no new job
+        };
         if (search.shared) {
           const meta = await loadShared(search.shared);
           const link = urlFrom(meta?.url, meta?.text, meta?.title);
-          if (link) await ingest(link);
+          if (link) await ingestLink(link);
           else if (meta?.text?.trim()) await ingestText(meta.text.trim(), meta.title || undefined);
         } else {
           // Legacy GET share (url/text/title in the query).
           const link = urlFrom(search.url, search.text, search.title);
-          if (link) await ingest(link);
+          if (link) await ingestLink(link);
           else if (search.text?.trim())
             await ingestText(search.text.trim(), search.title || undefined);
         }
-        navigate({ to: "/" }); // → the Notes feed, where the processing card gives feedback
+        if (dupNoteId) navigate({ to: "/notes/$noteId", params: { noteId: dupNoteId } });
+        else navigate({ to: "/" }); // → the Notes feed, where the processing card gives feedback
       } catch (e) {
         // A link share that couldn't reach the backend is parked in the replay queue; a
         // file/text share can't be replayed, so surface it and stay on this screen.

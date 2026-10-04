@@ -6,7 +6,7 @@ Decision record · 3 October 2026
 
 **A saved video becomes something you can use.** A successful first session ends with a useful note. A successful return ends with someone finding a recipe, revisiting a recommendation, or answering a question using what they saved.
 
-The proposed interface has three stable destinations: **Library, Search, Ask**. Save is an action. Library works before a user creates any collections. There is no obligation to empty an inbox, complete a reading backlog, or maintain a taxonomy. Returning should serve a person's intent, not a streak or an unread counter.
+The proposed interface has three stable bottom-bar destinations: **Notes, Collections, Ask**. A Search button beside **Your library** opens retrieval from Notes. Save is an action. Notes works before a user creates any collections. There is no obligation to empty an inbox, complete a reading backlog, or maintain a taxonomy. Returning should serve a person's intent, not a streak or an unread counter.
 
 This supports the [design direction](DIRECTION.md), interactive prototype and specification. Research used official sources; no existing Clipnote frontend was inspected. The sources document product capabilities and platform guidance. We measured no competitor efficacy, retention or usability. Publication or update dates do not prove that we tested a current native build; desktop-only and plan-dependent features must not be generalized to mobile.
 
@@ -27,7 +27,7 @@ These are selected design references, not a ranking of competitors. The “avoid
 
 ### 1. Search finds; Ask explains
 
-Both accept ordinary language, but produce different outcomes. “That miso pasta reel” should return recognizable notes immediately. “Which dinners take under 20 minutes?” may need an answer comparing them. Separate labeled destinations make the outcome predictable; **Ask about these results** bridges them without retyping or losing filters.
+Both accept ordinary language, but produce different outcomes. “That miso pasta reel” should return recognizable notes immediately. “Which dinners take under 20 minutes?” may need an answer comparing them. Search opens from the button beside **Your library**; Ask has its own labeled tab. These distinct entry points make the outcome predictable; **Ask about these results** bridges them without retyping or losing filters.
 
 Ask starts with a visible scope. “All notes” means where retrieval may look, not a claim that every note was read. Show relevant-note counts, exhaustive coverage or truncation accurately. A citation opens its note and returns to the same conversation. Unsupported facts get an explicit absence statement. Saving synthesis is deliberate and creates an editable note with its sources.
 
@@ -50,7 +50,7 @@ Recently saved notes and a bounded Continue reading section offer straightforwar
 ## Apple guidance translated into interface choices
 
 - **Agency and simplicity:** accept a link without mandatory filing; preserve personal edits and make correction easy. [Design principles](https://developer.apple.com/design/human-interface-guidelines/design-principles)
-- **Familiar navigation:** labeled tabs are stable destinations; Save is separate. Preserve each destination's state. [Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars)
+- **Familiar navigation:** Notes, Collections and Ask are labeled, stable tabs. Search sits beside Your library; Save remains an action. Preserve tab state and return from search to the previous note-list position. [Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars)
 - **Appropriate presentation:** brief capture/filter tasks use dismissible sheets; reading and sustained conversation get full screens. [Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets)
 - **Inspectable AI:** identify generated content, show sources and limitations, and allow editing. [Generative AI](https://developer.apple.com/design/human-interface-guidelines/generative-ai)
 - **Accessible reading:** choose large targets, scalable text, solid readable surfaces, meaningful labels and reduced motion. Native points and CSS pixels are different units; the web design target is at least 44 CSS px. [Accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility), [WCAG enhanced target size](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced)

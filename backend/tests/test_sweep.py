@@ -40,9 +40,9 @@ async def test_reclaim_stale(fake_db, dispatched):
 
     n = await process._reclaim_stale(fake_db)
 
-    assert n == 3
-    assert sorted(dispatched) == [("agent", "/api/process-agent"),
-                                  ("stale-pending", "/api/process"),
+    assert n == 2
+    assert fake_db.docs[("jobs", "agent")]["status"] == "failed"   # agent tasks were removed
+    assert sorted(dispatched) == [("stale-pending", "/api/process"),
                                   ("stale-proc", "/api/process")]
 
 

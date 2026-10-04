@@ -8,32 +8,24 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronRight, FolderInput, Loader2, Share2, Trash2 } from "lucide-react";
-import type { Collection, Note } from "@/lib/types";
-import { deleteNote, shareNote, updateNote } from "@/lib/api";
+import { Check, ChevronRight, FolderInput, Trash2 } from "lucide-react";
+import type { Note } from "@/lib/types";
+import { deleteNote, updateNote } from "@/lib/api";
 import { noteIcon, noteLabel } from "@/lib/note-meta";
 
-// Per-card menu context: the user's category slugs (for "Recategorise") plus their
-// collections + uid (for "Add to collection"), provided once by the feed/Library so every
-// card's menu has them without prop-drilling. Safe defaults make the menu work outside a
-// provider (just no recategorise/collection targets).
-type MenuCtx = { categories: string[]; collections: Collection[]; uid: string | null };
-const MenuContext = createContext<MenuCtx>({ categories: [], collections: [], uid: null });
+// Per-card menu context: the user's category slugs (for "Recategorise"), provided once by the
+// feed so every card's menu has them without prop-drilling. Safe default: no targets.
+type MenuCtx = { categories: string[] };
+const MenuContext = createContext<MenuCtx>({ categories: [] });
 
 export function NoteMenuProvider({
   categories,
-  collections = [],
-  uid = null,
   children,
 }: {
   categories: string[];
-  collections?: Collection[];
-  uid?: string | null;
   children: ReactNode;
 }) {
-  return (
-    <MenuContext.Provider value={{ categories, collections, uid }}>{children}</MenuContext.Provider>
-  );
+  return <MenuContext.Provider value={{ categories }}>{children}</MenuContext.Provider>;
 }
 
 // Wraps a feed card and opens a context menu on right-click (desktop) or long-press (touch).
@@ -110,7 +102,7 @@ function MenuItem({
   danger,
   trailing,
 }: {
-  icon: typeof Share2;
+  icon: typeof Trash2;
   label: string;
   onClick: () => void;
   danger?: boolean;
@@ -144,8 +136,6 @@ function NoteMenu({
 }) {
   const [view, setView] = useState<"main" | "recat">("main");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState(pos);
 
@@ -184,32 +174,6 @@ function NoteMenu({
       await updateNote(note.id, { content_type: slug }); // feed onSnapshot reflects the change
     } catch {
       /* leave it; the user can retry */
-    }
-  };
-
-  const share = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      if (note.is_public !== true) await shareNote(note.id);
-      const url = `${window.location.origin}/p/${note.id}`;
-      const data = { title: note.title, text: note.title, url };
-      if (navigator.share && navigator.canShare?.(data)) {
-        try {
-          await navigator.share(data);
-        } catch {
-          /* user dismissed the sheet — not an error */
-        }
-        onClose();
-        return;
-      }
-      await navigator.clipboard.writeText(url).catch(() => {});
-      setStatus("Link copied");
-      setTimeout(onClose, 1200);
-    } catch {
-      onClose();
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -253,7 +217,6 @@ function NoteMenu({
                 trailing={<ChevronRight className="h-4 w-4 shrink-0 text-ink-soft" />}
               />
             )}
-            <MenuItem icon={busy ? Loader2 : Share2} label={status ?? "Share"} onClick={share} />
             <MenuItem
               icon={Trash2}
               label={confirmDelete ? "Tap again to delete" : "Delete"}

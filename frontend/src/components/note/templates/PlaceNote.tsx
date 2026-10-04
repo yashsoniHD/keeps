@@ -1,6 +1,5 @@
 import {
   MapPin,
-  Map as MapIcon,
   Star,
   Clock,
   Wallet,
@@ -13,9 +12,7 @@ import type { Note, PlaceAction } from "@/lib/types";
 import { noteAccent } from "@/lib/note-meta";
 import { FOCUS_RING } from "@/lib/ui";
 import { ActionRow } from "@/components/shared/ActionRow";
-import { VenuesMap } from "../VenuesMap";
 import { SmartImage } from "../SmartImage";
-import { SectionHeader } from "../SectionHeader";
 import { FactsBlock } from "../FactsBlock";
 import { DataTable } from "../DataTable";
 
@@ -332,10 +329,6 @@ export function PlaceNote({ note }: { note: Note }) {
     return [cat, ratingText].filter(Boolean).join(" · ");
   };
 
-  const geocoded = venues.filter(
-    (v) => typeof v.lat === "number" && typeof v.lng === "number",
-  ).length;
-
   return (
     <div className="space-y-10">
       {data.listTheme && multi && (
@@ -381,17 +374,6 @@ export function PlaceNote({ note }: { note: Note }) {
           <VenueBlock v={v} accent={accent} showName={multi} index={i} />
         </div>
       ))}
-
-      {/* Map below the list so its numbered pins reference venues already read; hidden unless
-          at least two venues geocoded (a single venue leans on its Directions action instead). */}
-      {geocoded >= 2 && (
-        <section className="space-y-4">
-          <SectionHeader icon={MapIcon} iconClassName={accent.text}>
-            On the map
-          </SectionHeader>
-          <VenuesMap venues={venues} heightClass="h-64 md:h-72" />
-        </section>
-      )}
     </div>
   );
 }

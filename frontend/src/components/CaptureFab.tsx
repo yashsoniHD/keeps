@@ -5,11 +5,9 @@ import { useAuth } from "@/contexts/auth-context";
 import { useCapture } from "@/components/CaptureProvider";
 import { FOCUS_RING, PRESS } from "@/lib/ui";
 
-// The app's single primary-action FAB: capture a new note. Replaces the old bottom tab bar
-// (Home · Collections · + · Ask · Settings) — capture was the only action there that earns a
-// persistent control; Ask now rides with search and Settings lives in the feed header.
-// Home-only: every other surface (note detail, settings, search, digest, library) is a
-// focused context where a floating + is noise.
+// The app's single primary-action FAB: capture a new note. Settings lives in the feed header.
+// Home-only: every other surface (note detail, settings, search) is a focused context where a
+// floating + is noise.
 
 // Only react once a scroll gesture accumulates past this many px, so momentum wobble and
 // sub-pixel jitter don't flip the button back and forth mid-scroll.

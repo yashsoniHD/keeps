@@ -37,7 +37,7 @@ def test_input_builders_match_actor_schemas():
     assert reg["instagram_reel"].build_input("u") == {"username": ["u"], "resultsLimit": 1}
     assert reg["instagram_post"].build_input("u")["username"] == ["u"]
     tk = reg["tiktok"].build_input("u")
-    assert tk["postURLs"] == ["u"] and tk["shouldDownloadVideos"] is True
+    assert tk["postURLs"] == ["u"] and tk["shouldDownloadVideos"] is False
 
 
 def test_normalize_instagram_reel_item():
@@ -88,10 +88,10 @@ def test_normalize_carousel_from_child_posts():
 
 
 def test_carousel_images_capped():
-    # 12 covers an intro slide + a 10-venue listicle (10 dropped the last venue).
-    assert apify.MAX_CAROUSEL_IMAGES == 12
+    # The vision model gets at most 6 slides.
+    assert apify.MAX_CAROUSEL_IMAGES == 6
     item = {"images": [f"https://cdn/{i}.jpg" for i in range(25)]}
-    assert len(apify._carousel_images(item)) == 12
+    assert len(apify._carousel_images(item)) == 6
 
 
 def test_normalize_tiktok_item():
@@ -113,6 +113,7 @@ def test_normalize_tiktok_videometa_shape():
     item = {
         "text": "tutorial",
         "authorMeta": {"name": "chef"},
+        "webVideoUrl": "https://www.tiktok.com/@chef/video/1",  # page URL — must be ignored
         "videoMeta": {"downloadAddr": "https://v.tiktokcdn.com/dl.mp4",
                       "coverUrl": "https://p.tiktokcdn.com/cover.jpg", "duration": 42},
     }

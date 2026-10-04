@@ -1,6 +1,10 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
@@ -17,7 +21,12 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// IndexedDB-backed cache: the feed and note views render from disk instantly (and offline),
+// then onSnapshot revalidates. Multi-tab manager so a second tab doesn't fail to get the lease.
+// Browsers without IndexedDB (some private modes) fall back to memory inside the SDK.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 
 // Analytics is optional — requires VITE_FIREBASE_MEASUREMENT_ID and browser support.
 // Get the measurement ID from Firebase Console → Project Settings → Your apps → Web app.

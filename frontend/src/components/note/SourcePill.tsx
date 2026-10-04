@@ -13,6 +13,7 @@ export function SourcePill({ domain, url }: { domain: string; url: string }) {
       className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-ink-soft transition-colors hover:text-ink hover:bg-accent"
     >
       <img
+        loading="lazy"
         src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
         onError={(e) => {
           e.currentTarget.style.visibility = "hidden";

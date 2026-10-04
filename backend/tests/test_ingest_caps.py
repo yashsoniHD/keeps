@@ -159,3 +159,25 @@ async def test_empty_sa_email_runs_inline(fake_db, patch_ingest, monkeypatch):
     assert patch_ingest == []          # nothing dispatched
     await asyncio.sleep(0)             # let the scheduled inline task run
     assert ran == [res.job_id]
+
+
+# --- exact-duplicate capture -------------------------------------------------
+
+async def test_duplicate_url_returns_existing_note_without_a_new_job(fake_db, patch_ingest):
+    fake_db.seed("notes", "n-1", {"user_id": "u", "source_url": "https://example.com/x"})
+    res = await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/x?utm_source=a"}'),
+                                  user_id="u")
+    assert res.status == "completed" and res.note_id == "n-1"
+    job = fake_db.docs[("jobs", res.job_id)]
+    assert job["status"] == "completed" and job["note_id"] == "n-1"   # job watcher resolves
+    assert job["destination"] == {"kind": "note", "note_id": "n-1"}
+    assert patch_ingest == []                                         # nothing dispatched
+    assert ("usage", f"u-{TODAY}") not in fake_db.docs                # no cap charged
+
+
+async def test_other_users_note_or_bookmark_is_not_a_duplicate(fake_db, patch_ingest):
+    fake_db.seed("notes", "n-1", {"user_id": "someone-else", "source_url": "https://example.com/x"})
+    fake_db.seed("notes", "n-2", {"user_id": "u", "source_url": "https://example.com/x",
+                                  "is_fallback": True})
+    res = await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u")
+    assert res.status == "pending" and patch_ingest == [res.job_id]

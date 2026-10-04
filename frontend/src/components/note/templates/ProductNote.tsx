@@ -32,6 +32,7 @@ export function ProductNote({ note }: { note: Note }) {
         {note.cover_image_url && (
           <div className="rounded-3xl border border-border bg-card p-6">
             <img
+              loading="lazy"
               src={note.cover_image_url}
               alt={note.title}
               className="max-h-80 w-full object-contain md:max-h-[26rem]"

@@ -1,16 +1,11 @@
-import { Link } from "@tanstack/react-router";
-import { RotateCcw, ArrowRight, BookmarkPlus, Loader2, X } from "lucide-react";
+import { RotateCcw, X } from "lucide-react";
 import type { Note } from "@/lib/types";
-import { PillButton, PillLink } from "@/components/shared/PillButton";
-import { ClipMark } from "@/components/ClipMark";
+import { PillButton } from "@/components/shared/PillButton";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoteActions, NoteMeta } from "./note/NoteHeader";
 import { SmartImage } from "./note/SmartImage";
 import { useImageAspect } from "./note/useImageAspect";
-import { TypeBadge } from "./note/TypeBadge";
-import { SourcePill } from "./note/SourcePill";
-import { formatDate, noteAccent, noteIcon } from "@/lib/note-meta";
-import { ThoughtsBlock } from "./note/ThoughtsBlock";
+import { noteAccent, noteIcon } from "@/lib/note-meta";
 import { RecipeNote } from "./note/templates/RecipeNote";
 import { ItineraryNote } from "./note/templates/ItineraryNote";
 import { ProductNote } from "./note/templates/ProductNote";
@@ -163,96 +158,6 @@ function ReextractErrorBanner({ message, onDismiss }: { message: string; onDismi
   );
 }
 
-// Top row of the public /p/{id} view: the branded wordmark (routes to sign-up). No owner
-// controls and no back-link into the private feed. Mirrors NoteActions' placement so the
-// hero layout below is shared between the owner and public variants.
-function PublicActions() {
-  return (
-    <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-ink">
-      <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-ink text-paper">
-        <ClipMark className="h-3.5 w-3.5" />
-      </span>
-      Clipnote
-    </Link>
-  );
-}
-
-// Pill row + plain (non-editable) title for the public view — the meta block the shared hero
-// layout places either stacked or in a portrait cover's right column.
-function PublicMeta({ note }: { note: Note }) {
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <TypeBadge type={note.content_type} size="md" />
-        <SourcePill domain={note.source_domain} url={note.source_url} />
-        <span className="text-xs text-ink-soft">{formatDate(note.created_at)}</span>
-      </div>
-      <h1 className="font-serif text-3xl leading-[1.05] text-ink md:text-5xl">{note.title}</h1>
-    </div>
-  );
-}
-
-// Public-view save controls. Receiver of a shared link can save the note to their own
-// Clipnote; the parent route decides what `onSave` does (save it if signed in, else send
-// them to sign-up and auto-save on return). Falls back to a plain sign-up nudge when no
-// save handler is wired.
-interface PublicSaveProps {
-  onSave?: () => void;
-  saving?: boolean;
-  isAuthed?: boolean;
-}
-
-// Sticky bar at the top of the public note so "save this" is visible before any scroll.
-function PublicSaveBar({ onSave, saving, isAuthed }: PublicSaveProps) {
-  if (!onSave) return null;
-  return (
-    <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
-      <p className="text-sm text-ink-soft">Save this note to your Clipnote.</p>
-      <PillButton type="button" onClick={onSave} disabled={saving} className="shrink-0">
-        {saving ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <BookmarkPlus className="h-4 w-4" />
-        )}
-        {saving ? "Saving…" : isAuthed ? "Save" : "Save to Clipnote"}
-      </PillButton>
-    </div>
-  );
-}
-
-// Bottom-of-note conversion prompt shown only on the public view.
-function PublicSignupCTA({ onSave, saving, isAuthed }: PublicSaveProps) {
-  return (
-    <div className="mt-12 flex flex-col items-start gap-3 rounded-3xl border border-border bg-card p-6 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p className="font-serif text-xl text-ink">
-          {isAuthed ? "Keep this note" : "Saved with Clipnote"}
-        </p>
-        <p className="mt-1 text-sm text-ink-soft">
-          {isAuthed
-            ? "Add this note to your own Clipnote so you can come back to it any time."
-            : "Turn any link (recipe, video, product, article) into a structured note you'll actually re-read."}
-        </p>
-      </div>
-      {onSave ? (
-        <PillButton type="button" onClick={onSave} disabled={saving} className="shrink-0">
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <BookmarkPlus className="h-4 w-4" />
-          )}
-          {saving ? "Saving…" : isAuthed ? "Save to my notes" : "Sign up to save"}
-        </PillButton>
-      ) : (
-        <PillLink to="/" className="shrink-0">
-          Sign up free
-          <ArrowRight className="h-4 w-4" />
-        </PillLink>
-      )}
-    </div>
-  );
-}
-
 // Gradient + faded type-icon stand-in so the detail view never reads as empty — the same
 // accent system the feed cards use (note-meta), scaled up. Used when there's no cover, a
 // broken one, or while measuring; also the safety net when an AI cover is capped/disabled.
@@ -277,10 +182,6 @@ export function NoteContent({
   reextracting,
   reextractError,
   onDismissReextractError,
-  variant = "owner",
-  onSave,
-  saving,
-  isAuthed,
 }: {
   note: Note;
   onDelete?: () => void;
@@ -289,12 +190,7 @@ export function NoteContent({
   reextracting?: boolean; // true from click until the job completes or fails
   reextractError?: string | null; // set when the job failed or the request itself errored
   onDismissReextractError?: () => void;
-  variant?: "owner" | "public";
-  onSave?: () => void; // public view: save this shared note to the viewer's account
-  saving?: boolean;
-  isAuthed?: boolean;
 }) {
-  const isPublic = variant === "public";
   // ProductNote lays out its own image beside the buy panel — it skips the shared hero.
   // Key off the structural template (not the editable category) so a recategorised
   // product doesn't render both its own image and the shared hero.
@@ -308,9 +204,7 @@ export function NoteContent({
   const portrait = hasCover && ratio < 1.3;
   const loadingCover = showHero && !!url && status === "loading";
 
-  const actions = isPublic ? (
-    <PublicActions />
-  ) : (
+  const actions = (
     <NoteActions
       note={note}
       onDelete={onDelete}
@@ -318,29 +212,19 @@ export function NoteContent({
       reextracting={reextracting}
     />
   );
-  const meta = isPublic ? (
-    <PublicMeta note={note} />
-  ) : (
-    <NoteMeta note={note} onPatch={onPatch} />
-  );
+  const meta = <NoteMeta note={note} onPatch={onPatch} />;
 
   return (
     <article className="mx-auto max-w-4xl px-5 py-8 md:px-8 md:py-14">
       {actions}
-      {isPublic && (
-        <div className="mt-6">
-          <PublicSaveBar onSave={onSave} saving={saving} isAuthed={isAuthed} />
-        </div>
-      )}
       {/* Re-extract failed (dead source) or the request itself errored — the note was left
-          untouched either way. Hidden on the public view (no owner controls there). */}
-      {reextractError && !isPublic && onDismissReextractError && (
+          untouched either way. */}
+      {reextractError && onDismissReextractError && (
         <div className="mt-6">
           <ReextractErrorBanner message={reextractError} onDismiss={onDismissReextractError} />
         </div>
       )}
-      {/* Salvage retry re-extracts via an authed call — hide it on the public view. */}
-      {note.is_fallback && !isPublic && (
+      {note.is_fallback && (
         <div className="mt-6">
           <FallbackBanner note={note} onRetry={onReextract} retrying={reextracting} />
         </div>
@@ -368,7 +252,7 @@ export function NoteContent({
           <div className="mt-6">{meta}</div>
           {banner ? (
             <div className="mt-8 overflow-hidden rounded-3xl border border-border">
-              <img src={url} alt="" className="h-56 w-full object-cover md:h-72" />
+              <img src={url} alt="" loading="lazy" className="h-56 w-full object-cover md:h-72" />
             </div>
           ) : loadingCover ? (
             // Hold neutral space while measuring so a real cover doesn't flash the fallback icon.
@@ -380,15 +264,8 @@ export function NoteContent({
       )}
 
       <div className="mt-8">
-        {/* onPatch is owner-only (undefined on the public view), so the editable body block
-            inside GenericNote stays read-only for shared notes. */}
-        <SafeNoteBody note={note} onPatch={isPublic ? undefined : onPatch} />
+        <SafeNoteBody note={note} onPatch={onPatch} />
       </div>
-      {/* Private annotation — owner view only, at the very bottom of the note. */}
-      {!isPublic && (
-        <ThoughtsBlock noteId={note.id} value={note.user_note ?? ""} onPatch={onPatch} />
-      )}
-      {isPublic && <PublicSignupCTA onSave={onSave} saving={saving} isAuthed={isAuthed} />}
     </article>
   );
 }
