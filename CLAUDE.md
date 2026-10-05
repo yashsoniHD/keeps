@@ -18,7 +18,7 @@ Open item: a paywall before public launch (the weekly digest is dropped). Retent
 | Firebase Project | `weekly-updates-automation` |
 | Backend host | Vercel Hobby container (Vercel project `keeps-api`; root `backend`, `Dockerfile.vercel`). Production URL `https://keeps-api-yashsoni102-progs-projects.vercel.app`. Deploy notes: `infra/vercel.md` |
 | Job dispatch | Synchronous self-POST to `/api/process/{id}` (`X-Worker-Secret`) + in-process retry + daily cron sweep (`GET /api/process/sweep`) |
-| Firebase Hosting URL | https://keeps.web.app (site `keeps`). The old `clipnote` site (clipnote.web.app) only forwards to it (`infra/old-domain-forward/`); Hosting site IDs cannot be renamed |
+| Firebase Hosting URL | https://keeps.web.app (site `keeps`; the old `clipnote` site was deleted) |
 | Legacy Cloud Run URL (old name) | https://clip-note-api-674775099277.us-central1.run.app (rollback only; torn down after soak) |
 | Service account | `clip-note-vercel` (legacy name, cannot be renamed; `roles/datastore.user`), key supplied as `GOOGLE_SERVICE_ACCOUNT_JSON` (written to `/tmp/sa.json`, exported as `GOOGLE_APPLICATION_CREDENTIALS`) |
 | AI provider | OpenRouter (`OPENROUTER_API_KEY`) |
@@ -31,7 +31,7 @@ Open item: a paywall before public launch (the weekly digest is dropped). Retent
 
 ## Tech Stack
 
-Frontend: Vite SPA (React 19, TanStack Router, the "Keeps" design in plain CSS with system fonts; Tailwind 4 kept only for category-palette utilities), Firebase Hosting. Renamed from "Clip Note" to Keeps everywhere; only external identifiers keep the old name (GCP project, service account `clip-note-vercel`, Firebase Hosting site `clipnote` serving the old-domain forwarder). `src/lib/storage-migrate.ts` copies old `clipnote-*`/`clipnote.*` localStorage keys to `keeps-*`/`keeps.*` at startup. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
+Frontend: Vite SPA (React 19, TanStack Router, the "Keeps" design in plain CSS with system fonts; Tailwind 4 kept only for category-palette utilities), Firebase Hosting. Renamed from "Clip Note" to Keeps everywhere; only external identifiers keep the old name (GCP project, service account `clip-note-vercel`). `src/lib/storage-migrate.ts` copies old `clipnote-*`/`clipnote.*` localStorage keys to `keeps-*`/`keeps.*` at startup. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
 
 ---
 
@@ -137,7 +137,7 @@ cd backend && pip install -r requirements.txt && uvicorn main:app --reload --por
 cd backend && .venv/bin/python -m pytest -q          # tests
 vercel deploy --prod --yes                           # backend, from the REPO ROOT (root dir setting = backend; env vars: infra/vercel.md)
 cd frontend && node src/keeps/toView.check.ts          # toView adapter checks
-cd frontend && npm run build && firebase deploy --only hosting:keeps   # app; hosting:clipnote = old-domain forwarder
+cd frontend && npm run build && firebase deploy --only hosting
 firebase deploy --only firestore                     # rules + indexes
 cd backend && python -m scripts.reindex_embeddings --apply   # after changing EMBED_MODEL/EMBED_TEXT_VERSION
 curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/process/sweep   # manual sweep
