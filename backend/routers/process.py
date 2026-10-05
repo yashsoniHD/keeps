@@ -286,6 +286,19 @@ async def _extract_from_video(bundle: ContentBundle, video: bytes, mime: str,
         list(bundle.metadata.get("comments") or []), content_type, categories=categories)
 
 
+def _drop_unsourced_urls(data: dict, bundle: ContentBundle) -> None:
+    """Resource links the model invented (a "comment X for the links" reel gets plausible
+    YouTube IDs) are removed: an item keeps `url` only when it appears in the source text.
+    ponytail: a URL shown only on screen is lost too; a dead link is worse than no link."""
+    src = " ".join([bundle.text or "", str(bundle.metadata.get("caption") or ""),
+                    *map(str, bundle.metadata.get("comments") or [])])
+    for it in data.get("items") or []:
+        u = it.get("url") if isinstance(it, dict) else None
+        if u is not None and (not isinstance(u, str)
+                              or u.split("://")[-1].rstrip("/") not in src):
+            it.pop("url")
+
+
 async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
                    note_hint: str | None, categories: list[str] | None = None
                    ) -> tuple[NoteExtraction, ContentBundle]:
@@ -588,6 +601,8 @@ async def _process_job(job_id: str) -> dict:
             elif (extracted.content_type != content_type
                     and match_existing(extracted.content_type, existing) not in existing):
                 extracted.content_type = content_type
+
+            _drop_unsourced_urls(extracted.data, bundle)
 
             # No video reached the model (caption/cover only): flag it so the UI can say so.
             if bundle.metadata.get("thin") or bundle.metadata.get("too_long"):

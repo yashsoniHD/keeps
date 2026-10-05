@@ -65,10 +65,11 @@ def firestore_safe(value):
     rows: [[cell, cell], …]. The model's output shape stays natural; inner
     arrays get wrapped as {"cells": [...]} at the write boundary, and the
     GenericNote template renders both shapes. Applies recursively so any
-    AI-invented nesting can't kill the note write.
+    AI-invented nesting can't kill the note write. Null fields are dropped: an
+    absent field and a null one render the same, and nulls are model filler.
     """
     if isinstance(value, dict):
-        return {str(k): firestore_safe(v) for k, v in value.items()}
+        return {str(k): firestore_safe(v) for k, v in value.items() if v is not None}
     if isinstance(value, (list, tuple)):
         return [
             {"cells": firestore_safe(list(v))} if isinstance(v, (list, tuple)) else firestore_safe(v)

@@ -29,3 +29,8 @@ def test_non_string_dict_keys_coerced():
 def test_scalars_pass_through():
     for v in ("s", 3, 2.5, True, None):
         assert firestore_safe(v) == v
+
+
+def test_null_fields_dropped():
+    data = {"rating": None, "items": [{"name": "x", "url": None}], "tips": None}
+    assert firestore_safe(data) == {"items": [{"name": "x"}]}

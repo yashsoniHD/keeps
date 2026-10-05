@@ -100,7 +100,7 @@ acq_cache/{key}      scrape metadata by canonical URL, 6 h (backend-only)
 
 `users/{uid}.categories` is the source of truth for a user's note types (ArrayUnion on each new slug). Notes store structured `data` only. Legacy collections for removed features (conversations, place_items, watch_items, recipe/trip/wish items, collections, annotations, search_index, places_cache) are left in Firestore until the owner deletes them; rules deny all client access.
 
-Note templates (`frontend/src/keeps/templates/`, picked by `NoteBody`, which falls back to GenericNote via an error boundary): `recipe`, `itinerary` (plain list), `product`, `summary`, `workout`, `entertainment` (`titles[]` + TMDB fields; resolved by data shape), `place` (plain `venues[]` list), `book`, `*` -> GenericNote. Watch/entertainment shows the mandatory JustWatch credit. Legacy `template:"composed"` notes render via GenericNote.
+Note templates (`frontend/src/keeps/templates/`, picked by `NoteBody`, which falls back to GenericNote via an error boundary): `recipe`, `itinerary` (plain list), `product`, `summary`, `workout`, `entertainment` (`titles[]` + TMDB fields; resolved by data shape), `place` (plain `venues[]` list), `book`, `resources` (`items[]` of videos/tools/repos; toView mapper, rendered by GenericNote; item `url` kept only if it appears in the source text), `*` -> GenericNote. Watch/entertainment shows the mandatory JustWatch credit. Legacy `template:"composed"` notes render via GenericNote.
 
 ---
 

@@ -148,6 +148,9 @@ Rules, in priority order:
      roundup of several spots ("5 best cafes in Bandra") are both "place" — the schema
      lists each venue. A reel recommending spots is "place", NOT "itinerary".
    - "book" — a book recommendation/review.
+   - "resources" — a roundup of things to check out: videos, tools, repos, apps, courses,
+     plugins, newsletters ("3 videos you must watch", "11 new Claude plugins", "this free
+     GitHub tool"). Software/free tools are "resources", NOT "product".
    - "summary" — see rule 4.
 3. Places vs trip: one venue OR a list of independent venues = "place"; only a route or
    day-by-day plan that sequences several stops into a journey = "itinerary". Never use a
@@ -182,7 +185,7 @@ open the source again — your note must be MORE useful than the source.
 Output is STRUCTURED JSON ONLY — no HTML, no markdown, no styling. Shape:
 {
   "content_type": "<echo the slug you were given — do not change it>",
-  "title": "concise, specific note title in SENTENCE CASE (capitalize only the first word and proper nouns/brand names/acronyms, e.g. 'Easy weeknight paneer butter masala', 'A weekend in Lisbon', 'Sony WH-1000XM5 review')",
+  "title": "SHORT title, 2-6 words, max ~40 characters, SENTENCE CASE (capitalize only the first word and proper nouns/brand names/acronyms), a label not a sentence, e.g. 'Paneer butter masala', '3 days in Meghalaya', 'Sony WH-1000XM5 review', 'Themed restaurants in Bengaluru'",
   "ai_summary": "ONE concise, specific sentence (~15-25 words) capturing the single most useful takeaway from THIS content (mention an actual detail)",
   "data": { ...per the schema below... }
 }
@@ -190,8 +193,17 @@ Output is STRUCTURED JSON ONLY — no HTML, no markdown, no styling. Shape:
 Extraction rules:
 - Extract CONCRETE values: real quantities, timings, prices, set/rep counts, place names.
 - If the content shows something visually but never says it aloud, extract what is SHOWN.
-- Strip sponsorships, intros, calls-to-action, filler.
-- Never leave a schema field empty if the information exists anywhere in the source.
+- Strip sponsorships, intros, filler and calls-to-action. NEVER output "comment X",
+  "link in bio", "check the pinned comment", "follow for more", "DM me" or similar in ANY
+  field — they are not action items.
+- Fill every schema field the source supports. If the source does not support a field,
+  OMIT it — never write placeholder text ("Unspecified", "not mentioned", "implies ...",
+  "possibly ...") and never write null.
+- Each field must add something the others don't. Do not restate the title, ai_summary or
+  another field in different words.
+- Do not transcribe. Never copy the speech sentence by sentence; distil it.
+- Spell proper nouns (people, places, venues, products) as they are correctly known; if
+  on-screen text shows a name, prefer its spelling over what you heard.
 - NEVER FABRICATE. If the source does not state a value, omit the field — do not estimate,
   average, or invent plausible-sounding numbers/items to fill the schema. A sparse but
   truthful note beats a complete-looking invented one.
@@ -216,13 +228,14 @@ Every ingredient must carry its quantity. Group ingredients when the source does
 
 `data` schema for itinerary:
 {
-  "destination": str, "duration": "e.g. 5 days", "budget"?: "with currency",
+  "destination": str, "duration"?: "e.g. 5 days — only if the source states a length", "budget"?: "with currency",
   "bestSeason"?: str,
   "days": [{"day": 1, "title": "e.g. Old Town & Food Walk",
             "stops": [{"time"?: "09:00", "place": str, "note": "why go / what to do / cost"}]}],
   "tips"?: ["transport, booking, local etiquette", ...]
 }
-If the source is not day-structured, organize the places into sensible days yourself.""",
+Only use multiple days when the source gives a day-by-day plan. Otherwise put every stop in
+ONE entry ({"day": 1, "title": "Stops", ...}) in the source's order and omit "duration".""",
 
     "product": _SHARED_RULES + """
 
@@ -231,7 +244,7 @@ If the source is not day-structured, organize the places into sensible days your
   "price": "with currency symbol", "brand": str, "rating"?: "0-5 float",
   "buyUrl": "the product page URL",
   "specs": [{"label": str, "value": str}],   // the specs that actually matter for a buying decision
-  "pros": [str], "cons": [str],              // from reviews/description; honest, specific
+  "pros": [str], "cons"?: [str],             // from reviews/description; honest, specific; omit cons if the source gives none
   "verdict"?: "1 sentence: who should buy this"
 }
 Pros/cons must be specific ("battery lasts 2 days") not generic ("good quality").""",
@@ -255,10 +268,10 @@ Watch the demonstration: capture sets/reps/tempo even if only shown on screen te
 `data` schema for summary (prose content only — articles, essays, talks):
 {
   "medium": "article|video|podcast", "readTime"?: str, "videoLength"?: str,
-  "tldr": "3-4 sentences capturing the actual argument, not a teaser",
-  "keyPoints": ["each a complete, specific claim from the content", ...],
-  "quotes"?: [{"text": str, "timestamp"?: str}],
-  "actionItems"?: ["if the content implies things to do", ...]
+  "tldr": "2-3 sentences stating the actual argument/conclusion, not a teaser ('covers topics like...' is a failure)",
+  "keyPoints": ["3-6 items, each a complete, specific claim NOT already in the tldr", ...],
+  "quotes"?: [{"text": str, "timestamp"?: str}],   // AT MOST 2, only genuinely memorable lines; omit for videos under 3 minutes
+  "actionItems"?: ["concrete things the content tells the viewer to do in their own life/work", ...]
 }""",
 
     "place": _SHARED_RULES + """
@@ -280,7 +293,7 @@ array position IS the ranking (there is no separate rank field).
                                               // (e.g. "City":"Lisbon", "Count":"10 cafes"), optional
   "venues": [{
     "name": "the venue's name exactly as stated",
-    "location": "area, city (whatever is given)",
+    "location"?: "the real area/neighbourhood and/or city, ONLY if given. A theme label like 'Mini Dubai' is NOT a location — put it in `why`",
     "city"?: "just the city, if identifiable — used to group places",
     "category": "e.g. cafe, fine-dining, rooftop bar, viewpoint, hotel",
     "cuisine"?: "for restaurants/cafes, e.g. 'South Indian', 'Italian'",
@@ -300,7 +313,7 @@ array position IS the ranking (there is no separate rank field).
   "listTheme"?: "the theme if it's a themed roundup, e.g. 'best brunch in Bandra'"
 }
 COMPLETENESS (fabrication-safe): every venue MUST carry at least one of `why` or `highlights`,
-drawn from the source. If the source only names the venue with no detail, set `why` from the
+drawn from the source, and `why`/`highlights` must not just repeat the list's theme. If the source only names the venue with no detail, set `why` from the
 list's own framing (e.g. "One of the 10 best brunch spots in Bandra") — NEVER invent dishes,
 prices, ratings, or any attribute the source did not state.
 A single-venue post yields a one-element `venues` array; a listicle yields one entry per venue.
@@ -316,6 +329,25 @@ The note's own `title`/`ai_summary` should describe the reel/list as a whole."""
   "keyIdeas"?: ["for non-fiction: the core ideas", ...],
   "whoShouldRead": str
 }""",
+
+    "resources": _SHARED_RULES + """
+
+This is a roundup of things to check out (videos, tools, repos, apps, courses, plugins) — or a
+single one. Extract EVERY distinct item named as its own entry; NEVER invent an item.
+
+`data` schema for resources:
+{
+  "items": [{
+    "name": "the item's name/title exactly as stated",
+    "kind": "video | tool | repo | app | course | plugin | article | book | other",
+    "creator"?: "person/company behind it, if stated",
+    "what": "one line: what it is / what you get from it, specific",
+    "url"?: "ONLY a URL shown/stated for THIS item — never guess one, never reuse one item's URL for another",
+    "cost"?: "e.g. Free, $20/mo — only if stated"
+  }],
+  "context"?: "one line on why these were recommended, if it adds something"
+}
+The note's own `title`/`ai_summary` should describe the roundup as a whole.""",
 
     "entertainment": _SHARED_RULES + """
 

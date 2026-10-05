@@ -324,6 +324,21 @@ function product(d: R, note: Note): Mapped {
   return { facts, blocks };
 }
 
+// Roundup of videos/tools/repos to check out: one card per item, with its link when stated.
+function resources(d: R): Mapped {
+  const blocks: Block[] = [];
+  const ctx = str(d.context);
+  if (ctx) blocks.push(...block("Why these", "text", [ctx]));
+  for (const it of recs(d.items).filter((i) => str(i.name))) {
+    const items = [join([humanize(str(it.kind)), str(it.creator), str(it.cost)]), str(it.what)]
+      .filter(Boolean);
+    const b: Block = { heading: str(it.name), kind: "list", items };
+    if (safeUrl(it.url)) b.links = [{ label: "Open", url: safeUrl(it.url) }];
+    blocks.push(b);
+  }
+  return { facts: [], blocks };
+}
+
 const MAPPERS: Record<string, (d: R, n: Note) => Mapped> = {
   recipe,
   workout,
@@ -331,6 +346,7 @@ const MAPPERS: Record<string, (d: R, n: Note) => Mapped> = {
   place,
   entertainment,
   product,
+  resources,
 };
 
 // ---- age + platform ---------------------------------------------------------------

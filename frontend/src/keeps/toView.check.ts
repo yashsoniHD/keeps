@@ -143,6 +143,7 @@ for (const tpl of [
   "product",
   "entertainment",
   "summary",
+  "resources",
   "",
 ]) {
   const bad = toView(
@@ -161,10 +162,28 @@ for (const tpl of [
         pros: {},
         keyPoints: [null, { a: null }],
         tldr: null,
+        items: [null, { name: 3 }, "x"],
       },
     }),
   );
   assert.ok(Array.isArray(bad.blocks) && bad.age === "");
 }
 assert.doesNotThrow(() => toView(mk({ data: null as never })));
+// resources: one card per named item; link only when the URL is safe
+const res = toView(
+  mk({
+    template: "resources",
+    data: {
+      items: [
+        { name: "Agent skills", kind: "video", creator: "Matt Pocock", what: "Build skills", url: "https://youtu.be/x" },
+        { name: "Bad link", kind: "tool", what: "y", url: "javascript:alert(1)" },
+        { kind: "repo" },
+      ],
+    },
+  }),
+);
+assert.equal(res.blocks.length, 2);
+assert.deepEqual(res.blocks[0].items, ["Video · Matt Pocock", "Build skills"]);
+assert.equal(res.blocks[0].links?.[0].url, "https://youtu.be/x");
+assert.equal(res.blocks[1].links, undefined);
 console.log("toView.check: ok");
