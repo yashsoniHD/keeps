@@ -9,16 +9,14 @@ import Onboarding from "@/keeps/Onboarding";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
-// Publish keeps.shortcut to iCloud (Shortcuts app → Share → Copy iCloud Link) and paste the link
-// here to restore the one-tap install. iOS only allows true one-tap installs from
+// One-tap install link: keeps.shortcut (built by infra/build_shortcut.py) published via
+// Shortcuts app → Share → Copy iCloud Link. iOS only allows true one-tap installs from
 // icloud.com/shortcuts links — the shortcuts:// URL scheme rejects self-hosted files
-// ("invalid URL"), and file downloads need manual taps through Safari's download list.
-// While empty, the UI falls back to the self-hosted signed /keeps.shortcut download
-// (built by infra/build_shortcut.py). It carries the "Paste your Keeps token" import
-// question — no token is baked in. Re-publishing creates a NEW link; update this
-// constant whenever the shortcut changes.
-// Old link (published "Save to Keeps" shortcut): https://www.icloud.com/shortcuts/d3ba89f721d54d1ba2e89185f6472eae
-const SHORTCUT_ICLOUD_LINK = "";
+// ("invalid URL"). The published copy carries the "Paste your Keeps token" import
+// question — no token is baked in (verified via icloud.com/shortcuts/api/records/<id>).
+// Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
+// Set to "" to fall back to the self-hosted signed /keeps.shortcut download.
+const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/bf74f31ec15d4ebba1ce335fba479923";
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://keeps.web.app";
