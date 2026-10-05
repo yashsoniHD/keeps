@@ -1,5 +1,7 @@
 # Clipnote mobile design
 
+> Superseded: the shipped frontend is the "Keeps" redesign (`frontend/src/keeps/`). This folder is historical design research.
+
 ## Open the prototype
 
 Run from the repository root:

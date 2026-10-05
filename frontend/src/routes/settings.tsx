@@ -9,15 +9,16 @@ import Onboarding from "@/keeps/Onboarding";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
-// Published from frontend/public/clipnote.shortcut (import into Shortcuts on the Mac →
-// Share → "Copy iCloud Link"). iOS only allows true one-tap installs from
+// Publish keeps.shortcut to iCloud (Shortcuts app → Share → Copy iCloud Link) and paste the link
+// here to restore the one-tap install. iOS only allows true one-tap installs from
 // icloud.com/shortcuts links — the shortcuts:// URL scheme rejects self-hosted files
 // ("invalid URL"), and file downloads need manual taps through Safari's download list.
-// The published copy carries the "Paste your Clipnote token" import question (verified
-// via the icloud.com/shortcuts/api/records/<id> payload) — no token is baked in. The
-// shortcut's own name ("Save to Clipnote") is therefore kept verbatim in the steps below.
-// Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
-const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/d3ba89f721d54d1ba2e89185f6472eae";
+// While empty, the UI falls back to the self-hosted signed /keeps.shortcut download
+// (built by infra/build_shortcut.py). It carries the "Paste your Keeps token" import
+// question — no token is baked in. Re-publishing creates a NEW link; update this
+// constant whenever the shortcut changes.
+// Old link (published "Save to Keeps" shortcut): https://www.icloud.com/shortcuts/d3ba89f721d54d1ba2e89185f6472eae
+const SHORTCUT_ICLOUD_LINK = "";
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://clipnote.web.app";
@@ -318,13 +319,13 @@ function ConnectPhone() {
                   token is already copied.
                 </li>
                 <li>
-                  Done. In any app: <strong>Share</strong> → <strong>Save to Clipnote</strong>.
+                  Done. In any app: <strong>Share</strong> → <strong>Save to Keeps</strong>.
                 </li>
               </ol>
             </>
           ) : (
             <>
-              <a href="/clipnote.shortcut" className="primary wide">
+              <a href="/keeps.shortcut" className="primary wide">
                 Download the Shortcut
               </a>
               <ol>
@@ -333,14 +334,14 @@ function ConnectPhone() {
                 </li>
                 <li>
                   Tap the <strong>downloads (↓) icon</strong> in Safari's address bar, then tap{" "}
-                  <strong>Save to Clipnote.shortcut</strong> to open the Shortcuts app.
+                  <strong>Save to Keeps.shortcut</strong> to open the Shortcuts app.
                 </li>
                 <li>
                   Tap <strong>Add Shortcut</strong>, then paste your token when asked{" "}
-                  <em>"Paste your Clipnote token"</em>.
+                  <em>"Paste your Keeps token"</em>.
                 </li>
                 <li>
-                  Done. In any app: <strong>Share</strong> → <strong>Save to Clipnote</strong>.
+                  Done. In any app: <strong>Share</strong> → <strong>Save to Keeps</strong>.
                 </li>
               </ol>
               {isStandalone() && (

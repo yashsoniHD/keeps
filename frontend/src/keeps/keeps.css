@@ -2773,3 +2773,27 @@ button {
 .sheet-handle-zone .icon-button {
   touch-action: manipulation;
 }
+
+/* Frozen library header + category chips; the list scrolls behind. */
+.sticky-sentinel {
+  height: 1px;
+  margin-bottom: -1px;
+}
+.sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--k-bg);
+  margin-inline: -22px;
+  padding: env(safe-area-inset-top) 22px 8px;
+  transition: box-shadow 0.15s;
+}
+.sticky-top.scrolled {
+  box-shadow: 0 1px 0 var(--k-line), 0 6px 10px -8px rgba(0, 0, 0, 0.25);
+}
+@media (max-width: 360px) {
+  .sticky-top {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+}

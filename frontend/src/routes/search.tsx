@@ -73,6 +73,16 @@ function SearchScreen() {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
 
+  // Cmd/Ctrl+K while already here: refocus the field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")
+        document.querySelector<HTMLInputElement>(".search-field input")?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const trimmed = query.trim();
   useEffect(() => {
     if (trimmed.length < MIN_CHARS) {

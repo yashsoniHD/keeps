@@ -1,6 +1,6 @@
 # Routes
 
-TanStack Start uses **file-based routing**. Every `.tsx` file in this directory
+TanStack Router (Vite SPA) uses **file-based routing**. Every `.tsx` file in this directory
 is a route. Do **not** create `src/pages/`, `src/routes/_app/index.tsx`, or
 `app/layout.tsx` — those are Next.js / Remix conventions. The only root layout
 is `src/routes/__root.tsx`.
@@ -19,3 +19,7 @@ is `src/routes/__root.tsx`.
 | `__root.tsx` | app shell — wraps every page; preserve `<Outlet />` |
 
 `routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+
+## Current routes
+
+`index` (Library), `notes.$noteId`, `search`, `settings`, `share`, `login`. UI lives in `src/keeps/`; routes stay thin.

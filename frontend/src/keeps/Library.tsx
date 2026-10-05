@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -43,6 +43,18 @@ function host(url: string): string {
   } catch {
     return url;
   }
+}
+
+// iOS only opens the keyboard for focus() inside a user gesture. Focus a throwaway input now; the
+// search page's autoFocus input takes over after navigation, keeping the keyboard up.
+function primeKeyboard() {
+  const el = document.createElement("input");
+  el.setAttribute("aria-hidden", "true");
+  el.tabIndex = -1;
+  el.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px;width:1px;height:1px";
+  document.body.appendChild(el);
+  el.focus();
+  setTimeout(() => el.remove(), 1000);
 }
 
 type RowKind = "processing" | "queued" | "waiting" | "failed";
@@ -131,6 +143,16 @@ export function Library({ typeParam }: { typeParam?: string }) {
   });
   const [showGuide, setShowGuide] = useState(false);
   const [actionsFor, setActionsFor] = useState<NoteView | null>(null);
+  // Sticky header gets a divider only once the page has scrolled (sentinel leaves the viewport).
+  const sentinel = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setScrolled(!e.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loading, user]);
 
   // Pick up captures queued while away (e.g. from the share page) and retry them.
   useEffect(() => {
@@ -144,8 +166,19 @@ export function Library({ typeParam }: { typeParam?: string }) {
 
   // Chip groups: different slugs can share a display label (itinerary + trip -> "Trips").
   // One chip per label carrying ALL its slugs, sorted by label. Source: user doc + loaded notes.
+  // Only slugs that have notes: on a complete "All" view (not truncated) the loaded notes are the
+  // truth; when truncated the user doc is added (can't know). The last "All" set is remembered so
+  // chips survive a narrowing filter, and the active slug always stays (deep links).
+  const [allSlugs, setAllSlugs] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (active !== "all" || !notesReady) return;
+    const s = new Set(notes.map((n) => n.content_type));
+    if (notes.length >= max) userCategories.forEach((c) => s.add(c));
+    setAllSlugs(Array.from(s));
+  }, [active, notesReady, notes, max, userCategories]);
   const chipGroups = useMemo(() => {
-    const slugs = new Set([...userCategories, ...notes.map((n) => n.content_type)]);
+    const slugs = new Set(allSlugs ?? [...userCategories, ...notes.map((n) => n.content_type)]);
+    if (active !== "all") slugs.add(active);
     const byLabel = new Map<string, string[]>();
     for (const slug of Array.from(slugs).sort()) {
       const label = noteLabel(slug);
@@ -156,7 +189,7 @@ export function Library({ typeParam }: { typeParam?: string }) {
     return Array.from(byLabel.entries())
       .map(([label, s]) => ({ label, slugs: s.slice().sort() }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [notes, userCategories]);
+  }, [notes, userCategories, allSlugs, active]);
   // The slug set the active chip filters by (null == All). `activeKey` is the stable string the
   // subscription keys off, so streaming notes don't churn the listener.
   const activeSlugs = useMemo<string[] | null>(() => {
@@ -315,54 +348,43 @@ export function Library({ typeParam }: { typeParam?: string }) {
   return (
     <div className="app-shell">
       <main id="main-content" tabIndex={-1} className="main">
-        <header className="page-header">
-          <div>
-            <button
-              type="button"
-              className="app-title"
-              aria-label="Keeps home"
-              onClick={() => applyActive("all")}
-            >
-              <Logo />
-            </button>
-          </div>
-          <div className="header-actions">
-            <IconButton
-              icon="Search"
-              label="Search saved notes"
-              onClick={() => navigate({ to: "/search" })}
-            />
-            <IconButton icon="Plus" label="Save a link" onClick={openCapture} />
-            <button
-              type="button"
-              className="avatar"
-              aria-label="Open profile and settings"
-              onClick={() => navigate({ to: "/settings" })}
-            >
-              {user.photoURL ? (
-                <img src={user.photoURL} alt="" referrerPolicy="no-referrer" />
-              ) : (
-                avatarText || <Icon name="Settings" size={18} />
-              )}
-            </button>
-          </div>
-        </header>
-
-        <section className="library" aria-label="Saved links">
-          {feedError && (
-            <p className="library-alert" role="alert">
-              Couldn’t load your notes. Check your connection and refresh.
-            </p>
-          )}
-
-          {notesReady && showGuide && (
-            <Guide
-              notesCount={notes.length}
-              onAddLink={openCapture}
-              onTrySample={() => capture(SAMPLE_LINK)}
-              onDismiss={dismissGuide}
-            />
-          )}
+        <div ref={sentinel} className="sticky-sentinel" aria-hidden="true" />
+        <div className={`sticky-top${scrolled ? " scrolled" : ""}`}>
+          <header className="page-header">
+            <div>
+              <button
+                type="button"
+                className="app-title"
+                aria-label="Keeps home"
+                onClick={() => applyActive("all")}
+              >
+                <Logo />
+              </button>
+            </div>
+            <div className="header-actions">
+              <IconButton
+                icon="Search"
+                label="Search saved notes"
+                onClick={() => {
+                  primeKeyboard();
+                  navigate({ to: "/search" });
+                }}
+              />
+              <IconButton icon="Plus" label="Save a link" onClick={openCapture} />
+              <button
+                type="button"
+                className="avatar"
+                aria-label="Open profile and settings"
+                onClick={() => navigate({ to: "/settings" })}
+              >
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="" referrerPolicy="no-referrer" />
+                ) : (
+                  avatarText || <Icon name="Settings" size={18} />
+                )}
+              </button>
+            </div>
+          </header>
 
           {/* Rendered before notes arrive (just "All") so the strip never pops in and shifts the list. */}
           {(!notesReady || chipGroups.length > 0) && (
@@ -401,6 +423,23 @@ export function Library({ typeParam }: { typeParam?: string }) {
                 );
               })}
             </div>
+          )}
+        </div>
+
+        <section className="library" aria-label="Saved links">
+          {feedError && (
+            <p className="library-alert" role="alert">
+              Couldn’t load your notes. Check your connection and refresh.
+            </p>
+          )}
+
+          {notesReady && showGuide && (
+            <Guide
+              notesCount={notes.length}
+              onAddLink={openCapture}
+              onTrySample={() => capture(SAMPLE_LINK)}
+              onDismiss={dismissGuide}
+            />
           )}
 
           {!notesReady && !feedError ? (

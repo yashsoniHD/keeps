@@ -1,4 +1,4 @@
-# Clip Note
+# Clip Note (app name in the UI: "Keeps")
 
 Save any URL as a structured note. Paste or share a link; the app analyses the content (video included) and produces a note you can browse in a feed, search, and filter by category. Note types are AI-determined and open-ended.
 
@@ -17,7 +17,7 @@ Open item: a paywall before public launch (the weekly digest is dropped). Retent
 | Firebase Project | `weekly-updates-automation` |
 | Backend host | Vercel Hobby container (project to be created in Phase F; root `backend`, `Dockerfile.vercel`). Production URL placeholder `https://clip-note-api-yashsoni102-progs-projects.vercel.app`. Deploy notes: `infra/vercel.md` |
 | Job dispatch | Synchronous self-POST to `/api/process/{id}` (`X-Worker-Secret`) + in-process retry + daily cron sweep (`GET /api/process/sweep`) |
-| Firebase Hosting URL | https://weekly-updates-automation.web.app |
+| Firebase Hosting URL | https://clipnote.web.app (site `clipnote` in `firebase.json`; the project-named `weekly-updates-automation.web.app` may also exist) |
 | Legacy Cloud Run URL | https://clip-note-api-674775099277.us-central1.run.app (rollback only; torn down after soak) |
 | Service account | `clip-note-vercel` (`roles/datastore.user`), key supplied as `GOOGLE_SERVICE_ACCOUNT_JSON` (written to `/tmp/sa.json`, exported as `GOOGLE_APPLICATION_CREDENTIALS`) |
 | AI provider | OpenRouter (`OPENROUTER_API_KEY`) |
@@ -30,7 +30,7 @@ Open item: a paywall before public launch (the weekly digest is dropped). Retent
 
 ## Tech Stack
 
-Frontend: Vite SPA (React 19, Tailwind 4, shadcn/ui), Firebase Hosting. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
+Frontend: Vite SPA (React 19, TanStack Router, the "Keeps" design in plain CSS with system fonts; Tailwind 4 kept only for category-palette utilities), Firebase Hosting. The app was renamed Clip Note -> Keeps in the UI/manifest/title/login only; backend, GCP/Firebase/Vercel names, the `clip-note-api` URL, Firestore collections, `clipnote*` localStorage keys and the `X-Clipnote-*` headers are unchanged on purpose. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
 
 ---
 
@@ -51,7 +51,7 @@ paste / PWA share / iOS Shortcut (PAT)
   -> jobs/{id} completed {note_id}
 
 Daily cron GET /api/process/sweep re-dispatches stale pending/processing jobs.
-Frontend: onSnapshot on jobs/{id}; feed reads notes via Firestore; search/edit/delete/re-extract via the API.
+Frontend: onSnapshot on jobs/{id}; the library (home) reads notes live via Firestore; search/edit/delete/re-extract via the API. `toView` adapts raw `note.data` into a `NoteView` that the templates render.
 ```
 
 Key decisions:
@@ -99,7 +99,7 @@ acq_cache/{key}      scrape metadata by canonical URL, 6 h (backend-only)
 
 `users/{uid}.categories` is the source of truth for a user's note types (ArrayUnion on each new slug). Notes store structured `data` only. Legacy collections for removed features (conversations, place_items, watch_items, recipe/trip/wish items, collections, annotations, search_index, places_cache) are left in Firestore until the owner deletes them; rules deny all client access.
 
-Note templates: `recipe`, `itinerary` (plain list), `product`, `summary`, `workout`, `entertainment` (`titles[]` + TMDB fields; resolved by data shape), `place` (plain `venues[]` list), `*` -> GenericNote. Legacy `template:"composed"` notes render via GenericNote.
+Note templates (`frontend/src/keeps/templates/`, picked by `NoteBody`, which falls back to GenericNote via an error boundary): `recipe`, `itinerary` (plain list), `product`, `summary`, `workout`, `entertainment` (`titles[]` + TMDB fields; resolved by data shape), `place` (plain `venues[]` list), `book`, `*` -> GenericNote. Watch/entertainment shows the mandatory JustWatch credit. Legacy `template:"composed"` notes render via GenericNote.
 
 ---
 
@@ -116,8 +116,13 @@ backend/
   models/note.py
   scripts/   verify_apify.py, reindex_embeddings.py, ab_baseline.py
   Dockerfile.vercel, vercel.json (daily sweep cron), requirements.txt, tests/
-frontend/    Vite SPA: routes (feed/home, note detail, search, settings, share target),
-             components/note/templates/*, lib/api.ts, lib/firestore.ts
+frontend/    Vite SPA. routes/ (index=Library, notes.$noteId, search, settings, share, login);
+             src/keeps/ (view.ts NoteView/Block, toView.ts + toView.check.ts, ui.tsx primitives incl. Sheet,
+               Library, CaptureSheet, NoteActions, Onboarding, Guide, noteCache, useEdgeSwipeBack,
+               useSearchShortcut, templates/*, keeps.css (--k-* vars) + templates.css + motion.css);
+             components/ (CaptureProvider: capture/optimistic/offline queue, ErrorBoundary, shared/ErrorState);
+             public/keeps.shortcut (signed iOS Shortcut "Save to Keeps", built by infra/build_shortcut.py);
+             lib/ (api.ts, firestore.ts, note-meta.ts noteAccent); vite.config.ts splits vendor chunks
 infra/       firestore.rules, firestore.indexes.json, vercel.md, setup.sh, build_shortcut.py
 ```
 
@@ -130,6 +135,7 @@ cd frontend && npm install && npm run dev            # frontend
 cd backend && pip install -r requirements.txt && uvicorn main:app --reload --port 8080   # backend (WORKER_SECRET unset = inline worker)
 cd backend && .venv/bin/python -m pytest -q          # tests
 vercel deploy --prod --yes                           # backend, from the REPO ROOT (root dir setting = backend; env vars: infra/vercel.md)
+cd frontend && node src/keeps/toView.check.ts          # toView adapter checks
 cd frontend && npm run build && firebase deploy --only hosting
 firebase deploy --only firestore                     # rules + indexes
 cd backend && python -m scripts.reindex_embeddings --apply   # after changing EMBED_MODEL/EMBED_TEXT_VERSION
@@ -153,6 +159,10 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/process/sweep  
 - **Blocking SDK calls** (OpenAI client, yt-dlp, `verify_id_token`) go through `asyncio.to_thread`.
 - **Model IDs**: verify against `GET https://openrouter.ai/api/v1/models` before changing; a wrong ID fails immediately.
 - **yt-dlp/ffmpeg**: `Dockerfile.vercel` keeps ffmpeg. yt-dlp from Vercel IPs may be blocked; Apify is the paid fallback.
+- **keeps.css is unlayered, so it beats Tailwind utilities.** Category colours must use the `noteAccent` classes (`src/lib/note-meta.ts`) on inner elements, not on elements keeps.css styles.
+- **`X-Clipnote-Url` / `X-Clipnote-Source` headers are a contract** with the iOS Shortcut and backend; keep the names despite the rename. Same for `clipnote-theme` / `clipnote.*` localStorage keys.
+- **iOS Shortcut**: Settings serves the self-hosted signed `keeps.shortcut` until the owner republishes the iCloud one-tap link ("Save to Keeps").
+- **Local dev**: `frontend/.env.development.local` may point the API at localhost:8080; `.claude/launch.json` has `frontend-prodapi` to run the dev server against the prod API.
 - **Firestore real-time on web** needs the JS SDK (client) in `src/integrations/firebase/client.ts`.
 
 ---
