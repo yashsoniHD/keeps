@@ -35,7 +35,7 @@ from models.note import ContentBundle
 from services import acq_cache
 from services.net_guard import guarded_async_client
 
-log = logging.getLogger("clipnote.sources")
+log = logging.getLogger("keeps.sources")
 
 # Instagram serves og: tags to link-preview crawlers; mimic one to get the caption reliably.
 _CRAWLER_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"

@@ -14,7 +14,7 @@ from services.net_guard import BlockedURLError, assert_public_url_async, guarded
 from services.url_utils import canonical_url
 from services.sources import youtube, social_video, reddit, product, twitter, google_share, generic
 
-log = logging.getLogger("clipnote.sources")
+log = logging.getLogger("keeps.sources")
 
 # Ordered: first match wins. `generic` matches everything and must stay last.
 _STRATEGIES = [youtube, social_video, reddit, product, twitter, google_share, generic]

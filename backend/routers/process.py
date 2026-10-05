@@ -50,7 +50,7 @@ from services.dispatch import enqueue_process_job
 from services.usage_meter import start_metering
 
 router = APIRouter(tags=["process"])
-log = logging.getLogger("clipnote.process")
+log = logging.getLogger("keeps.process")
 
 
 async def _note_embedding(title: str, ai_summary: str = "",
@@ -94,7 +94,7 @@ SWEEP_MAX_ATTEMPTS = 5
 def _stable_id(kind: str, job_id: str) -> str:
     """Deterministic doc id per (job, kind): if a duplicate delivery ever slips past the
     claim, both runs converge on the same note doc instead of minting an orphan duplicate."""
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"clipnote:{kind}:{job_id}"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"keeps:{kind}:{job_id}"))
 
 
 async def _claim_job(db, job_ref):

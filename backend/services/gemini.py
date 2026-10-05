@@ -33,7 +33,7 @@ from config import settings
 from models.note import ContentBundle, NoteExtraction
 from services.usage_meter import record_usage
 
-log = logging.getLogger("clipnote.gemini")
+log = logging.getLogger("keeps.gemini")
 
 
 class ProviderError(ValueError):

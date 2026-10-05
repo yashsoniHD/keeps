@@ -25,7 +25,7 @@ import { Toast } from "@/keeps/ui";
 // App-wide capture, lifted above the router <Outlet /> so the "+" can open the same sheet from
 // ANY route. This is the ONE place that owns ingest, the optimistic placeholders, the offline
 // queue (replayed on sign-in and when the connection returns), the duplicate notice and the
-// `clipnote.pendingCapture` replay. The library reads the lists via useCapture() to render rows.
+// `keeps.pendingCapture` replay. The library reads the lists via useCapture() to render rows.
 export interface Optimistic {
   id: string;
   url: string;
@@ -156,8 +156,8 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
     if (!user || pendingHandled.current) return;
     let pending: string | null = null;
     try {
-      pending = localStorage.getItem("clipnote.pendingCapture");
-      if (pending) localStorage.removeItem("clipnote.pendingCapture");
+      pending = localStorage.getItem("keeps.pendingCapture");
+      if (pending) localStorage.removeItem("keeps.pendingCapture");
     } catch {
       /* private mode / storage disabled — nothing to replay */
     }

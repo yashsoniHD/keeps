@@ -1,6 +1,6 @@
 # Mobile capture and readable notes: competitor evidence
 
-Research date: 3 October 2026. Scope: capture, conversion, reading, provenance, onboarding and recovery. Official product documentation only; no existing Clipnote frontend or mobile design inspected. These are documented capabilities, not usability test results or evidence of retention. Organization and rediscovery are covered separately.
+Research date: 3 October 2026. Scope: capture, conversion, reading, provenance, onboarding and recovery. Official product documentation only; no existing Keeps frontend or mobile design inspected. These are documented capabilities, not usability test results or evidence of retention. Organization and rediscovery are covered separately.
 
 ## Readwise Reader
 
@@ -14,7 +14,7 @@ Research date: 3 October 2026. Scope: capture, conversion, reading, provenance, 
 
 **Observed.** Reader provides a document-specific parsing report, recommends re-saving an authenticated page from Safari for paywall problems, and preserves the originally captured article version. Re-saving an identical URL brings the existing document back to the top, although its documented URL deduplication has limits. [Parsing](https://docs.readwise.io/reader/docs/faqs/parsing)
 
-**Clipnote proposal.** Keep Save separate from AI completion. Once the server acknowledges receipt, show “Saved · Making your note” with Done and View progress. Offer an optional “Why I saved this” field. In the finished note, expose the original URL and verified timestamps where available. Treat an existing save as “Already saved” with Open note, rather than creating another note.
+**Keeps proposal.** Keep Save separate from AI completion. Once the server acknowledges receipt, show “Saved · Making your note” with Done and View progress. Offer an optional “Why I saved this” field. In the finished note, expose the original URL and verified timestamps where available. Treat an existing save as “Already saved” with Open note, rather than creating another note.
 
 ## Matter
 
@@ -22,7 +22,7 @@ Research date: 3 October 2026. Scope: capture, conversion, reading, provenance, 
 
 **Inferred benefit.** Saving promises a usable reading experience, not simply a stored address. Different reading modes accommodate different contexts without requiring another capture.
 
-**Clipnote proposal.** Make the result immediately useful for its subject: ingredient groups and steps for a recipe; venues and practical details for a place; key points for an explainer. Keep one clear reading hierarchy. A large video player or cover should not displace all useful text from the first screen. Audio reading is a later enhancement, not a prerequisite for the first capture-to-note journey.
+**Keeps proposal.** Make the result immediately useful for its subject: ingredient groups and steps for a recipe; venues and practical details for a place; key points for an explainer. Keep one clear reading hierarchy. A large video player or cover should not displace all useful text from the first screen. Audio reading is a later enhancement, not a prerequisite for the first capture-to-note journey.
 
 ## mymind
 
@@ -32,11 +32,11 @@ Research date: 3 October 2026. Scope: capture, conversion, reading, provenance, 
 
 **Inferred benefit.** A concise first layer helps users recognize a save quickly, while a deeper reading layer supports actual use. Deferred elaboration reduces the work of capturing something in the moment.
 
-**Clipnote proposal.** Start note detail with a descriptive title, source, and a short useful overview, followed by the structured note. Put optional details behind clear expansion controls. Keep “Your notes” visually distinct from generated content. Do not promise a preserved full article or video unless Clipnote actually stores it.
+**Keeps proposal.** Start note detail with a descriptive title, source, and a short useful overview, followed by the structured note. Put optional details behind clear expansion controls. Keep “Your notes” visually distinct from generated content. Do not promise a preserved full article or video unless Keeps actually stores it.
 
 ## Five concrete design implications
 
-1. **Acknowledge saving before processing finishes.** Use truthful states: Saving → Saved / Making note → Ready, or Saved / Needs attention. “You can close this” is shown only after receipt is durable. If offline capture is unsupported, show “Not saved — reconnect to try again”; never show success optimistically without recovery. The exact state model is a Clipnote proposal, not a verified competitor pattern.
+1. **Acknowledge saving before processing finishes.** Use truthful states: Saving → Saved / Making note → Ready, or Saved / Needs attention. “You can close this” is shown only after receipt is durable. If offline capture is unsupported, show “Not saved — reconnect to try again”; never show success optimistically without recovery. The exact state model is a Keeps proposal, not a verified competitor pattern.
 
 2. **Keep the capture decision tiny.** The first save needs the shared URL and one confirmation. Title, type and destination are optional corrections after save. Teach the share action with one short, platform-specific example after the first success. Keep paste-link available when native sharing is unavailable.
 
@@ -48,4 +48,4 @@ Research date: 3 October 2026. Scope: capture, conversion, reading, provenance, 
 
 ## Evidence gaps and validation
 
-The reviewed pages do not establish actual capture latency, completion-notification behavior, or complete first-run/error flows for all three products. Their features are useful design references, not proof that a pattern works better. Test the proposed Clipnote flow with people saving a reel, closing immediately, returning to a completed note, encountering a failed video, and saving a duplicate. Measure unassisted completion, confidence that the item was saved, and ability to locate the source.
+The reviewed pages do not establish actual capture latency, completion-notification behavior, or complete first-run/error flows for all three products. Their features are useful design references, not proof that a pattern works better. Test the proposed Keeps flow with people saving a reel, closing immediately, returning to a completed note, encountering a failed video, and saving a duplicate. Measure unassisted completion, confidence that the item was saved, and ability to locate the source.

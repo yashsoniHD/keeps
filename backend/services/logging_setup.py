@@ -5,7 +5,7 @@ user_id, url, ...) becomes a top-level JSON field. On Vercel these show up in th
 logs (per-instance, not per-request), so job_id on every line is what ties a job together.
 
 Usage:
-    log = logging.getLogger("clipnote.sources")
+    log = logging.getLogger("keeps.sources")
     log.warning("strategy failed", extra={"url": url, "strategy": name})
 """
 import json

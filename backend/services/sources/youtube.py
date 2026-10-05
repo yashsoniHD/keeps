@@ -21,7 +21,7 @@ import httpx
 from config import settings
 from models.note import ContentBundle
 
-log = logging.getLogger("clipnote.sources")
+log = logging.getLogger("keeps.sources")
 
 _DOMAINS = ("youtube.com", "youtu.be", "music.youtube.com")
 MIN_TRANSCRIPT_CHARS = 200

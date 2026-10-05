@@ -10,7 +10,7 @@ from services.logging_setup import setup_logging
 from services.rate_limit import RateLimitMiddleware
 
 setup_logging()
-log = logging.getLogger("clipnote.app")
+log = logging.getLogger("keeps.app")
 
 os.makedirs(settings.TEMP_DOWNLOAD_DIR, exist_ok=True)
 
@@ -52,7 +52,7 @@ def health():
     return {"status": "healthy", "version": settings.VERSION}
 
 
-_client_log = logging.getLogger("clipnote.client")
+_client_log = logging.getLogger("keeps.client")
 
 
 @app.post("/api/client-errors")

@@ -54,7 +54,7 @@ class _Events(logging.Handler):
 
 def _install_hooks():
     h = _Events(level=logging.INFO)
-    root = logging.getLogger("clipnote")
+    root = logging.getLogger("keeps")
     root.setLevel(logging.INFO)
     root.addHandler(h)
 

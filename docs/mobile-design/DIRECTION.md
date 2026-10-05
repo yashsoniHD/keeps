@@ -1,4 +1,4 @@
-# Clipnote mobile design direction
+# Keeps mobile design direction
 
 Working design, 3 October 2026. Created independently of the existing frontend.
 

@@ -1,6 +1,6 @@
 """Builds the "Save to Keeps" iOS shortcut and signs it for distribution.
 
-The shortcut: [Text: token] → [POST /api/ingest, shared URL in X-Clipnote-Url header]
+The shortcut: [Text: token] → [POST /api/ingest, shared URL in X-Keeps-Url header]
 → [Notification]. A WFWorkflowImportQuestion targets the Text action, so iOS prompts
 "Paste your Keeps token" at install time and bakes the value in — no manual
 shortcut editing for the user.
@@ -8,7 +8,7 @@ shortcut editing for the user.
 Why headers, not a JSON body: WFJSONValues dictionaries get silently STRIPPED when a
 signed .shortcut file is imported on-device (verified iOS 18, 2026-06-11) — the action
 keeps its method/URL/headers but loses the body fields. Header dictionaries survive
-import intact, so the URL travels in X-Clipnote-Url and /api/ingest reads it from there.
+import intact, so the URL travels in X-Keeps-Url and /api/ingest reads it from there.
 
 Usage:  python3 infra/build_shortcut.py            # writes + signs frontend/public/keeps.shortcut
 Signing uses the macOS `shortcuts sign` CLI (requires this Mac to be signed into iCloud).
@@ -19,7 +19,7 @@ import sys
 import uuid
 from pathlib import Path
 
-API_URL = "https://clip-note-api-yashsoni102-progs-projects.vercel.app/api/ingest"
+API_URL = "https://keeps-api-yashsoni102-progs-projects.vercel.app/api/ingest"
 ROOT = Path(__file__).resolve().parent.parent
 UNSIGNED = ROOT / "infra" / "build" / "keeps-unsigned.shortcut"
 SIGNED = ROOT / "frontend" / "public" / "keeps.shortcut"
@@ -95,12 +95,11 @@ workflow = {
                             # Shared URL rides in a header: the share-sheet input is
                             # interpolated directly (no Get-URLs step), and the backend
                             # sanitizes whatever text arrives.
-                            # X-Clipnote-* header names are the backend contract (routers/ingest.py); do not rename.
                             dict_item(
-                                "X-Clipnote-Url",
+                                "X-Keeps-Url",
                                 text_token("￼", {"{0, 1}": {"Type": "ExtensionInput"}}),
                             ),
-                            dict_item("X-Clipnote-Source", text_token("shortcut")),
+                            dict_item("X-Keeps-Source", text_token("shortcut")),
                         ]
                     },
                     "WFSerializationType": "WFDictionaryFieldValue",

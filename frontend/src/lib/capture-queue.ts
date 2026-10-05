@@ -9,7 +9,7 @@ export interface QueuedCapture {
   ts: number;
 }
 
-const KEY = "clipnote.captureQueue";
+const KEY = "keeps.captureQueue";
 const MAX_ENTRIES = 50;
 
 export function loadQueue(): QueuedCapture[] {

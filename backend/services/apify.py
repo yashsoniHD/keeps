@@ -21,7 +21,7 @@ import httpx
 
 from config import settings
 
-log = logging.getLogger("clipnote.apify")
+log = logging.getLogger("keeps.apify")
 
 _RUN_SYNC = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
 

@@ -19,7 +19,7 @@ from models.note import ContentBundle
 from services.net_guard import guarded_async_client
 
 import logging
-log = logging.getLogger("clipnote.sources")
+log = logging.getLogger("keeps.sources")
 
 _PRODUCT_DOMAINS = (
     "amazon.", "amzn.", "flipkart.com", "myntra.com", "ajio.com",

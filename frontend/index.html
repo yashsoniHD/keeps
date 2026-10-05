@@ -17,7 +17,7 @@
     <script>
       (function () {
         try {
-          var t = localStorage.getItem("clipnote-theme");
+          var t = localStorage.getItem("keeps-theme") || localStorage.getItem("clipnote-theme");
           var dark =
             t === "dark" ||
             ((!t || t === "system") &&

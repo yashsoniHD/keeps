@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from services.firebase import get_db
 
-log = logging.getLogger("clipnote.acq_cache")
+log = logging.getLogger("keeps.acq_cache")
 
 TTL = timedelta(hours=6)
 FIELDS = ("caption", "comments", "media_url", "thumbnail", "images", "title", "author",

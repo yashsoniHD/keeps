@@ -18,7 +18,7 @@ import httpx
 from models.note import ContentBundle
 from services.net_guard import guarded_async_client
 
-log = logging.getLogger("clipnote.sources")
+log = logging.getLogger("keeps.sources")
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")

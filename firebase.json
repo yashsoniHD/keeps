@@ -51,7 +51,7 @@
             },
             {
               "key": "Content-Security-Policy-Report-Only",
-              "value": "default-src 'self'; script-src 'self' https://apis.google.com https://www.gstatic.com https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src 'self' https://*.googleapis.com https://*.google.com https://clip-note-api-yashsoni102-progs-projects.vercel.app wss://*.firebaseio.com; frame-src https://*.firebaseapp.com https://accounts.google.com; base-uri 'self'; object-src 'none'"
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com https://www.gstatic.com https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src 'self' https://*.googleapis.com https://*.google.com https://keeps-api-yashsoni102-progs-projects.vercel.app wss://*.firebaseio.com; frame-src https://*.firebaseapp.com https://accounts.google.com; base-uri 'self'; object-src 'none'"
             }
           ]
         },
@@ -74,7 +74,7 @@
     },
     {
       "site": "clipnote",
-      "public": "infra/clipnote-forward",
+      "public": "infra/old-domain-forward",
       "ignore": [
         "**/.*"
       ],

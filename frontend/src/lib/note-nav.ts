@@ -3,7 +3,7 @@
 // category, source filter, pins and search); the note detail reads the neighbours of the note
 // being viewed. sessionStorage so it survives the feed → note push but not a new session.
 
-const KEY = "clipnote.feedOrder";
+const KEY = "keeps.feedOrder";
 
 export function setFeedOrder(ids: string[]): void {
   try {

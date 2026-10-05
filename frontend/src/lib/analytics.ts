@@ -12,7 +12,7 @@ function track(event: string, params?: Record<string, string | number | boolean>
 // event may fire again, which is acceptable for a funnel signal.
 function trackOnce(key: string, event: string, params?: Record<string, string | number | boolean>) {
   try {
-    const k = `clipnote.ev.${key}`;
+    const k = `keeps.ev.${key}`;
     if (localStorage.getItem(k)) return;
     localStorage.setItem(k, "1");
   } catch {
@@ -37,9 +37,9 @@ export const analytics = {
   returned: () => {
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const last = localStorage.getItem("clipnote.lastActiveDay");
+      const last = localStorage.getItem("keeps.lastActiveDay");
       if (last && last !== today) track("returned");
-      if (last !== today) localStorage.setItem("clipnote.lastActiveDay", today);
+      if (last !== today) localStorage.setItem("keeps.lastActiveDay", today);
     } catch {
       /* storage disabled — skip the returned signal */
     }

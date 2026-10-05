@@ -19,7 +19,7 @@ from services.embeddings import embedding_service
 from services.firebase import get_db
 from services.source_alias import source_matches
 
-log = logging.getLogger("clipnote.search")
+log = logging.getLogger("keeps.search")
 
 router = APIRouter(tags=["search"])
 

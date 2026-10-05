@@ -8,7 +8,7 @@ const API_URL =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.DEV
     ? "http://localhost:8080"
-    : "https://clip-note-api-yashsoni102-progs-projects.vercel.app"); // must match the Vercel project's production alias (Phase F sets the real one)
+    : "https://keeps-api-yashsoni102-progs-projects.vercel.app"); // must match the Vercel project's production alias (Phase F sets the real one)
 
 // All API calls go through this: a 401 usually means the cached Firebase token
 // expired while the tab was backgrounded — retry exactly once with a forced refresh.

@@ -324,7 +324,7 @@
   background-position: 0 0, 1px 2px;
 }
 
-/* The Clipnote paper-clip mark draws itself on once and holds ("Draw-on"). Plays once and
+/* The Keeps paper-clip mark draws itself on once and holds ("Draw-on"). Plays once and
    holds: a mark that keeps wiping itself off reads as broken on a screen the user sits on. */
 @keyframes clip-draw {
   from {

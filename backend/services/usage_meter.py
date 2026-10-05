@@ -16,7 +16,7 @@ import logging
 
 from config import settings
 
-log = logging.getLogger("clipnote.usage")
+log = logging.getLogger("keeps.usage")
 
 _meter: contextvars.ContextVar["UsageMeter | None"] = contextvars.ContextVar(
     "gemini_usage_meter", default=None

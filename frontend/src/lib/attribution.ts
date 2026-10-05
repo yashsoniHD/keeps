@@ -2,7 +2,7 @@
 // landing page, or "shared-note" when they arrive via a public /p link) and attach it to
 // the account on first sign-in, so the admin dashboard can break signups down by source.
 
-const REF_KEY = "clipnote.signupRef";
+const REF_KEY = "keeps.signupRef";
 
 // Capture an attribution source from the current URL (best-effort, first-write-wins so the
 // original source isn't overwritten by a later internal navigation).

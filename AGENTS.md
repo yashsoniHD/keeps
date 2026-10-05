@@ -1,4 +1,4 @@
-# Clip Note (app name in the UI: "Keeps")
+# Keeps
 
 Save any URL as a structured note. Paste or share a link; the app analyses the content (video included) and produces a note you can browse in a feed, search, and filter by category. Note types are AI-determined and open-ended.
 
@@ -12,25 +12,26 @@ Open item: a paywall before public launch (the weekly digest is dropped). Retent
 
 | Item | Value |
 |------|-------|
+| Repo / local folder | GitHub `yashsoni102-prog/keeps`; local `/Users/yashsoni/dev/Personal/keeps` |
 | GCP Project ID | `weekly-updates-automation` (shared project — user's choice; Firestore + Firebase Auth were pre-enabled) |
 | GCP Region | `us-central1` (legacy infra, being torn down) — Firebase/Firestore only after cutover |
 | Firebase Project | `weekly-updates-automation` |
-| Backend host | Vercel Hobby container (project to be created in Phase F; root `backend`, `Dockerfile.vercel`). Production URL placeholder `https://clip-note-api-yashsoni102-progs-projects.vercel.app`. Deploy notes: `infra/vercel.md` |
+| Backend host | Vercel Hobby container (Vercel project `keeps-api`; root `backend`, `Dockerfile.vercel`). Production URL `https://keeps-api-yashsoni102-progs-projects.vercel.app`. Deploy notes: `infra/vercel.md` |
 | Job dispatch | Synchronous self-POST to `/api/process/{id}` (`X-Worker-Secret`) + in-process retry + daily cron sweep (`GET /api/process/sweep`) |
-| Firebase Hosting URL | https://keeps.web.app (site `keeps`). The old `clipnote` site (clipnote.web.app) only forwards to it (`infra/clipnote-forward/`); Hosting site IDs cannot be renamed |
-| Legacy Cloud Run URL | https://clip-note-api-674775099277.us-central1.run.app (rollback only; torn down after soak) |
-| Service account | `clip-note-vercel` (`roles/datastore.user`), key supplied as `GOOGLE_SERVICE_ACCOUNT_JSON` (written to `/tmp/sa.json`, exported as `GOOGLE_APPLICATION_CREDENTIALS`) |
+| Firebase Hosting URL | https://keeps.web.app (site `keeps`). The old `clipnote` site (clipnote.web.app) only forwards to it (`infra/old-domain-forward/`); Hosting site IDs cannot be renamed |
+| Legacy Cloud Run URL (old name) | https://clip-note-api-674775099277.us-central1.run.app (rollback only; torn down after soak) |
+| Service account | `clip-note-vercel` (legacy name, cannot be renamed; `roles/datastore.user`), key supplied as `GOOGLE_SERVICE_ACCOUNT_JSON` (written to `/tmp/sa.json`, exported as `GOOGLE_APPLICATION_CREDENTIALS`) |
 | AI provider | OpenRouter (`OPENROUTER_API_KEY`) |
-| Firebase web app | "Clip Note" `1:674775099277:web:5a3293c1c0b570e392bfc4` |
+| Firebase web app | "Clip Note" (legacy display name) `1:674775099277:web:5a3293c1c0b570e392bfc4` |
 | Models | See "Models" below. All env-overridable in `backend/config.py`. |
 | TMDB (note enrichment) | `TMDB_BEARER` env on Vercel = TMDB v4 Read Access Token. Empty = enrichment no-op. Free API; "Streaming data by JustWatch" credit is mandatory wherever providers render. |
-| Billing budget | "Clip Note credits guard" ₹30,000 (50/80/100% alerts) |
+| Billing budget | "Clip Note credits guard" (legacy name) ₹30,000 (50/80/100% alerts) |
 
 ---
 
 ## Tech Stack
 
-Frontend: Vite SPA (React 19, TanStack Router, the "Keeps" design in plain CSS with system fonts; Tailwind 4 kept only for category-palette utilities), Firebase Hosting. The app was renamed Clip Note -> Keeps in the UI/manifest/title/login only; backend, GCP/Firebase/Vercel names, the `clip-note-api` URL, Firestore collections, `clipnote*` localStorage keys and the `X-Clipnote-*` headers are unchanged on purpose. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
+Frontend: Vite SPA (React 19, TanStack Router, the "Keeps" design in plain CSS with system fonts; Tailwind 4 kept only for category-palette utilities), Firebase Hosting. Renamed from "Clip Note" to Keeps everywhere; only external identifiers keep the old name (GCP project, service account `clip-note-vercel`, Firebase Hosting site `clipnote` serving the old-domain forwarder). `src/lib/storage-migrate.ts` copies old `clipnote-*`/`clipnote.*` localStorage keys to `keeps-*`/`keeps.*` at startup. Auth: Firebase Google Sign-In. DB: Firestore (schema-less; AI-invented types need no migrations). Backend: FastAPI container on Vercel Hobby (`Dockerfile.vercel`, 300 s/request). AI: OpenRouter.
 
 ---
 
@@ -160,7 +161,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/process/sweep  
 - **Model IDs**: verify against `GET https://openrouter.ai/api/v1/models` before changing; a wrong ID fails immediately.
 - **yt-dlp/ffmpeg**: `Dockerfile.vercel` keeps ffmpeg. yt-dlp from Vercel IPs may be blocked; Apify is the paid fallback.
 - **keeps.css is unlayered, so it beats Tailwind utilities.** Category colours must use the `noteAccent` classes (`src/lib/note-meta.ts`) on inner elements, not on elements keeps.css styles.
-- **`X-Clipnote-Url` / `X-Clipnote-Source` headers are a contract** with the iOS Shortcut and backend; keep the names despite the rename. Same for `clipnote-theme` / `clipnote.*` localStorage keys.
+- **iOS Shortcut headers** are `X-Keeps-Url` / `X-Keeps-Source` (set by `infra/build_shortcut.py`, read in `routers/ingest.py`).
 - **iOS Shortcut**: Settings serves the self-hosted signed `keeps.shortcut` until the owner republishes the iCloud one-tap link ("Save to Keeps").
 - **Local dev**: `frontend/.env.development.local` may point the API at localhost:8080; `.claude/launch.json` has `frontend-prodapi` to run the dev server against the prod API.
 - **Firestore real-time on web** needs the JS SDK (client) in `src/integrations/firebase/client.ts`.

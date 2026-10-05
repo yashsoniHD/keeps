@@ -10,7 +10,7 @@ from google.cloud.firestore_v1 import AsyncClient, ArrayRemove, ArrayUnion, Incr
 from config import settings
 from services.usage_meter import UsageMeter
 
-log = logging.getLogger("clipnote.firebase")
+log = logging.getLogger("keeps.firebase")
 
 _app = None
 _db: AsyncClient | None = None

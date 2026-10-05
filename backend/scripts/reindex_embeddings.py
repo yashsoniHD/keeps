@@ -15,7 +15,7 @@ from google.cloud.firestore_v1.vector import Vector
 from services.embeddings import EMBED_TEXT_VERSION, embedding_service, note_embedding_text
 from services.firebase import get_db
 
-log = logging.getLogger("clipnote.reindex_embeddings")
+log = logging.getLogger("keeps.reindex_embeddings")
 
 
 async def main(apply: bool, user_id: str | None, per_minute: int) -> None:

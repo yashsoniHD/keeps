@@ -136,7 +136,7 @@ export function Library({ typeParam }: { typeParam?: string }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedJobs, setDismissedJobs] = useState<string[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem("clipnote.dismissedJobs") || "[]");
+      return JSON.parse(localStorage.getItem("keeps.dismissedJobs") || "[]");
     } catch {
       return [];
     }
@@ -249,10 +249,10 @@ export function Library({ typeParam }: { typeParam?: string }) {
   // Getting-started guide: shown until users/{uid}.onboarding_done (cross-device); the
   // localStorage mirror prevents a flash of the guide on every load after dismissal.
   useEffect(() => {
-    if (!user || localStorage.getItem("clipnote.onboardingDone") === "1") return;
+    if (!user || localStorage.getItem("keeps.onboardingDone") === "1") return;
     getOnboardingDone(user.uid)
       .then((done) => {
-        if (done) localStorage.setItem("clipnote.onboardingDone", "1");
+        if (done) localStorage.setItem("keeps.onboardingDone", "1");
         else setShowGuide(true);
       })
       .catch(() => {});
@@ -261,7 +261,7 @@ export function Library({ typeParam }: { typeParam?: string }) {
   const dismissGuide = () => {
     setShowGuide(false);
     try {
-      localStorage.setItem("clipnote.onboardingDone", "1");
+      localStorage.setItem("keeps.onboardingDone", "1");
     } catch {
       /* mirror only — the Firestore flag below is the durable copy */
     }
@@ -322,7 +322,7 @@ export function Library({ typeParam }: { typeParam?: string }) {
     setDismissedJobs((prev) => {
       const next = [...prev.filter((id) => id !== jobId), jobId].slice(-100);
       try {
-        localStorage.setItem("clipnote.dismissedJobs", JSON.stringify(next));
+        localStorage.setItem("keeps.dismissedJobs", JSON.stringify(next));
       } catch {
         /* in-memory dismissal still applies this session */
       }

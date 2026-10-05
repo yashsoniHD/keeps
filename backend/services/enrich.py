@@ -10,7 +10,7 @@ from services import tmdb
 from services.firebase import get_db
 from services.gemini import is_entertainment
 
-log = logging.getLogger("clipnote.enrich")
+log = logging.getLogger("keeps.enrich")
 
 
 async def get_user_region(uid: str) -> str:

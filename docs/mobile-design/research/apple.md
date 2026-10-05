@@ -1,6 +1,6 @@
-# Apple guidance for Clipnote on mobile
+# Apple guidance for Keeps on mobile
 
-Researched 3 October 2026. Sources are official Apple documentation and W3C. No existing Clipnote frontend or mobile design was inspected. HIG statements below are platform **guidance**, not claims about mandatory App Review rules. **Product decisions** are recommendations for Clipnote, not prescriptions from Apple.
+Researched 3 October 2026. Sources are official Apple documentation and W3C. No existing Keeps frontend or mobile design was inspected. HIG statements below are platform **guidance**, not claims about mandatory App Review rules. **Product decisions** are recommendations for Keeps, not prescriptions from Apple.
 
 ## 1. Design around returning to useful content
 
@@ -26,7 +26,7 @@ Researched 3 October 2026. Sources are official Apple documentation and W3C. No 
 
 **Apple guidance:** Display useful content promptly and allow other activity while work continues in the background. Use determinate progress only when duration is known; otherwise use indeterminate feedback. [Loading](https://developer.apple.com/design/human-interface-guidelines/loading), [Progress indicators](https://developer.apple.com/design/human-interface-guidelines/progress-indicators)
 
-**Product decision:** The inbound flow is Share → Clipnote → source preview → Save → durable saved acknowledgement. Collection and “Why I saved this” are optional. Confirm “Link saved. Preparing your note.” only after persistence succeeds. Show the pending note in Library; allow leaving immediately. Processing, ready, and failed are distinct states. A failure keeps the original URL and offers Retry/Open source. Do not fabricate percentages or describe extraction stages the backend cannot observe. Native share extension, PWA share target, and iOS Shortcut are different implementations; demonstrate the applicable entry point honestly.
+**Product decision:** The inbound flow is Share → Keeps → source preview → Save → durable saved acknowledgement. Collection and “Why I saved this” are optional. Confirm “Link saved. Preparing your note.” only after persistence succeeds. Show the pending note in Library; allow leaving immediately. Processing, ready, and failed are distinct states. A failure keeps the original URL and offers Retry/Open source. Do not fabricate percentages or describe extraction stages the backend cannot observe. Native share extension, PWA share target, and iOS Shortcut are different implementations; demonstrate the applicable entry point honestly.
 
 ## 5. Use sheets for brief decisions
 
@@ -46,6 +46,6 @@ Researched 3 October 2026. Sources are official Apple documentation and W3C. No 
 - **Apple guidance:** iOS’s recommended default custom text size is 17 pt. Support enlarged text, ideally at least 200%, through Dynamic Type or equivalent behavior. [Accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility)
 - **Apple guidance:** Give important controls accessible labels, expose document headings, and report meaningful content changes to assistive technology. [VoiceOver](https://developer.apple.com/design/human-interface-guidelines/voiceover)
 - **Official criteria:** Apple’s Sufficient Contrast declaration generally expects 4.5:1 for ordinary text in common tasks. Its Reduced Motion declaration concerns respecting reduced-motion needs. [Contrast](https://developer.apple.com/help/app-store-connect/manage-app-accessibility/sufficient-contrast-evaluation-criteria/), [Reduced Motion](https://developer.apple.com/help/app-store-connect/manage-app-accessibility/reduced-motion-evaluation-criteria)
-- **Web distinction:** WCAG 2.2 AA target-size guidance is 24 × 24 CSS px with exceptions; AAA enhanced guidance is 44 × 44 CSS px. Apple points and CSS pixels are separate units. Clipnote should choose 44 CSS px targets as its web design baseline. [WCAG minimum](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum), [WCAG enhanced](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced)
+- **Web distinction:** WCAG 2.2 AA target-size guidance is 24 × 24 CSS px with exceptions; AAA enhanced guidance is 44 × 44 CSS px. Apple points and CSS pixels are separate units. Keeps should choose 44 CSS px targets as its web design baseline. [WCAG minimum](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum), [WCAG enhanced](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced)
 
 **Product decision:** Verify the entire save → read → organize → find → ask loop with large text, VoiceOver, keyboard navigation, reduced motion, light/dark appearance, and a narrow viewport. No key action should depend solely on a swipe, long press, color, hover, or an image. Respect safe areas and keep controls clear of the software keyboard. Prefer solid readable content surfaces; any translucent navigation must preserve contrast over arbitrary covers. [Layout](https://developer.apple.com/design/human-interface-guidelines/layout)

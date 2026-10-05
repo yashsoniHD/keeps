@@ -1,9 +1,9 @@
-// Minimal service worker: required for PWA installability (which puts Clipnote in the
+// Minimal service worker: required for PWA installability (which puts Keeps in the
 // OS share sheet via the manifest's share_target). It only handles the share POST and
 // caches hashed static assets. Everything else (index.html, API, Firestore, images) is not
 // intercepted at all, so it goes network-direct with no SW hop and no stale app shell.
-const SHARE_CACHE = "clipnote-shared";
-const STATIC_CACHE = "clipnote-static-v1";
+const SHARE_CACHE = "keeps-shared";
+const STATIC_CACHE = "keeps-static-v1";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) =>

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Clip Note GCP bootstrap (Firebase/Firestore + backend service account only). Run once: bash infra/setup.sh weekly-updates-automation
+# Keeps GCP bootstrap (Firebase/Firestore + backend service account only). Run once: bash infra/setup.sh weekly-updates-automation
 set -e
 PROJECT=$1
 if [ -z "$PROJECT" ]; then echo "Usage: setup.sh <project-id>"; exit 1; fi
@@ -15,8 +15,9 @@ gcloud services enable \
 # Runtime service account for the Vercel backend. Firestore + Firebase Auth admin only: no
 # Vertex, Cloud Tasks or Storage roles. Export a key and paste it into Vercel as
 # GOOGLE_SERVICE_ACCOUNT_JSON (see infra/vercel.md).
+# NOTE: "clip-note-vercel" is a legacy SA name (the app is now Keeps); SA names cannot be renamed.
 gcloud iam service-accounts create clip-note-vercel \
-  --display-name="Clip Note (Vercel backend)" || true
+  --display-name="Keeps (Vercel backend)" || true
 
 SA="clip-note-vercel@${PROJECT}.iam.gserviceaccount.com"
 

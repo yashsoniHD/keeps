@@ -1,6 +1,6 @@
 """firestore.rules against the real emulator (REST, unsigned emulator JWTs). Skipped unless
 FIRESTORE_EMULATOR_HOST is set — run with:
-  firebase emulators:exec --only firestore --project demo-clipnote \
+  firebase emulators:exec --only firestore --project demo-keeps \
     "cd backend && .venv/bin/python -m pytest -q tests/test_adversarial_rules_emulator.py"
 """
 import base64
@@ -12,7 +12,7 @@ import pytest
 
 HOST = os.getenv("FIRESTORE_EMULATOR_HOST")
 pytestmark = pytest.mark.skipif(not HOST, reason="Firestore emulator not running")
-PROJECT = os.getenv("GCLOUD_PROJECT", "demo-clipnote")
+PROJECT = os.getenv("GCLOUD_PROJECT", "demo-keeps")
 BASE = f"http://{HOST}/v1/projects/{PROJECT}/databases/(default)/documents"
 
 

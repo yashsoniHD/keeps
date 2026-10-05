@@ -1,6 +1,6 @@
 # Organizing, finding and reusing saved knowledge
 
-Research date: 3 October 2026. Scope: Raindrop.io, Fabric and Recall official documentation. No existing Clipnote frontend or mobile design was inspected. These sources establish documented features, not independent evidence that the features improve retention or task success. Recommendations below are design hypotheses to validate.
+Research date: 3 October 2026. Scope: Raindrop.io, Fabric and Recall official documentation. No existing Keeps frontend or mobile design was inspected. These sources establish documented features, not independent evidence that the features improve retention or task success. Recommendations below are design hypotheses to validate.
 
 ## What the products document
 
@@ -9,7 +9,7 @@ Research date: 3 October 2026. Scope: Raindrop.io, Fabric and Recall official do
 - One search covers bookmarks, collections, tags, highlights and annotations. Results are grouped by kind. Queries can combine text with filters; search can be restricted to the current collection. The documentation also describes matching by meaning and full-content search, including YouTube transcripts. Newly saved metadata is searchable before content indexing finishes. [Search documentation](https://help.raindrop.io/using-search)
 - Collections represent topics, projects or interests. Unfiled bookmarks remain in Unsorted. A bookmark belongs to one collection; placing it in another requires a separate copy. Collections support nesting and independent list/grid/moodboard settings. [Collections documentation](https://help.raindrop.io/collections)
 
-**Transferable principle:** clear scope and visible filters help users understand what they are searching. A familiar collection name can be a stronger memory cue than a generated tag. **Tradeoff:** single-folder membership forces a choice when one item serves several purposes; Clipnote should avoid duplicate notes merely to support multiple contexts.
+**Transferable principle:** clear scope and visible filters help users understand what they are searching. A familiar collection name can be a stronger memory cue than a generated tag. **Tradeoff:** single-folder membership forces a choice when one item serves several purposes; Keeps should avoid duplicate notes merely to support multiple contexts.
 
 ### Fabric: useful without maintaining a filing system
 
@@ -17,7 +17,7 @@ Research date: 3 October 2026. Scope: Raindrop.io, Fabric and Recall official do
 - Search accepts natural-language descriptions, finds related content by meaning and can jump to matching paragraphs or media timestamps. It also offers a route from search results into an AI conversation. [Search feature page](https://fabric.so/features/search)
 - Recap packages recent saved material and writing into an email summary. Users choose a schedule. This demonstrates a deliberate return loop, although the page supplies no controlled retention results. [Recap feature page](https://fabric.so/product/recap)
 
-**Transferable principle:** organization should improve a working library, not be a prerequisite for one. Search results should explain the match and support the next task. **Tradeoff:** exposing folders, spaces, tags, boards and canvases together would be excessive for Clipnote's mobile purpose.
+**Transferable principle:** organization should improve a working library, not be a prerequisite for one. Search results should explain the match and support the next task. **Tradeoff:** exposing folders, spaces, tags, boards and canvases together would be excessive for Keeps's mobile purpose.
 
 ### Recall: explicit context and reusable answers
 
@@ -28,7 +28,7 @@ Research date: 3 October 2026. Scope: Raindrop.io, Fabric and Recall official do
 
 **Transferable principle:** make the evidence set visible, then let useful synthesis become another saved object. **Tradeoff:** graph browsing, quizzes, model pickers and personas create demands beyond everyday recipe, travel and product retrieval.
 
-## Proposed Clipnote behavior
+## Proposed Keeps behavior
 
 ### 1. Two understandable kinds of organization
 

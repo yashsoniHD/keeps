@@ -17,7 +17,7 @@ from openai import OpenAI
 from config import settings
 from services.usage_meter import record_usage
 
-log = logging.getLogger("clipnote.embeddings")
+log = logging.getLogger("keeps.embeddings")
 
 # Bump whenever `note_embedding_text` changes what goes into the vector, so a backfill can tell
 # which notes were embedded under the old recipe and re-embed only those.

@@ -4,6 +4,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-ENV TEMP_DOWNLOAD_DIR=/tmp/clip_note_downloads
+ENV TEMP_DOWNLOAD_DIR=/tmp/keeps_downloads
 # Vercel injects PORT. Shell form so ${PORT} expands; exec so SIGTERM reaches uvicorn.
 CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-80}"]

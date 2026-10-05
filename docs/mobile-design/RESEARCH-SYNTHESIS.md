@@ -8,20 +8,20 @@ Decision record · 3 October 2026
 
 The proposed interface has three stable bottom-bar destinations: **Notes, Collections, Ask**. A Search button beside **Your library** opens retrieval from Notes. Save is an action. Notes works before a user creates any collections. There is no obligation to empty an inbox, complete a reading backlog, or maintain a taxonomy. Returning should serve a person's intent, not a streak or an unread counter.
 
-This supports the [design direction](DIRECTION.md), interactive prototype and specification. Research used official sources; no existing Clipnote frontend was inspected. The sources document product capabilities and platform guidance. We measured no competitor efficacy, retention or usability. Publication or update dates do not prove that we tested a current native build; desktop-only and plan-dependent features must not be generalized to mobile.
+This supports the [design direction](DIRECTION.md), interactive prototype and specification. Research used official sources; no existing Keeps frontend was inspected. The sources document product capabilities and platform guidance. We measured no competitor efficacy, retention or usability. Publication or update dates do not prove that we tested a current native build; desktop-only and plan-dependent features must not be generalized to mobile.
 
 ## Competitor comparison and decisions
 
-| Reference | Documented pattern | Adopt for Clipnote | Avoid carrying over |
+| Reference | Documented pattern | Adopt for Keeps | Avoid carrying over |
 |---|---|---|---|
 | Readwise Reader | Mobile share capture, optional personal context, readable video transcripts and preservation of source relationships. | Save where interest arises; keep “Why I saved this” optional; make source evidence accessible. | Requiring reading workflow decisions during capture or assuming every video has a usable transcript. [Saving](https://docs.readwise.io/reader/docs/saving-content), [videos](https://docs.readwise.io/reader/docs/faqs/videos) |
 | Matter | Clean reading, audio/text modes, and YouTube/podcast transcription. | Judge capture by the usefulness of the result; let the subject determine the note structure. | Making playback or a large cover dominate the reading screen; introducing audio as a prerequisite. [Product](https://www.getmatter.com/) |
-| mymind | A short article summary can lead into a full Reading Mode; archived articles are a plan-dependent capability. | A recognizable first layer, then depth when needed. | Promising full-source preservation when Clipnote stores only extracted information. [Reading Mode](https://mymind.helpscoutdocs.com/article/67-how-reading-mode-works) |
+| mymind | A short article summary can lead into a full Reading Mode; archived articles are a plan-dependent capability. | A recognizable first layer, then depth when needed. | Promising full-source preservation when Keeps stores only extracted information. [Reading Mode](https://mymind.helpscoutdocs.com/article/67-how-reading-mode-works) |
 | Raindrop.io | Visible search scope and filters; collections have single membership. | Explicit, removable filters and recognizable collection names. | Duplicating a note to place it in two contexts. [Search](https://help.raindrop.io/using-search), [collections](https://help.raindrop.io/collections) |
 | Fabric | Natural-language search, optional organization and a route from results into conversation. | Find a remembered item directly, then carry its context into Ask. | Exposing folders, spaces, boards and tags as competing concepts on a phone. [Search](https://fabric.so/features/search), [organization](https://fabric.so/features/organization) |
 | Recall | Explicit chat context, sources and saving an answer as a card; review scheduling is intentional. | Visible evidence scope, useful citations and Save as note. | Making graph navigation, quizzes or study commitments part of everyday capture. [Chat](https://docs.recall.it/deep-dives/chat/overview), [review](https://docs.recall.it/getting-started/6-review-content) |
 
-These are selected design references, not a ranking of competitors. The “avoid” column records Clipnote's scope choices, not evidence that those features are ineffective elsewhere.
+These are selected design references, not a ranking of competitors. The “avoid” column records Keeps's scope choices, not evidence that those features are ineffective elsewhere.
 
 ## Four tensions resolved
 
@@ -41,7 +41,7 @@ Automatic type suggestions reduce capture effort but remain correctable. Collect
 
 The proposed sequence is Saving → Saved / Preparing note → Ready, with a recoverable Needs attention state. The saved acknowledgement requires durable persistence. A failed extraction preserves the source and offers an appropriate next action. Unsupported offline capture says it is not saved.
 
-Apple advises allowing other activity during loading and showing determinate progress only when measurable. Therefore no fabricated percentages or unobservable processing stages. This state model is a Clipnote proposal, not a competitor behavior we verified. [Loading](https://developer.apple.com/design/human-interface-guidelines/loading), [progress](https://developer.apple.com/design/human-interface-guidelines/progress-indicators)
+Apple advises allowing other activity during loading and showing determinate progress only when measurable. Therefore no fabricated percentages or unobservable processing stages. This state model is a Keeps proposal, not a competitor behavior we verified. [Loading](https://developer.apple.com/design/human-interface-guidelines/loading), [progress](https://developer.apple.com/design/human-interface-guidelines/progress-indicators)
 
 ### 4. Useful return without another obligation
 

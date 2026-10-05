@@ -15,7 +15,7 @@ from collections import deque
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-log = logging.getLogger("clipnote.ratelimit")
+log = logging.getLogger("keeps.ratelimit")
 
 # Only the costly endpoints are throttled. Other reads, the OIDC worker (/api/process*), and
 # the client-error sink are exempt. str.startswith accepts a tuple of prefixes.

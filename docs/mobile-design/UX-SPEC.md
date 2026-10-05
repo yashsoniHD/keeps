@@ -1,4 +1,4 @@
-# Clipnote: mobile experience specification
+# Keeps: mobile experience specification
 
 3 October 2026 · Proposed design · Companion to the interactive prototype
 
@@ -6,11 +6,11 @@
 
 **A saved video becomes something you can use, then find when you need it.** Success is a person cooking from a saved recipe, revisiting a recommendation or comparing their sources. Saving is the beginning of that loop.
 
-This specification was created without inspecting Clipnote's existing frontend or mobile design. Product capabilities come from the supplied project brief and have not been independently audited against the backend. The prototype demonstrates selected interactions with fixture data; this document defines the fuller production behavior. Additional states, integrations and capabilities require implementation.
+This specification was created without inspecting Keeps's existing frontend or mobile design. Product capabilities come from the supplied project brief and have not been independently audited against the backend. The prototype demonstrates selected interactions with fixture data; this document defines the fuller production behavior. Additional states, integrations and capabilities require implementation.
 
-Apple emphasizes purpose, agency, familiarity, flexibility and simplicity. The resulting Clipnote decisions are ours: optional filing, predictable navigation, readable notes and recoverable actions. HIG guidance is not an App Review ruling. [Apple design principles](https://developer.apple.com/design/human-interface-guidelines/design-principles)
+Apple emphasizes purpose, agency, familiarity, flexibility and simplicity. The resulting Keeps decisions are ours: optional filing, predictable navigation, readable notes and recoverable actions. HIG guidance is not an App Review ruling. [Apple design principles](https://developer.apple.com/design/human-interface-guidelines/design-principles)
 
-Competitor documentation establishes available patterns, not measured efficacy. Reader shows optional capture context; mymind separates summary from deeper reading; Raindrop provides explicit retrieval scope; Fabric supports retrieval without filing; Recall makes chat context and sources visible. These inform hypotheses to test with Clipnote users. [Reader saving](https://docs.readwise.io/reader/docs/saving-content), [mymind Reading Mode](https://mymind.helpscoutdocs.com/article/67-how-reading-mode-works), [Raindrop Search](https://help.raindrop.io/using-search), [Fabric Organization](https://fabric.so/features/organization), [Recall Chat](https://docs.recall.it/deep-dives/chat/overview)
+Competitor documentation establishes available patterns, not measured efficacy. Reader shows optional capture context; mymind separates summary from deeper reading; Raindrop provides explicit retrieval scope; Fabric supports retrieval without filing; Recall makes chat context and sources visible. These inform hypotheses to test with Keeps users. [Reader saving](https://docs.readwise.io/reader/docs/saving-content), [mymind Reading Mode](https://mymind.helpscoutdocs.com/article/67-how-reading-mode-works), [Raindrop Search](https://help.raindrop.io/using-search), [Fabric Organization](https://fabric.so/features/organization), [Recall Chat](https://docs.recall.it/deep-dives/chat/overview)
 
 ## 2. Navigation and screen inventory
 
@@ -89,7 +89,7 @@ Keep favorite and collection actions accessible; place secondary actions in a la
 
 **Collections mean what the person will use it for.** Weeknight dinners, Japan trip and New apartment can mix types. A note may belong to several collections through references, without duplicate content. Creation asks for a name only. The picker is searchable, shows membership and applies changes explicitly. Removing a collection retains its notes in All notes.
 
-All notes works with zero collections; avoid an Unsorted badge implying unfinished work. Suggestions may propose an existing collection with a reason and one-tap acceptance. Do not create or reorganize personal collections silently. Recall's multi-tag contexts and Fabric's optional filing support this direction; the exact Clipnote model is a product proposal. [Recall tagging](https://docs.recall.it/deep-dives/tagging), [Fabric Organization](https://fabric.so/features/organization)
+All notes works with zero collections; avoid an Unsorted badge implying unfinished work. Suggestions may propose an existing collection with a reason and one-tap acceptance. Do not create or reorganize personal collections silently. Recall's multi-tag contexts and Fabric's optional filing support this direction; the exact Keeps model is a product proposal. [Recall tagging](https://docs.recall.it/deep-dives/tagging), [Fabric Organization](https://fabric.so/features/organization)
 
 ## 7. Search and Ask
 
@@ -105,7 +105,7 @@ Ask starts with **All notes**, a changeable scope chip and three relevant exampl
 
 Answers include source links near supported claims, a compact source list and optional useful follow-ups. Opening a citation preserves conversation state. Display actual coverage: Used 8 relevant notes for ranked retrieval; Reviewed all 12 notes only for exhaustive processing; Reviewed 50 of 83 matching notes when capped. Render the interpreted date range in the user's timezone. Do not equate All notes scope with reviewing every note.
 
-Absent evidence receives a direct explanation. General conversation is labeled General answer and carries no invented note citations. This design does not add web search. Recall documents visible source scope, pinned context and source references; Clipnote adopts the inspectability principle. [Recall Chat](https://docs.recall.it/deep-dives/chat/overview), [Apple generative AI](https://developer.apple.com/design/human-interface-guidelines/generative-ai)
+Absent evidence receives a direct explanation. General conversation is labeled General answer and carries no invented note citations. This design does not add web search. Recall documents visible source scope, pinned context and source references; Keeps adopts the inspectability principle. [Recall Chat](https://docs.recall.it/deep-dives/chat/overview), [Apple generative AI](https://developer.apple.com/design/human-interface-guidelines/generative-ai)
 
 **Save as note** opens a preview with editable title and optional collection. Saving creates one structured artifact with source-note references. Repeat taps are idempotent; a saved state offers Open note. Failure preserves the answer and allows retry. Do not silently mutate existing notes or organize the library through chat.
 

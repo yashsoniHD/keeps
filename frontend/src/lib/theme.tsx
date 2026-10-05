@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 export type Theme = "light" | "dark" | "system";
 type Resolved = "light" | "dark";
 
-const STORAGE_KEY = "clipnote-theme";
+const STORAGE_KEY = "keeps-theme";
 // Browser-chrome colors (status bar / address bar) = Keeps --k-bg (keeps/keeps.css). index.html's
 // first-paint script and manifest.json must match these exactly so there's no theme-color flash.
 const THEME_COLOR: Record<Resolved, string> = { light: "#ffffff", dark: "#000000" };

@@ -8,7 +8,7 @@ Firestore and Hosting stay on Firebase.
 ```bash
 # Run from the REPO ROOT: the Vercel project's Root Directory setting is `backend`, so
 # deploying from inside backend/ fails with "Root Directory \"backend\" does not exist".
-vercel link --yes --scope yashsoni102-progs-projects --project clip-note-api
+vercel link --yes --scope yashsoni102-progs-projects --project keeps-api
 # vercel env add <NAME> production   (for each variable below)
 vercel deploy --prod --yes
 ```
@@ -28,7 +28,7 @@ preflights and the cron GET all return 401.
 | `VIDEO_CALL_TIMEOUT_S`, `VIDEO_MAX_BYTES` | video-call timeout (default 120) and max mp4 size (default 25 MB; larger files under `MAX_VIDEO_SECONDS` are ffmpeg re-encoded, needs libx264) |
 | `MAX_VIDEO_SECONDS` | default 600; longer reels are not sent to the video model |
 | `YOUTUBE_MAX_DIRECT_SECONDS` | default 900; longer YouTube videos use the fallback scraper (~8 s latency per minute of video) |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | key JSON for SA `clip-note-vercel` (`roles/datastore.user`). Written to `/tmp/sa.json` at boot and exported as `GOOGLE_APPLICATION_CREDENTIALS`; used by Firebase Admin and Firestore |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | key JSON for SA `clip-note-vercel` (legacy name, cannot be renamed) (`roles/datastore.user`). Written to `/tmp/sa.json` at boot and exported as `GOOGLE_APPLICATION_CREDENTIALS`; used by Firebase Admin and Firestore |
 | `GOOGLE_CLOUD_PROJECT` | `weekly-updates-automation` |
 | `WORKER_URL` | stable production alias, e.g. `https://<project>.vercel.app` (no trailing slash) |
 | `WORKER_SECRET` | random string; authenticates the self-dispatch to `/api/process*`. Empty disables the route (fail closed) and enables the local inline dev path |

@@ -18,7 +18,7 @@ def _chain(name: str, default: str) -> list[str]:
 
 
 class Settings:
-    PROJECT_NAME = "Clip Note API"
+    PROJECT_NAME = "Keeps API"
     VERSION = "1.0.0"
 
     GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "weekly-updates-automation")
@@ -57,7 +57,7 @@ class Settings:
     WORKER_SECRET: str = os.getenv("WORKER_SECRET", "")
     CRON_SECRET: str = os.getenv("CRON_SECRET", "")
 
-    TEMP_DOWNLOAD_DIR: str = os.getenv("TEMP_DOWNLOAD_DIR", "/tmp/clip_note_downloads")
+    TEMP_DOWNLOAD_DIR: str = os.getenv("TEMP_DOWNLOAD_DIR", "/tmp/keeps_downloads")
 
     # Cost guardrails (budget ~$360 total).
     MAX_NOTES_PER_USER: int = int(os.getenv("MAX_NOTES_PER_USER", "500"))

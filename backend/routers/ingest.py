@@ -16,7 +16,7 @@ from services.firebase import get_db, touch_user_activity
 from services.net_guard import BlockedURLError, assert_public_url_async
 
 router = APIRouter(tags=["ingest"])
-log = logging.getLogger("clipnote.ingest")
+log = logging.getLogger("keeps.ingest")
 
 
 async def _enforce_cost_caps(db, user_id: str, *, skip_note_cap: bool = False) -> bool:
@@ -75,8 +75,8 @@ async def _parse_ingest_request(request: Request) -> IngestRequest:
 
     JSON-only path: URL captures and typed-text notes. Binary inputs (image/pdf/voice)
     go through /ingest/upload, not here."""
-    url = request.headers.get("x-clipnote-url", "")
-    source = request.headers.get("x-clipnote-source", "web")
+    url = request.headers.get("x-keeps-url", "")
+    source = request.headers.get("x-keeps-source", "web")
     input_type = "url"
     text = title = content = note_hint = None
     process_ai = True

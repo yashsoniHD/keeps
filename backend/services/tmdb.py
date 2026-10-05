@@ -23,7 +23,7 @@ import httpx
 from config import settings
 from services.firebase import get_db
 
-log = logging.getLogger("clipnote.tmdb")
+log = logging.getLogger("keeps.tmdb")
 
 
 @dataclass

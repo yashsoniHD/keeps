@@ -1802,9 +1802,9 @@ textarea {
 }
 .app-title .brand {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 34px;
+  font-size: 30px;
   font-weight: 700;
-  letter-spacing: -1.8px;
+  letter-spacing: -1.6px;
 }
 .brand-symbol {
   width: 28px;
