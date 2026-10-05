@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/keeps/templates.css"
+        ],
+        "createdAt": "2026-10-05T13:54:49.419Z",
+        "reason": "Claude decided: remaining hit is .t-quote, a typographic pull-quote left rule (blockquote convention), not a card side-tab; verdict card fixed"
+      }
+    ]
+  }
+}

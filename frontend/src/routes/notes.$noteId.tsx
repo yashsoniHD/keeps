@@ -1,15 +1,16 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { ClipLoader } from "@/components/ClipMark";
+import { Loader2 } from "lucide-react";
 import { getNote, watchJob } from "@/lib/firestore";
-import { deleteNote, reextractNote, ApiError } from "@/lib/api";
+import { reextractNote, ApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
-import { NoteContent } from "@/components/NoteContent";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { AppShell } from "@/components/AppShell";
+import { toView } from "@/keeps/toView";
+import { NoteActions } from "@/keeps/NoteActions";
+import { CategoryChip, Icon, IconButton, Thumbnail } from "@/keeps/ui";
+import { NoteBody } from "@/keeps/templates/NoteBody";
+import { peekNote } from "@/keeps/noteCache";
 import { feedNeighbors } from "@/lib/note-nav";
-import { FOCUS_RING } from "@/lib/ui";
 import type { Note } from "@/lib/types";
 import { analytics } from "@/lib/analytics";
 
@@ -19,9 +20,16 @@ function NoteDetail() {
   const { noteId } = Route.useParams();
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  const [note, setNote] = useState<Note | null>(null);
+  const router = useRouter();
+  const canGoBack = useCanGoBack();
+  // Seeded from the library's live cache so the page paints instantly; getNote revalidates.
+  const [note, setNote] = useState<Note | null>(() => {
+    const cached = peekNote(noteId);
+    return cached && cached.user_id === user?.uid ? cached : null;
+  });
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   useEffect(() => {
     // Preserve the destination: after sign-in the login page replays this path,
@@ -33,9 +41,19 @@ function NoteDetail() {
 
   useEffect(() => {
     if (user && noteId) {
+      let stale = false; // a slow fetch for the previous note must not overwrite this one
       setLoadError(false);
+      setNotFound(false);
+      // Paging to a new note: show its cached copy (only ever the user's own) or the spinner,
+      // never the previous note under the new URL.
+      setNote((cur) => {
+        if (cur?.id === noteId && cur.user_id === user.uid) return cur;
+        const cached = peekNote(noteId);
+        return cached && cached.user_id === user.uid ? cached : null;
+      });
       getNote(noteId)
         .then((n) => {
+          if (stale) return;
           if (!n || n.user_id !== user.uid) {
             setNotFound(true);
             return;
@@ -44,12 +62,16 @@ function NoteDetail() {
           analytics.noteViewed(n.content_type);
         })
         .catch((err) => {
+          if (stale) return;
           // A deleted note or one the user can't read comes back as permission-denied (Firestore
           // rules), not a network error — treat it as not-found rather than blaming the connection.
           const code = (err as { code?: string })?.code;
           if (code === "permission-denied" || code === "not-found") setNotFound(true);
           else setLoadError(true);
         });
+      return () => {
+        stale = true;
+      };
     }
   }, [user, noteId]);
 
@@ -105,11 +127,13 @@ function NoteDetail() {
   // Start each note at the top when swiping to the next one.
   useEffect(() => {
     window.scrollTo(0, 0);
+    setActionsOpen(false); // the sheet holds the previous note's edit state
   }, [noteId]);
 
   // Arrow keys page between notes (ignored while typing in a field / editing text).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) return; // sheet open: don't page
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if (e.key === "ArrowLeft") go(prev);
@@ -119,7 +143,7 @@ function NoteDetail() {
     return () => window.removeEventListener("keydown", onKey);
   }, [go, prev, next]);
 
-  if (loadError) {
+  if (loadError && !note) {
     return (
       <ErrorState
         title="Couldn't load this note"
@@ -130,8 +154,12 @@ function NoteDetail() {
   }
   if (loading || (!note && !notFound)) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <ClipLoader className="h-20 w-20" />
+      <div
+        className="flex min-h-screen items-center justify-center"
+        role="status"
+        aria-label="Loading"
+      >
+        <Loader2 size={28} className="spin" aria-hidden="true" />
       </div>
     );
   }
@@ -139,53 +167,127 @@ function NoteDetail() {
     return <ErrorState title="Note not found" body="This note doesn't exist or was deleted." />;
   }
 
-  return (
-    <AppShell>
-      <div>
-        <NoteContent
-          note={note}
-          onPatch={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
-          onReextract={onReextract}
-          reextracting={reextracting}
-          reextractError={reextractError}
-          onDismissReextractError={() => setReextractError(null)}
-          onDelete={async () => {
-            await deleteNote(note.id);
-            navigate({ to: "/" });
-          }}
-        />
-      </div>
+  const view = toView(note);
+  const age = view.age && view.age.charAt(0).toLowerCase() + view.age.slice(1); // "3 Oct" stays
+  // Back to wherever the user came from inside the app; otherwise the library.
+  const back = () => (canGoBack ? router.history.back() : navigate({ to: "/" }));
 
-      {/* In-flow footer nav to the neighbouring notes in the feed order the user came from.
-          The only note-to-note navigation on mobile (swipe paging was removed on purpose). */}
-      {(prev || next) && (
-        <nav className="mx-auto flex max-w-4xl items-center justify-between border-t border-border px-5 py-3 md:px-8">
-          {prev ? (
-            <button
-              type="button"
-              onClick={() => go(prev)}
-              className={`inline-flex min-h-11 items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Previous
+  return (
+    <div className="app-shell">
+      <main className="main">
+        <div className="reader">
+          <div className="reader-toolbar">
+            <button type="button" className="text-button muted" onClick={back}>
+              <Icon name="ChevronLeft" />
+              Back to library
             </button>
-          ) : (
-            <span />
+            <div className="row">
+              {/^https?:\/\//i.test(view.url) && (
+                <a
+                  className="platform-source"
+                  href={view.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Open on ${view.platform}`}
+                >
+                  {view.platform}
+                  <Icon name="ArrowUpRight" size={14} />
+                </a>
+              )}
+              <IconButton
+                icon="MoreHorizontal"
+                label="Note actions"
+                onClick={() => setActionsOpen(true)}
+              />
+            </div>
+          </div>
+
+          {loadError && (
+            <div className="notice" role="status">
+              Couldn't refresh this note. Showing the saved copy.
+            </div>
           )}
-          {next ? (
-            <button
-              type="button"
-              onClick={() => go(next)}
-              className={`inline-flex min-h-11 items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-            >
-              Next
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          ) : (
-            <span />
+          {reextracting && (
+            <div className="notice" role="status">
+              <Loader2 size={16} className="spin" aria-hidden="true" />
+              Regenerating this note from the source. This can take a minute.
+            </div>
           )}
-        </nav>
+          {reextractError && (
+            <div className="notice" role="alert">
+              {reextractError}
+              <button type="button" className="text-button" onClick={() => setReextractError(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+          {view.thin && !reextracting && (
+            <div className="notice" role="status">
+              Only the caption could be read.
+              <button type="button" className="text-button" onClick={onReextract}>
+                Regenerate
+              </button>
+            </div>
+          )}
+
+          <div className="note-heading">
+            <Thumbnail note={view} large />
+            <div>
+              <h1>{view.title}</h1>
+              {view.categorySlug && (
+                <div className="t-heading-chip">
+                  <CategoryChip slug={view.categorySlug} label={view.category} />
+                </div>
+              )}
+              {(age || view.creator) && (
+                <p className="saved-caption">
+                  {age && <>Saved {age}</>}
+                  {age && view.creator && " · "}
+                  {view.creator}
+                </p>
+              )}
+            </div>
+          </div>
+          {view.summary && (
+            <section className="in-short">
+              <h2>In short</h2>
+              <p>{view.summary}</p>
+            </section>
+          )}
+          <NoteBody key={`${view.id}:${note.updated_at?.toMillis?.() ?? ""}`} view={view} />
+
+          {(prev || next) && (
+            <nav className="reader-pager">
+              {prev ? (
+                <button type="button" className="text-button muted" onClick={() => go(prev)}>
+                  <Icon name="ChevronLeft" />
+                  Previous
+                </button>
+              ) : (
+                <span />
+              )}
+              {next ? (
+                <button type="button" className="text-button muted" onClick={() => go(next)}>
+                  Next
+                  <Icon name="ChevronRight" />
+                </button>
+              ) : (
+                <span />
+              )}
+            </nav>
+          )}
+        </div>
+      </main>
+      {actionsOpen && (
+        <NoteActions
+          key={view.id}
+          view={view}
+          onClose={() => setActionsOpen(false)}
+          onDeleted={() => navigate({ to: "/" })}
+          onUpdated={(patch) => setNote((n) => (n ? { ...n, ...patch } : n))}
+          onReextract={onReextract}
+        />
       )}
-    </AppShell>
+    </div>
   );
 }

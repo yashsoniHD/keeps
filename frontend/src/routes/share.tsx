@@ -1,9 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ingest, ingestText } from "@/lib/api";
 import { enqueueCapture, isQueueableError } from "@/lib/capture-queue";
+import { useCapture } from "@/components/CaptureProvider";
+import { Icon, Logo } from "@/keeps/ui";
 
 // PWA share-sheet target (manifest.json share_target, POST). The service worker
 // catches the POST, stashes the payload in the Cache, and redirects here with ?shared=<id>.
@@ -54,6 +55,7 @@ function SharePage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const search = Route.useSearch();
+  const { refreshQueue } = useCapture();
   const fired = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,6 +103,7 @@ function SharePage() {
         const link = urlFrom(search.url, search.text, search.title);
         if (link && isQueueableError(e)) {
           enqueueCapture(link);
+          refreshQueue();
           navigate({ to: "/" });
         } else {
           setError(e instanceof Error ? e.message : "Couldn't save that. Please try again.");
@@ -111,9 +114,22 @@ function SharePage() {
   }, [user, search.shared]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-center">
-      <Sparkles className="h-6 w-6 animate-pulse text-ink-soft" />
-      {error && <p className="max-w-xs text-sm text-destructive">{error}</p>}
-    </div>
+    <main className="center-screen" aria-live="polite">
+      <Logo />
+      {error ? (
+        <>
+          <p className="login-error" role="alert">
+            {error}
+          </p>
+          <a href="/" className="secondary">
+            Back to your library
+          </a>
+        </>
+      ) : (
+        <p>
+          <Icon name="Loader2" size={18} className="animate-spin" /> Saving to Keeps…
+        </p>
+      )}
+    </main>
   );
 }

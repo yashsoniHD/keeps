@@ -5,7 +5,14 @@ export const getRouter = () => {
   const router = createRouter({
     routeTree,
     scrollRestoration: true,
+    defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
+    // No-op where startViewTransition is unsupported. Search-param-only navigations (category
+    // chips) skip it: a page-wide fade there swallows taps.
+    defaultViewTransition: {
+      // Hidden tabs reject startViewTransition with InvalidStateError; skip it there.
+      types: ({ pathChanged }) => (pathChanged && !document.hidden ? [] : false),
+    },
   });
 
   return router;

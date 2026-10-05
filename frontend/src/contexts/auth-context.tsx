@@ -13,6 +13,7 @@ import { analytics } from "@/lib/analytics";
 import { ensureUserRegion, recordSignup } from "@/lib/firestore";
 import { readSignupRef, clearSignupRef } from "@/lib/attribution";
 import { clearCache } from "@/lib/swr-cache";
+import { clearNotes } from "@/keeps/noteCache";
 
 interface AuthCtx {
   user: User | null;
@@ -33,7 +34,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let uid: string | null = null;
     return onAuthStateChanged(auth, (u) => {
+      if ((u?.uid ?? null) !== uid) clearNotes(); // never carry one account's notes to another
+      uid = u?.uid ?? null;
       setUser(u);
       setLoading(false);
       // Seed the "where to watch" region (TMDB providers on notes) once, the first time we see this user.

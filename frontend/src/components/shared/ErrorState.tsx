@@ -1,8 +1,7 @@
-import { PillButton, PillLink } from "@/components/shared/PillButton";
+import { Logo } from "@/keeps/ui";
 
-// A full-height, house-style error / empty panel: serif title, soft body, and up to two ink-pill
-// actions (an optional Retry and an optional "Back to home"). Used for note-load failures and any
-// other terminal state where the surrounding view has nothing to show — it always offers a way out.
+// A full-height error / empty panel in the Keeps style (same markup as the root NotFound/Error
+// screens): title, soft body, and up to two actions (an optional Retry and "Back to your library").
 export function ErrorState({
   title,
   body,
@@ -17,25 +16,24 @@ export function ErrorState({
   showHome?: boolean;
 }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-      <div className="space-y-2">
-        <h1 className="font-serif text-2xl text-ink">{title}</h1>
-        {body && <p className="mx-auto max-w-sm text-sm text-ink-soft">{body}</p>}
-      </div>
+    <main className="center-screen">
+      <Logo />
+      <h1>{title}</h1>
+      {body && <p>{body}</p>}
       {(onRetry || showHome) && (
-        <div className="flex flex-wrap items-center justify-center gap-3">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
           {onRetry && (
-            <PillButton type="button" onClick={onRetry}>
+            <button type="button" className="primary" onClick={onRetry}>
               {retryLabel}
-            </PillButton>
+            </button>
           )}
           {showHome && (
-            <PillLink to="/" variant="secondary">
-              Back to home
-            </PillLink>
+            <a href="/" className="primary">
+              Back to your library
+            </a>
           )}
         </div>
       )}
-    </div>
+    </main>
   );
 }

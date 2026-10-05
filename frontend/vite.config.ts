@@ -13,6 +13,20 @@ export default defineConfig({
     react(),
   ],
   server: { port: 3000 },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("@firebase/firestore") || id.includes("firebase/firestore"))
+            return "firebase-firestore";
+          if (/node_modules\/(@firebase|firebase)\//.test(id)) return "firebase-app";
+          if (id.includes("@tanstack")) return "router";
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+        },
+      },
+    },
+  },
   // The /landing route re-exports a component from ../../marketing (outside this app's
   // root), whose bare imports can't otherwise resolve. dedupe forces these to resolve
   // from frontend/node_modules — also guaranteeing a single React copy.

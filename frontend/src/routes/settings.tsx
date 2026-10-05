@@ -1,24 +1,11 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { PillButton, pillClasses } from "@/components/shared/PillButton";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import {
-  ArrowLeft,
-  LogOut,
-  Smartphone,
-  Copy,
-  Check,
-  Download,
-  Share2,
-  Moon,
-  Sun,
-  Settings as SettingsIcon,
-} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { createToken, listTokensCached, revokeToken, type ShortcutToken } from "@/lib/api";
-import { AppShell } from "@/components/AppShell";
-import { Switch } from "@/components/ui/switch";
-import { useTheme } from "@/lib/theme";
+import { useTheme, type Theme } from "@/lib/theme";
 import { getInstallPrompt, isAndroid, isIOS, isStandalone } from "@/lib/platform";
+import { Icon, Logo, Sheet } from "@/keeps/ui";
+import Onboarding from "@/keeps/Onboarding";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -27,20 +14,29 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 // icloud.com/shortcuts links — the shortcuts:// URL scheme rejects self-hosted files
 // ("invalid URL"), and file downloads need manual taps through Safari's download list.
 // The published copy carries the "Paste your Clipnote token" import question (verified
-// via the icloud.com/shortcuts/api/records/<id> payload) — no token is baked in.
+// via the icloud.com/shortcuts/api/records/<id> payload) — no token is baked in. The
+// shortcut's own name ("Save to Clipnote") is therefore kept verbatim in the steps below.
 // Re-publishing creates a NEW link; update this constant whenever the shortcut changes.
 const SHORTCUT_ICLOUD_LINK = "https://www.icloud.com/shortcuts/d3ba89f721d54d1ba2e89185f6472eae";
 
 // Where the app lives — shared via the "Share the app" button below.
 const APP_URL = "https://clipnote.web.app";
 const APP_SHARE_TEXT =
-  "Clipnote: save any link as a beautifully structured note you'll actually re-read.";
+  "Keeps: save any link as a beautifully structured note you'll actually re-read.";
+
+const THEMES: { value: Theme; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
   const [signOutConfirm, setSignOutConfirm] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [guide, setGuide] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
@@ -52,7 +48,7 @@ function Settings() {
   };
 
   const handleShareApp = async () => {
-    const shareData = { title: "Clipnote", text: APP_SHARE_TEXT, url: APP_URL };
+    const shareData = { title: "Keeps", text: APP_SHARE_TEXT, url: APP_URL };
     if (navigator.share && navigator.canShare?.(shareData)) {
       try {
         await navigator.share(shareData);
@@ -70,118 +66,104 @@ function Settings() {
     }
   };
 
-  // Auth still resolving — show a spinner instead of a blank flash.
+  // Auth still resolving — show a mark instead of a blank flash.
   if (loading || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <SettingsIcon className="h-6 w-6 animate-pulse text-ink-soft" />
-      </div>
+      <main className="center-screen">
+        <Logo />
+      </main>
     );
   }
 
   return (
-    <AppShell>
-      <div className="mx-auto max-w-2xl px-4 py-8 md:px-6">
-        <Link
-          to="/"
-          className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Home
-        </Link>
-        <h1 className="font-serif text-3xl text-ink">Settings</h1>
-
-        <section className="mt-8 rounded-3xl border border-border bg-card p-6">
-          <h2 className="text-xs uppercase tracking-wider text-ink-soft">Profile</h2>
-          <div className="mt-4 flex items-center gap-4">
-            {user.photoURL && (
-              <img
-                src={user.photoURL}
-                alt=""
-                className="h-14 w-14 rounded-full"
-                referrerPolicy="no-referrer"
-              />
-            )}
-            <div>
-              <div className="font-medium text-ink">{user.displayName}</div>
-              <div className="text-sm text-ink-soft">{user.email}</div>
-            </div>
+    <div className="app-shell">
+      <main id="main-content" className="main" tabIndex={-1}>
+        <header className="page-header">
+          <div>
+            <button type="button" className="text-button" onClick={() => navigate({ to: "/" })}>
+              <Icon name="ChevronLeft" size={16} /> Library
+            </button>
+            <h1>Settings</h1>
           </div>
-        </section>
+        </header>
 
-        <AppearanceSection />
+        <div className="settings-content">
+          <section aria-labelledby="profile-heading">
+            <h2 id="profile-heading">Profile</h2>
+            <div className="settings-profile">
+              {user.photoURL && <img src={user.photoURL} alt="" referrerPolicy="no-referrer" />}
+              <div>
+                <div className="settings-name">{user.displayName}</div>
+                <small>{user.email}</small>
+              </div>
+            </div>
+          </section>
 
-        <ConnectPhone />
+          <section aria-labelledby="appearance-heading">
+            <h2 id="appearance-heading">Appearance</h2>
+            <div className="segmented" role="group" aria-label="Appearance">
+              {THEMES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  aria-pressed={theme === t.value}
+                  className={theme === t.value ? "selected" : ""}
+                  onClick={() => setTheme(t.value)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </section>
 
-        <section className="mt-4 rounded-3xl border border-border bg-card p-6">
-          <h2 className="text-xs uppercase tracking-wider text-ink-soft">Account</h2>
-          <button
-            onClick={handleShareApp}
-            className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
-          >
-            {shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
-            {shareCopied ? "Link copied!" : "Share the app"}
+          <ConnectPhone />
+
+          <button type="button" className="setting-row full-button" onClick={() => setGuide(true)}>
+            <span className="row">
+              <Icon name="HelpCircle" size={20} />
+              Saving guide
+            </span>
+            <Icon name="ChevronRight" size={18} />
+          </button>
+          <button type="button" className="setting-row full-button" onClick={handleShareApp}>
+            <span className="row">
+              <Icon name={shareCopied ? "Check" : "Share2"} size={20} />
+              {shareCopied ? "Link copied!" : "Share the app"}
+            </span>
           </button>
           <button
+            type="button"
+            className="setting-row full-button danger"
             onClick={() => setSignOutConfirm(true)}
-            className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-ink-soft"
           >
-            <LogOut className="h-4 w-4" />
             Sign out
           </button>
-        </section>
-      </div>
+        </div>
+      </main>
+
+      {guide && <Onboarding onDone={() => setGuide(false)} />}
 
       {signOutConfirm && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-sm md:items-center md:p-4">
-          <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-2xl md:rounded-3xl">
-            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border md:hidden" />
-            <h2 className="font-serif text-2xl text-ink">Sign out?</h2>
-            <p className="mt-1 text-sm text-ink-soft">
-              You'll need to sign in again with Google to get back to your notes.
-            </p>
-            <div className="mt-4 flex gap-2">
-              <PillButton
-                type="button"
-                variant="secondary"
-                onClick={() => setSignOutConfirm(false)}
-                className="flex-1"
-              >
-                Cancel
-              </PillButton>
-              <PillButton type="button" onClick={handleSignOut} className="flex-1">
-                Sign out
-              </PillButton>
-            </div>
+        <Sheet title="Sign out?" onClose={() => setSignOutConfirm(false)}>
+          <p className="settings-note">
+            You'll need to sign in again with Google to get back to your notes.
+          </p>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="secondary"
+              data-initial-focus
+              onClick={() => setSignOutConfirm(false)}
+            >
+              Cancel
+            </button>
+            <button type="button" className="primary" onClick={handleSignOut}>
+              Sign out
+            </button>
           </div>
-        </div>
+        </Sheet>
       )}
-    </AppShell>
-  );
-}
-
-function AppearanceSection() {
-  const { resolved, setTheme } = useTheme();
-  const isDark = resolved === "dark";
-
-  return (
-    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
-      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
-        Appearance
-      </h2>
-      <label className="mt-4 flex cursor-pointer items-center justify-between gap-3">
-        <span>
-          <span className="block text-sm font-medium text-ink">Dark mode</span>
-          <span className="block text-xs text-ink-soft">Switch between light and dark themes.</span>
-        </span>
-        <Switch
-          checked={isDark}
-          onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
-          aria-label="Toggle dark mode"
-        />
-      </label>
-    </section>
+    </div>
   );
 }
 
@@ -286,167 +268,137 @@ function ConnectPhone() {
   };
 
   return (
-    <section className="mt-4 rounded-3xl border border-border bg-card p-6">
-      <h2 className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-ink-soft">
-        <Smartphone className="h-3.5 w-3.5" />
-        Capture from your phone
-      </h2>
+    <section aria-labelledby="phone-heading">
+      <h2 id="phone-heading">Capture from your phone</h2>
 
-      <div className="mt-4 divide-y divide-border">
-        {showAndroid && (
-          <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
-            <div>
-              <div className="text-sm font-medium text-ink">Android</div>
-              <div className="text-xs text-ink-soft">
-                Appears in your share sheet after install.
-              </div>
-            </div>
-            {installPrompt && (
-              <PillButton type="button" onClick={handleInstall} className="shrink-0">
-                <Download className="h-3.5 w-3.5" />
-                Install
-              </PillButton>
-            )}
-          </div>
-        )}
-        {showIOS && !newToken && (
-          <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
-            <div>
-              <div className="text-sm font-medium text-ink">iPhone</div>
-              <div className="text-xs text-ink-soft">
-                One-tap Shortcut for any app's share sheet.
-              </div>
-            </div>
-            <PillButton type="button" onClick={handleAdd} disabled={creating} className="shrink-0">
-              {creating ? "Setting up…" : "Add shortcut"}
-            </PillButton>
-          </div>
-        )}
-      </div>
+      {showAndroid && (
+        <div className="setting-row">
+          <span>
+            Android
+            <small>Appears in your share sheet after install.</small>
+          </span>
+          {installPrompt && (
+            <button type="button" className="primary small" onClick={handleInstall}>
+              <Icon name="Plus" size={16} />
+              Install
+            </button>
+          )}
+        </div>
+      )}
+      {showIOS && !newToken && (
+        <div className="setting-row">
+          <span>
+            iPhone
+            <small>One-tap Shortcut for any app's share sheet.</small>
+          </span>
+          <button type="button" className="primary small" onClick={handleAdd} disabled={creating}>
+            {creating ? "Setting up…" : "Add shortcut"}
+          </button>
+        </div>
+      )}
 
       {showIOS && newToken && (
-        <div className="mt-4 rounded-2xl border border-border bg-paper p-4">
+        <div className="settings-card">
           {SHORTCUT_ICLOUD_LINK ? (
             <>
               <a
                 href={SHORTCUT_ICLOUD_LINK}
                 target="_blank"
                 rel="noreferrer"
-                className={pillClasses("primary", "md", "w-full")}
+                className="primary wide"
               >
-                <Download className="h-4 w-4" />
                 Add the Shortcut
               </a>
-              <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
+              <ol>
                 <li>
-                  Tap <strong className="text-ink">Add the Shortcut</strong> to open the Shortcuts
-                  app.
+                  Tap <strong>Add the Shortcut</strong> to open the Shortcuts app.
                 </li>
                 <li>
-                  Tap <strong className="text-ink">Add Shortcut</strong>, then{" "}
-                  <strong className="text-ink">paste when asked</strong>. Your token is already
-                  copied.
+                  Tap <strong>Add Shortcut</strong>, then <strong>paste when asked</strong>. Your
+                  token is already copied.
                 </li>
                 <li>
-                  Done. In any app: <strong className="text-ink">Share</strong> →{" "}
-                  <strong className="text-ink">Save to Clipnote</strong>.
+                  Done. In any app: <strong>Share</strong> → <strong>Save to Clipnote</strong>.
                 </li>
               </ol>
             </>
           ) : (
             <>
-              <a href="/clipnote.shortcut" className={pillClasses("primary", "md", "w-full")}>
-                <Download className="h-4 w-4" />
+              <a href="/clipnote.shortcut" className="primary wide">
                 Download the Shortcut
               </a>
-              <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-ink-soft">
+              <ol>
                 <li>
-                  Tap <strong className="text-ink">Download the Shortcut</strong> in Safari on your
-                  iPhone.
+                  Tap <strong>Download the Shortcut</strong> in Safari on your iPhone.
                 </li>
                 <li>
-                  Tap the <strong className="text-ink">downloads (↓) icon</strong> in Safari's
-                  address bar, then tap{" "}
-                  <strong className="text-ink">Save to Clipnote.shortcut</strong> to open the
-                  Shortcuts app.
+                  Tap the <strong>downloads (↓) icon</strong> in Safari's address bar, then tap{" "}
+                  <strong>Save to Clipnote.shortcut</strong> to open the Shortcuts app.
                 </li>
                 <li>
-                  Tap <strong className="text-ink">Add Shortcut</strong>, then paste your token when
-                  asked <em>"Paste your Clipnote token"</em>.
+                  Tap <strong>Add Shortcut</strong>, then paste your token when asked{" "}
+                  <em>"Paste your Clipnote token"</em>.
                 </li>
                 <li>
-                  Done. In any app: <strong className="text-ink">Share</strong> →{" "}
-                  <strong className="text-ink">Save to Clipnote</strong>.
+                  Done. In any app: <strong>Share</strong> → <strong>Save to Clipnote</strong>.
                 </li>
               </ol>
               {isStandalone() && (
-                <p className="mt-3 text-xs text-ink-soft">
+                <p>
                   You're in the installed app, where iPhone can't show downloads. Open{" "}
-                  <strong className="text-ink">{window.location.host}/settings</strong> in Safari
-                  for this step.
+                  <strong>{window.location.host}/settings</strong> in Safari for this step.
                 </p>
               )}
             </>
           )}
 
-          <div className="mt-4 border-t border-border pt-3">
-            <div className="text-xs uppercase tracking-wider text-ink-soft">
-              Your token, shown only once
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs text-ink">
-                {newToken}
-              </code>
+          <div className="settings-token">
+            <small>Your token, shown only once</small>
+            <div className="row">
+              <code>{newToken}</code>
               <button
                 type="button"
+                className="icon-button"
                 onClick={handleCopy}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-ink-soft hover:text-ink"
                 aria-label="Copy token"
               >
-                {copied ? <Check className="h-4 w-4 text-place" /> : <Copy className="h-4 w-4" />}
+                <Icon name={copied ? "Check" : "Copy"} />
               </button>
             </div>
-            <p className="mt-2 text-xs text-ink-soft">
+            <p>
               {copied
-                ? "Copied to your clipboard ✓. Just paste it when the Shortcut asks."
+                ? "Copied to your clipboard. Just paste it when the Shortcut asks."
                 : "Tap copy, then paste it when the Shortcut asks."}
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setNewToken(null)}
-            className="mt-4 text-sm text-ink-soft underline hover:text-ink"
-          >
+          <button type="button" className="text-button" onClick={() => setNewToken(null)}>
             Hide token
           </button>
         </div>
       )}
-      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+      {error && <p className="error-text">{error}</p>}
 
       {tokens.length > 0 && (
-        <div className="mt-5 border-t border-border pt-4">
-          <div className="text-xs uppercase tracking-wider text-ink-soft">Connected devices</div>
-          <ul className="mt-1 divide-y divide-border">
-            {tokens.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div>
-                  <div className="text-sm text-ink">{t.label}</div>
-                  <div className="text-xs text-ink-soft">
-                    {t.last_used_at ? "Used recently" : "Never used"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleRevoke(t.id)}
-                  className="shrink-0 text-xs text-ink-soft transition-colors hover:text-destructive"
-                >
-                  Revoke
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <>
+          <h3 className="settings-subhead">Connected devices</h3>
+          {tokens.map((t) => (
+            <div key={t.id} className="setting-row">
+              <span>
+                {t.label}
+                <small>{t.last_used_at ? "Used recently" : "Never used"}</small>
+              </span>
+              <button
+                type="button"
+                className="secondary small"
+                aria-label={`Revoke ${t.label}`}
+                onClick={() => handleRevoke(t.id)}
+              >
+                Revoke
+              </button>
+            </div>
+          ))}
+        </>
       )}
     </section>
   );

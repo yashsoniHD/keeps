@@ -4,12 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <!-- Static light-paper value; the inline script below overwrites it to the dark-paper
+    <!-- Static light value (Keeps --bg); the inline script below overwrites it to the dark
          value before first paint when dark mode resolves, so this tag must come before that
          script in document order (the script runs synchronously during parsing and can only
-         query elements already parsed). Both hexes are the computed sRGB of --paper (styles.css)
+         query elements already parsed). Both hexes are the Keeps --bg
          for light/dark respectively — see theme.tsx THEME_COLOR for the source of truth. -->
-    <meta name="theme-color" content="#fdf8f0" />
+    <meta name="theme-color" content="#ffffff" />
     <!-- Set the theme class before first paint so a dark-mode user never sees a light flash.
          Also flips the theme-color meta above to the dark paper value in that case, so the
          status bar/address bar never flashes light before React's ThemeProvider (theme.tsx)
@@ -25,21 +25,22 @@
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) {
             document.documentElement.classList.add("dark");
+            document.documentElement.dataset.theme = "dark";
             var m = document.querySelector('meta[name="theme-color"]');
-            if (m) m.setAttribute("content", "#090909");
+            if (m) m.setAttribute("content", "#000000");
           }
         } catch (e) {}
       })();
     </script>
-    <title>Clipnote: notes worth re-reading</title>
+    <title>Keeps</title>
     <meta
       name="description"
-      content="Save anything. It becomes a note worth re-reading."
+      content="Save any link. Keep what matters."
     />
-    <meta property="og:title" content="Clipnote: notes worth re-reading" />
+    <meta property="og:title" content="Keeps" />
     <meta
       property="og:description"
-      content="Save anything. It becomes a note worth re-reading."
+      content="Save any link. Keep what matters."
     />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary" />

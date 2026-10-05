@@ -1,0 +1,55 @@
+/* Mobile feel: no tap flash, no double-tap-zoom delay, contained overscroll, fast route fades. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+a,
+button,
+[role="button"],
+input,
+summary,
+label {
+  touch-action: manipulation;
+}
+body {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.route-shell {
+  min-height: 100dvh;
+  background: var(--k-bg, inherit);
+}
+.note-list > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+
+::view-transition-old(root) {
+  animation: 90ms ease-out both k-fade-out;
+}
+::view-transition-new(root) {
+  animation: 160ms ease-out both k-fade-in;
+}
+@keyframes k-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes k-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+html[data-swipe]::view-transition-group(*),
+html[data-swipe]::view-transition-old(*),
+html[data-swipe]::view-transition-new(*) {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

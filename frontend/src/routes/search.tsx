@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Search as SearchIcon, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createFileRoute, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import { useAuth } from "@/contexts/auth-context";
 import { searchNotes, type SearchResult } from "@/lib/api";
+import { getNote } from "@/lib/firestore";
 import { goToNote } from "@/lib/nav";
-import { noteAccent, noteIcon } from "@/lib/note-meta";
-import { FOCUS_RING } from "@/lib/ui";
-import { AppShell } from "@/components/AppShell";
+import { noteLabel, sourceLabel } from "@/lib/note-meta";
+import type { Note } from "@/lib/types";
+import { EmptyState, Icon, NoteRow, SearchInput } from "@/keeps/ui";
+import { toView } from "@/keeps/toView";
+import type { NoteView } from "@/keeps/view";
+import { NoteActions } from "@/keeps/NoteActions";
 
 // Global search across everything saved (GET /api/search, keyword + vector over notes).
 // One flat, relevance-ranked list of notes; each row opens /notes/$id.
@@ -17,54 +20,58 @@ const DEBOUNCE_MS = 300;
 
 type Status = "idle" | "searching" | "done" | "error";
 
-function ResultRow({ hit, onOpen }: { hit: SearchResult; onOpen: () => void }) {
-  const accent = noteAccent(hit.content_type);
-  const Icon = noteIcon(hit.content_type);
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={`press flex w-full items-center gap-3 rounded-2xl border border-border bg-card p-3 text-left transition-shadow hover:shadow-md ${FOCUS_RING}`}
-    >
-      <span className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-muted">
-        {hit.cover_image_url ? (
-          <img
-            src={hit.cover_image_url}
-            alt=""
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span className={`flex h-full w-full items-center justify-center ${accent.soft}`}>
-            <Icon className={`h-5 w-5 ${accent.text}`} />
-          </span>
-        )}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-ink">{hit.title || "Untitled"}</span>
-        {hit.ai_summary && (
-          <span className="mt-0.5 block truncate text-sm text-ink-soft">{hit.ai_summary}</span>
-        )}
-      </span>
-    </button>
-  );
+// Search hits are not full notes, so build a display-only view (no blocks).
+function hitView(h: SearchResult): NoteView {
+  return {
+    id: h.ref_id ?? h.id,
+    title: h.title || "Untitled",
+    summary: h.ai_summary ?? "",
+    categorySlug: h.content_type ?? "",
+    category: noteLabel(h.content_type ?? ""),
+    platform: sourceLabel(h.source_domain ?? ""),
+    image: h.cover_image_url ?? undefined,
+    url: "",
+    age: sourceLabel(h.source_domain ?? ""),
+    thin: false,
+    facts: [],
+    blocks: [],
+    tags: [],
+    createdAt: 0,
+    note: {} as Note,
+  };
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Excerpt around the first match, with query terms wrapped in <mark> (React text, no HTML).
+function Highlight({ text, query }: { text: string; query: string }) {
+  const terms = query
+    .split(/\s+/)
+    .filter((x) => x.length >= MIN_CHARS)
+    .map(escapeRe);
+  if (!terms.length) return <>{text}</>;
+  const pattern = new RegExp(`(${terms.join("|")})`, "gi");
+  const at = text.search(pattern);
+  const start = Math.max(0, at - 60);
+  const shown = (start > 0 ? "…" : "") + text.slice(start);
+  return <>{shown.split(pattern).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))}</>;
 }
 
 function SearchScreen() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const router = useRouter();
+  const canGoBack = useCanGoBack();
+  const inputWasFocused = useRef(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [status, setStatus] = useState<Status>("idle");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [settled, setSettled] = useState(""); // the query `results`/`status` belong to
+  const [actionView, setActionView] = useState<NoteView | null>(null);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   const trimmed = query.trim();
   useEffect(() => {
@@ -76,89 +83,120 @@ function SearchScreen() {
     setStatus("searching");
     const handle = setTimeout(async () => {
       try {
-        const res = await searchNotes(trimmed);
-        setResults(res);
+        setResults(await searchNotes(trimmed));
         setStatus("done");
+        setSettled(trimmed);
       } catch {
         setResults([]);
         setStatus("error");
+        setSettled(trimmed);
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(handle);
   }, [trimmed]);
 
-  const open = (h: SearchResult) => goToNote(navigate, h.ref_id ?? h.id);
+  const rows = useMemo(() => results.map((h) => ({ h, view: hitView(h) })), [results]);
+
+  // The "…" menu needs the full note (edit/delete/re-extract), fetched on demand.
+  const openActions = async (id: string) => {
+    const note = await getNote(id).catch(() => null);
+    if (note) setActionView(toView(note));
+  };
+  const patchHit = (id: string, patch: Partial<Note>) =>
+    setResults((rs) =>
+      rs.map((r) => ((r.ref_id ?? r.id) === id ? ({ ...r, ...patch } as SearchResult) : r)),
+    );
 
   return (
-    <AppShell>
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 md:px-8">
-          <Link
-            to="/"
-            aria-label="Back home"
-            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-card text-ink-soft transition-colors hover:text-ink ${FOCUS_RING}`}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-          <div className="relative flex-1">
-            <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search everything you've saved"
-              aria-label="Search"
-              className={`h-11 w-full rounded-full border border-border bg-card pl-11 pr-10 text-base outline-none ${FOCUS_RING}`}
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => {
-                  setQuery("");
-                  inputRef.current?.focus();
-                }}
-                aria-label="Clear"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-soft hover:text-ink"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+    <div
+      className="app-shell"
+      style={{ minHeight: "100dvh" }}
+      onPointerDown={() => {
+        // A tap that blurs the field (iOS keyboard dismiss) must not also count as "tap outside".
+        inputWasFocused.current = document.activeElement instanceof HTMLInputElement;
+      }}
+      onClick={(e) => {
+        // Any tap outside the search field and interactive content goes back; taps on results,
+        // controls or the field itself (and keyboard-dismiss taps) never do.
+        // With a query typed, the first tap only dismisses the keyboard (keeps the results).
+        if (actionView || (inputWasFocused.current && trimmed)) return;
+        const t = e.target as HTMLElement;
+        if (
+          t.closest(
+            "input, button, a, [role=button], .note-list, .search-field, [role=alert], [aria-modal]",
+          )
+        )
+          return;
+        if (window.getSelection()?.toString()) return;
+        if (canGoBack) router.history.back();
+        else navigate({ to: "/" });
+      }}
+    >
+      <main id="main-content" className="main" tabIndex={-1}>
+        <header className="page-header">
+          <div>
+            <button
+              type="button"
+              className="text-button search-back"
+              onClick={() => navigate({ to: "/" })}
+            >
+              <Icon name="ChevronLeft" size={18} />
+              Back to library
+            </button>
           </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-4 py-6 md:px-8">
+        </header>
+        <SearchInput value={query} onChange={setQuery} placeholder="Search your saves" autoFocus />
         {trimmed.length < MIN_CHARS ? (
-          <div className="flex flex-col items-center gap-3 py-24 text-center text-ink-soft">
-            <SearchIcon className="h-8 w-8" />
-            <p className="max-w-xs text-sm">
-              Search everything you've saved: by topic, title, or place name.
+          <div className="search-start">
+            <h2>Find something you saved</h2>
+            <p>
+              Search by topic, title, or a detail you remember.
+              {trimmed.length > 0 && " Type at least 3 characters."}
             </p>
           </div>
-        ) : status === "searching" ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-ink-soft">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Searching…</span>
+        ) : status === "searching" || settled !== trimmed ? (
+          <div className="search-results-label" role="status">
+            Searching…
           </div>
         ) : status === "error" ? (
-          <div className="rounded-2xl bg-destructive/10 p-4 text-center text-sm text-destructive">
+          <p className="error-text" role="alert">
             Search didn't work just now. Try again.
-          </div>
-        ) : results.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-24 text-center text-ink-soft">
-            <p className="text-sm">
-              Nothing matched “<span className="text-ink">{trimmed}</span>”.
-            </p>
-            <p className="text-xs">Try a different word, a title, or a place name.</p>
-          </div>
+          </p>
+        ) : rows.length === 0 ? (
+          <EmptyState
+            title="No matching saves"
+            description="Try a different word, topic, or title."
+          />
         ) : (
-          <div className="space-y-2">
-            {results.map((h) => (
-              <ResultRow key={h.ref_id ?? h.id} hit={h} onOpen={() => open(h)} />
-            ))}
-          </div>
+          <>
+            <div className="search-results-label">
+              Results for <strong>“{trimmed}”</strong>
+            </div>
+            <div className="note-list library-list">
+              {rows.map(({ h, view }) => (
+                <NoteRow
+                  key={view.id}
+                  note={view}
+                  onOpen={() => goToNote(navigate, view.id)}
+                  onActions={() => openActions(view.id)}
+                  description={<Highlight text={h.ai_summary ?? ""} query={trimmed} />}
+                />
+              ))}
+            </div>
+          </>
         )}
       </main>
-    </AppShell>
+      {actionView && (
+        <NoteActions
+          view={actionView}
+          onClose={() => setActionView(null)}
+          onDeleted={() => {
+            setResults((rs) => rs.filter((r) => (r.ref_id ?? r.id) !== actionView.id));
+            setActionView(null);
+          }}
+          onUpdated={(patch) => patchHit(actionView.id, patch)}
+        />
+      )}
+    </div>
   );
 }
