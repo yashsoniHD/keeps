@@ -28,8 +28,10 @@ app.add_middleware(
         "http://localhost:5173",
         f"https://{settings.GOOGLE_CLOUD_PROJECT}.web.app",
         f"https://{settings.GOOGLE_CLOUD_PROJECT}.firebaseapp.com",
-        # Dedicated hosting site (firebase.json "site": "clipnote") — the project-named
-        # URLs above stay for the transition.
+        # Dedicated hosting site (firebase.json "site": "keeps"). The old "clipnote" site
+        # now only forwards to keeps.web.app; its origins stay allowed during the transition.
+        "https://keeps.web.app",
+        "https://keeps.firebaseapp.com",
         "https://clipnote.web.app",
         "https://clipnote.firebaseapp.com",
     ],

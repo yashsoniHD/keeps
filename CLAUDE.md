@@ -17,7 +17,7 @@ Open item: a paywall before public launch (the weekly digest is dropped). Retent
 | Firebase Project | `weekly-updates-automation` |
 | Backend host | Vercel Hobby container (project to be created in Phase F; root `backend`, `Dockerfile.vercel`). Production URL placeholder `https://clip-note-api-yashsoni102-progs-projects.vercel.app`. Deploy notes: `infra/vercel.md` |
 | Job dispatch | Synchronous self-POST to `/api/process/{id}` (`X-Worker-Secret`) + in-process retry + daily cron sweep (`GET /api/process/sweep`) |
-| Firebase Hosting URL | https://clipnote.web.app (site `clipnote` in `firebase.json`; the project-named `weekly-updates-automation.web.app` may also exist) |
+| Firebase Hosting URL | https://keeps.web.app (site `keeps`). The old `clipnote` site (clipnote.web.app) only forwards to it (`infra/clipnote-forward/`); Hosting site IDs cannot be renamed |
 | Legacy Cloud Run URL | https://clip-note-api-674775099277.us-central1.run.app (rollback only; torn down after soak) |
 | Service account | `clip-note-vercel` (`roles/datastore.user`), key supplied as `GOOGLE_SERVICE_ACCOUNT_JSON` (written to `/tmp/sa.json`, exported as `GOOGLE_APPLICATION_CREDENTIALS`) |
 | AI provider | OpenRouter (`OPENROUTER_API_KEY`) |
@@ -136,7 +136,7 @@ cd backend && pip install -r requirements.txt && uvicorn main:app --reload --por
 cd backend && .venv/bin/python -m pytest -q          # tests
 vercel deploy --prod --yes                           # backend, from the REPO ROOT (root dir setting = backend; env vars: infra/vercel.md)
 cd frontend && node src/keeps/toView.check.ts          # toView adapter checks
-cd frontend && npm run build && firebase deploy --only hosting
+cd frontend && npm run build && firebase deploy --only hosting:keeps   # app; hosting:clipnote = old-domain forwarder
 firebase deploy --only firestore                     # rules + indexes
 cd backend && python -m scripts.reindex_embeddings --apply   # after changing EMBED_MODEL/EMBED_TEXT_VERSION
 curl -H "Authorization: Bearer $CRON_SECRET" https://<alias>/api/process/sweep   # manual sweep

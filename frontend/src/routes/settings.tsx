@@ -21,7 +21,7 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 const SHORTCUT_ICLOUD_LINK = "";
 
 // Where the app lives — shared via the "Share the app" button below.
-const APP_URL = "https://clipnote.web.app";
+const APP_URL = "https://keeps.web.app";
 const APP_SHARE_TEXT =
   "Keeps: save any link as a beautifully structured note you'll actually re-read.";
 
