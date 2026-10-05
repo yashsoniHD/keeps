@@ -253,9 +253,20 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
 
     db = get_db()
     if body.input_type == "url" and (dup := await _existing_note(db, user_id, body.url)):
-        return await _completed_duplicate_job(db, user_id, body, dup)
+        out = await _completed_duplicate_job(db, user_id, body, dup)
+        out.message = "Already in Keeps ✓"
+        return out
     out = await _create_job(db, user_id, body)
     # Fire-and-forget: up to 10 sequential dispatches must not delay the response.
     _bg_tasks.add(t := asyncio.create_task(_redispatch_own_stale(db, user_id)))
     t.add_done_callback(_bg_tasks.discard)
+    out.message = _MESSAGES.get(out.status, "Saved to Keeps ✓")
     return out
+
+
+# Shown verbatim by the iOS Shortcut's notification (errors arrive as `detail` instead).
+_MESSAGES = {
+    "pending": "Saved to Keeps ✓ — your note is being drafted.",
+    "deferred": "Saved to Keeps ✓ — queued, your note will be drafted soon.",
+    "failed": "Keeps couldn't start this save. Try again from the app.",
+}

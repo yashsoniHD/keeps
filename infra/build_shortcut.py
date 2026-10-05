@@ -25,6 +25,9 @@ UNSIGNED = ROOT / "infra" / "build" / "keeps-unsigned.shortcut"
 SIGNED = ROOT / "frontend" / "public" / "keeps.shortcut"
 
 TOKEN_UUID = str(uuid.uuid4()).upper()
+RESPONSE_UUID = str(uuid.uuid4()).upper()
+MESSAGE_UUID = str(uuid.uuid4()).upper()
+DETAIL_UUID = str(uuid.uuid4()).upper()
 
 
 def text_token(string: str, attachments: dict | None = None) -> dict:
@@ -40,6 +43,20 @@ def action_output(uuid_: str, name: str) -> dict:
 
 def dict_item(key: str, value: dict) -> dict:
     return {"WFItemType": 0, "WFKey": text_token(key), "WFValue": value}
+
+
+def get_value(uuid_: str, key: str) -> dict:
+    return {
+        "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+        "WFWorkflowActionParameters": {
+            "UUID": uuid_,
+            "WFDictionaryKey": key,
+            "WFInput": {
+                "Value": action_output(RESPONSE_UUID, "Contents of URL"),
+                "WFSerializationType": "WFTextTokenAttachment",
+            },
+        },
+    }
 
 
 workflow = {
@@ -79,6 +96,7 @@ workflow = {
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
             "WFWorkflowActionParameters": {
+                "UUID": RESPONSE_UUID,
                 "WFURL": API_URL,
                 "WFHTTPMethod": "POST",
                 "ShowHeaders": True,
@@ -106,10 +124,21 @@ workflow = {
                 },
             },
         },
+        # The API answers {"message": ...} on success and {"detail": ...} on error; exactly
+        # one is set, so the notification shows the real outcome (never a false "Saved").
+        get_value(MESSAGE_UUID, "message"),
+        get_value(DETAIL_UUID, "detail"),
         {
             "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
             "WFWorkflowActionParameters": {
-                "WFNotificationActionBody": "Saved to Keeps ✓ — your note is being drafted.",
+                "WFNotificationActionTitle": "Keeps",
+                "WFNotificationActionBody": text_token(
+                    "￼￼",
+                    {
+                        "{0, 1}": action_output(MESSAGE_UUID, "Dictionary Value"),
+                        "{1, 1}": action_output(DETAIL_UUID, "Dictionary Value"),
+                    },
+                ),
                 "WFNotificationActionSound": True,
             },
         },

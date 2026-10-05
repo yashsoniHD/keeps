@@ -82,3 +82,4 @@ class JobStatus(BaseModel):
     status: str  # pending | processing | completed | failed
     note_id: Optional[str] = None
     error: Optional[str] = None
+    message: Optional[str] = None  # human-readable outcome, shown by the iOS Shortcut
