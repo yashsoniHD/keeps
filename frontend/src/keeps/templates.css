@@ -648,3 +648,30 @@
     padding: 0 11px;
   }
 }
+
+/* Content-selected comparisons stay readable on narrow screens. */
+.document-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.document-table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: inherit;
+}
+.document-table-scroll th,
+.document-table-scroll td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid var(--k-line, #ddd);
+  min-width: 8rem;
+}
+.document-table-scroll th {
+  font-weight: 600;
+}
+.block-quote blockquote {
+  margin: 0;
+  padding-left: 1rem;
+  border-left: 2px solid currentColor;
+}

@@ -11,7 +11,9 @@ export interface BlockLink {
 
 export interface Block {
   heading: string;
-  kind: "list" | "steps" | "text" | "code" | "facts" | "checklist";
+  kind: "list" | "steps" | "text" | "code" | "facts" | "checklist" | "quote" | "table";
+  columns?: string[];
+  rows?: string[][];
   items: string[];
   links?: BlockLink[]; // rendered as outbound buttons under the items (place actions, etc.)
   image?: string; // optional poster/thumbnail for the section (entertainment titles)

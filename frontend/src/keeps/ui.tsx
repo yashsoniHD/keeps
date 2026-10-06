@@ -399,9 +399,43 @@ function Checklist({ items }: { items: string[] }) {
 export function KnowledgeBlock({ block }: { block: Block }) {
   return (
     <section className={`knowledge-block block-${block.kind}`}>
-      <h2>{block.heading}</h2>
+      {block.heading && <h2>{block.heading}</h2>}
       {block.image && <img className="block-image" src={block.image} alt="" loading="lazy" />}
-      {block.kind === "code" ? (
+      {block.kind === "table" ? (
+        <div
+          className="document-table-scroll"
+          role="region"
+          aria-label={block.heading || "Comparison"}
+          tabIndex={0}
+        >
+          <table>
+            <thead>
+              <tr>
+                {block.columns?.map((column, i) => (
+                  <th key={i} scope="col">
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows?.map((row, i) => (
+                <tr key={i}>
+                  {row.map((cell, j) => (
+                    <td key={j}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : block.kind === "quote" ? (
+        <blockquote>
+          {block.items.map((item, i) => (
+            <p key={i}>{item}</p>
+          ))}
+        </blockquote>
+      ) : block.kind === "code" ? (
         <pre>
           <code>{block.items.join("\n")}</code>
         </pre>

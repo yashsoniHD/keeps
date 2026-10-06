@@ -3,7 +3,8 @@
 Classify: rules first (shop domains, JSON-LD @type, video sources), then one CLASSIFY_MODELS
 call against the user's existing categories only when rules don't decide.
 
-Extract: type-focused prompts. Known types get a TYPE_PROMPT carrying only that type's schema;
+Extract: source evidence, flexible document composition and bounded review by default.
+NOTE_DOCUMENTS_ENABLED=false restores legacy type-focused prompts. Known types get a TYPE_PROMPT carrying only that type's schema;
 unknown/invented slugs get the composer prompt (facts/sections/steps/table/checklist/quotes).
 Video (reels, YouTube fallback files) goes to VIDEO_MODELS as a base64 `video_url` part; a
 YouTube URL gets ONE YOUTUBE_MODELS attempt, else `VideoUnreadable`.
@@ -699,6 +700,23 @@ class GeminiService:
                               max_tokens=MAX_TOKENS_NOTE)
         return _note_from(parse_json(fixed)), used
 
+    def _extract_note(self, models, system, prompt, *, deadline=None, **kw):
+        if not settings.NOTE_DOCUMENTS_ENABLED:
+            return self._note_json(models, system, prompt, temperature=0.2, **kw)
+        from services.note_document import generate_document
+        rules = "\nChoosing category (does not determine layout):\n" + _CATEGORY_RULES
+        if CATEGORY_CAP_RULE in system:
+            rules += CATEGORY_CAP_RULE
+        # Also bound transport-level model fallbacks, including callers without a worker.
+        deadlines = [d for d in (deadline, job_deadline.get(), time.monotonic() + 240) if d is not None]
+        end = min(deadlines)
+        token = job_deadline.set(end)
+        try:
+            return generate_document(self._chat_full, parse_json, models, prompt, rules,
+                                     deadline=end, **kw)
+        finally:
+            job_deadline.reset(token)
+
     # ---------- Step 1: categorization ----------
 
     async def classify(self, url: str, bundle: ContentBundle,
@@ -802,18 +820,18 @@ class GeminiService:
         if yt:
             yt_timeout = _video_timeout(deadline)  # raises VideoUnreadable when out of budget
             try:
-                parsed, used = self._note_json(settings.YOUTUBE_MODELS, system, prompt,
-                                               temperature=0.2, video_url=yt, pin_google=True,
+                parsed, used = self._extract_note(settings.YOUTUBE_MODELS, system, prompt,
+                                               deadline=deadline, video_url=yt, pin_google=True,
                                                timeout=yt_timeout, reserve=VIDEO_RESERVE_S)
             except Exception as e:
                 raise VideoUnreadable(f"{type(e).__name__}: {e}") from e
         elif bundle.image_parts:
-            parsed, used = self._note_json(settings.IMAGE_MODELS, system, prompt,
-                                           temperature=0.2, images=bundle.image_parts,
+            parsed, used = self._extract_note(settings.IMAGE_MODELS, system, prompt,
+                                           deadline=deadline, images=bundle.image_parts,
                                            timeout=_call_timeout(120, deadline))
         else:
-            parsed, used = self._note_json(settings.TEXT_MODELS, system, prompt,
-                                           temperature=0.2, timeout=_call_timeout(120, deadline))
+            parsed, used = self._extract_note(settings.TEXT_MODELS, system, prompt,
+                                           deadline=deadline, timeout=_call_timeout(120, deadline))
         parsed.content_type = content_type or normalize_slug(parsed.content_type)
         bundle.metadata["model"] = used
         return parsed
@@ -844,9 +862,9 @@ class GeminiService:
         timeout = _video_timeout()  # raises VideoUnreadable when out of budget
         data_url = f"data:{mime or 'video/mp4'};base64,{base64.b64encode(video_bytes).decode()}"
         try:
-            parsed, used = self._note_json(
+            parsed, used = self._extract_note(
                 settings.VIDEO_MODELS, _system_with_cap(type_hint, categories),
-                "\n\n".join(parts), temperature=0.2, video_url=data_url,
+                "\n\n".join(parts), video_url=data_url,
                 timeout=timeout, reserve=VIDEO_RESERVE_S)
         except Exception as e:
             raise VideoUnreadable(f"{type(e).__name__}: {e}") from e

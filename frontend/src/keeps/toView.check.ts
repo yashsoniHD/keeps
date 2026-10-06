@@ -175,7 +175,13 @@ const res = toView(
     template: "resources",
     data: {
       items: [
-        { name: "Agent skills", kind: "video", creator: "Matt Pocock", what: "Build skills", url: "https://youtu.be/x" },
+        {
+          name: "Agent skills",
+          kind: "video",
+          creator: "Matt Pocock",
+          what: "Build skills",
+          url: "https://youtu.be/x",
+        },
         { name: "Bad link", kind: "tool", what: "y", url: "javascript:alert(1)" },
         { kind: "repo" },
       ],
@@ -187,3 +193,46 @@ assert.deepEqual(res.blocks[0].items, ["Video · Matt Pocock", "Build skills"]);
 assert.equal(res.blocks[0].links?.[0].url, "https://youtu.be/x");
 assert.equal(res.blocks[1].links, undefined);
 console.log("toView.check: ok");
+
+// Content-selected documents override both category templates and entertainment metadata.
+const doc = toView(
+  mk({
+    template: "recipe",
+    content_type: "recipe",
+    data: {
+      document: {
+        version: 1,
+        blocks: [
+          { kind: "text", heading: "Why it sticks", items: ["The pan is too cold."] },
+          {
+            kind: "table",
+            heading: "Compare",
+            columns: ["Pan", "Cue"],
+            rows: [{ cells: ["Hot", "Water dances"] }],
+          },
+          { kind: "quote", items: ["Heat it first."] },
+          { kind: "invalid", items: ["Hidden"] },
+        ],
+      },
+      _evidence: [{ text: "Private extraction detail" }],
+      _quality: { review: "passed" },
+      titles: [{ title: "Dune", providers: [{ name: "Netflix", type: "flatrate" }] }],
+    },
+  }),
+);
+assert.equal(doc.blocks[0].heading, "Why it sticks");
+assert.equal(doc.blocks[1].kind, "table");
+assert.deepEqual(doc.blocks[1].rows, [["Hot", "Water dances"]]);
+assert.equal(doc.blocks[2].kind, "quote");
+assert.equal(doc.blocks[3].credit, "Streaming data by JustWatch");
+assert.equal(doc.blocks.length, 4);
+assert.ok(!JSON.stringify(doc.blocks).includes("Private extraction"));
+const malformed = toView(
+  mk({
+    data: {
+      document: { version: 1, blocks: [null, { kind: "table", rows: [null] }] },
+      _quality: { review: "failed" },
+    },
+  }),
+);
+assert.deepEqual(malformed.blocks, []);

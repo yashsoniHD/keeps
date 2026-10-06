@@ -590,7 +590,8 @@ async def _process_job(job_id: str) -> dict:
             # all consistent and guarantees the taxonomy never grows past the cap here.
             # `template` follows the schema the data was BUILT for — taken before any snapping, so
             # a recipe reel snapped onto "summary" at the category cap still renders as a recipe.
-            schema_slug = normalize_slug(extracted.content_type or content_type or "summary")
+            schema_slug = ("document" if extracted.data.get("document") else
+                           normalize_slug(extracted.content_type or content_type or "summary"))
             if content_type is None:
                 # Video sources: the model picked the type. Snap the *category* onto the user's
                 # taxonomy (and onto the closest existing slug when the category cap is full).

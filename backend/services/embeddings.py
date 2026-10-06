@@ -33,7 +33,7 @@ def note_embedding_text(title: str, ai_summary: str, data: dict | None = None) -
     timestamps/Vectors inside `data` serialize instead of raising."""
     text = "\n".join(p for p in (title.strip(), ai_summary.strip()) if p)
     if data:
-        dump = json.dumps(data, ensure_ascii=False, default=str)[
+        dump = json.dumps({k: v for k, v in data.items() if k not in {"_evidence", "_quality"}}, ensure_ascii=False, default=str)[
             : settings.EMBED_NOTE_DATA_EXCERPT_CHARS]
         if dump and dump != "{}":
             text = f"{text}\n{dump}" if text else dump

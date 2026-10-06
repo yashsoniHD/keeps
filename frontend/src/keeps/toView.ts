@@ -55,6 +55,8 @@ const labelled = (label: string, v: unknown) => (str(v) ? `${label}: ${str(v)}` 
 
 // ---- template resolution (mirror of NoteContent.resolveTemplate) ------------------
 export function resolveTemplate(note: Note, data: R): string {
+  if (isRec(data.document) && data.document.version === 1 && Array.isArray(data.document.blocks))
+    return "document";
   const titles = data.titles;
   if (Array.isArray(titles) && titles.length > 0 && typeof titles[0] === "object")
     return "entertainment";
@@ -82,7 +84,17 @@ const KEY_RULES: Record<string, { heading?: string; kind?: Block["kind"] }> = {
   steps: { kind: "steps" },
   body: { heading: "Note" },
 };
-const SKIP_KEYS = new Set(["thin", "medium", "videoLength", "author", "creator", "embedding"]);
+const SKIP_KEYS = new Set([
+  "thin",
+  "medium",
+  "videoLength",
+  "author",
+  "creator",
+  "embedding",
+  "_evidence",
+  "_quality",
+  "document",
+]);
 const SHORT = 40; // scalars up to this length become "At a glance" chips, longer ones text blocks
 
 // One array item / object -> a single display string.
@@ -151,6 +163,38 @@ function generic(data: R): Mapped {
   const rt = str(data.readTime);
   if (rt && !out.facts.some((f) => f.startsWith("Read time"))) out.facts.push(`Read time: ${rt}`);
   return out;
+}
+
+// New notes choose their own block order independently of category and legacy template.
+function documentNote(data: R): Mapped {
+  const blocks: Block[] = [];
+  const kinds = new Set(["text", "list", "steps", "facts", "checklist", "quote", "table", "code"]);
+  for (const b of recs(isRec(data.document) ? data.document.blocks : [])) {
+    const kind = str(b.kind);
+    if (!kinds.has(kind)) continue;
+    const heading = str(b.heading);
+    const links = recs(b.links)
+      .map((l) => ({ label: str(l.label), url: safeUrl(l.url) }))
+      .filter((l) => l.label && l.url);
+    if (kind === "table") {
+      const columns = strs(b.columns);
+      // Firestore converts nested arrays into {cells: []} maps.
+      const rows = arr(b.rows)
+        .map((r) => (Array.isArray(r) ? r : isRec(r) ? arr(r.cells) : []).map(str))
+        .filter((r) => r.length === columns.length);
+      if (columns.length && rows.length)
+        blocks.push({ heading, kind: "table", items: [], columns, rows, links });
+    } else {
+      blocks.push(...block(heading, kind as Block["kind"], strs(b.items), { links }));
+    }
+  }
+  // Preserve supplementary TMDB details without forcing the document into WatchNote.
+  const enriched = recs(data.titles).filter(
+    (t) => t.tmdb_id || t.poster_url || arr(t.providers).length,
+  );
+  if (enriched.length) blocks.push(...entertainment({ titles: enriched }).blocks);
+  if (str(data.note)) blocks.push(...block("Source limitation", "text", [str(data.note)]));
+  return { facts: [], blocks };
 }
 
 // ---- per-template mappers ---------------------------------------------------------
@@ -330,8 +374,10 @@ function resources(d: R): Mapped {
   const ctx = str(d.context);
   if (ctx) blocks.push(...block("Why these", "text", [ctx]));
   for (const it of recs(d.items).filter((i) => str(i.name))) {
-    const items = [join([humanize(str(it.kind)), str(it.creator), str(it.cost)]), str(it.what)]
-      .filter(Boolean);
+    const items = [
+      join([humanize(str(it.kind)), str(it.creator), str(it.cost)]),
+      str(it.what),
+    ].filter(Boolean);
     const b: Block = { heading: str(it.name), kind: "list", items };
     if (safeUrl(it.url)) b.links = [{ label: "Open", url: safeUrl(it.url) }];
     blocks.push(b);
@@ -340,6 +386,7 @@ function resources(d: R): Mapped {
 }
 
 const MAPPERS: Record<string, (d: R, n: Note) => Mapped> = {
+  document: documentNote,
   recipe,
   workout,
   itinerary,
