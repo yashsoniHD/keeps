@@ -42,6 +42,8 @@ class _L(list):
 
 @pytest.fixture
 def calls2(monkeypatch):
+    # Legacy extraction transport tests; document pipeline has its own adversarial cases.
+    monkeypatch.setattr(settings, "NOTE_DOCUMENTS_ENABLED", False)
     seen = _L()
     seen.replies = []
 
@@ -216,7 +218,7 @@ def test_no_choices_is_an_empty_reply(calls2):
     with ProviderError (never returns ""), and the video path turns it into VideoUnreadable."""
     calls2.replies = [SimpleNamespace(choices=[], usage=None)]
     with pytest.raises(gemini.ProviderError, match="empty reply"):
-        gemini_service._note_json(settings.TEXT_MODELS, "S", "P")
+        gemini_service._note_json(settings.TEXT_MODELS[:1], "S", "P")  # no chain → no retry
     calls2.replies = [SimpleNamespace(choices=None, usage=None, error={"message": "down"})]
     with pytest.raises(VideoUnreadable, match="down"):
         gemini_service._extract_from_video(b"x" * 10, "video/mp4", "cap", [], None)

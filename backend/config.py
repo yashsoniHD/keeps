@@ -24,22 +24,28 @@ class Settings:
     GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "weekly-updates-automation")
 
     # --- AI via OpenRouter (OpenAI-compatible API). Model ids verified against the live
-    # catalog (GET https://openrouter.ai/api/v1/models) on 2026-10-03.
+    # catalog (GET https://openrouter.ai/api/v1/models) on 2026-10-06.
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     # Model chains: comma-separated, tried in order inside ONE request via OpenRouter's `models`
-    # fallback (429 / 5xx / downtime) — free endpoint first, paid floor last.
-    # Paid-only: in the spike the free nemotron omni was 5-7x slower (46-157 s), hit worker
-    # request limits on parallel calls and rejects bodies > 25 MiB.
-    VIDEO_MODELS: list[str] = _chain("VIDEO_MODELS", "google/gemini-2.5-flash-lite")
-    # YouTube URLs: pinned to the Google AI Studio provider (the only one that fetches the URL).
+    # fallback (429 / 5xx / downtime). Policy (2026-10-06): THREE models, picked for quality
+    # per dollar, not for being free (free heads trialled 10-04/05/06: 429s, fabrication, or
+    # too slow for the worker budget).
+    #   qwen/qwen3.8-omni-flash  — every reel, downloaded video and image/carousel. The only
+    #                              cheap open-weight model that HEARS video (audio input);
+    #                              ~$0.0023/min of video, 34 s per 60 s clip, verbatim narration
+    #                              in the smoke. Frames-only models (gemma-4, ling-vl, qwen3.x
+    #                              -flash) miss everything said in a reel. Too slow as a TEXT
+    #                              model (timed out composing), so not used for that.
+    #   google/gemini-2.5-flash-lite — YouTube by URL only (Google AI Studio is the only
+    #                              provider that fetches the URL). Nothing else here.
+    #   deepseek/deepseek-v3.2   — all text: page evidence, compose, review, classify.
+    VIDEO_MODELS: list[str] = _chain("VIDEO_MODELS", "qwen/qwen3.8-omni-flash")
     YOUTUBE_MODELS: list[str] = _chain("YOUTUBE_MODELS", "google/gemini-2.5-flash-lite")
-    # Images/carousels: Gemini too. In the 2026-10 A/B gemma-4:free 429'd on every call and the
-    # paid ling-3.0-flash-vl fallback rejects >4 images ("6 > 4"), so all 3 carousels failed.
-    IMAGE_MODELS: list[str] = _chain("IMAGE_MODELS", "google/gemini-2.5-flash-lite")
-    # Text/classify are paid-only: in the 2026-10 A/B nemotron-3-super:free fabricated fields
-    # on caption-only notes and gemma-4:free 429'd on 7/7 classify calls.
+    IMAGE_MODELS: list[str] = _chain("IMAGE_MODELS", "qwen/qwen3.8-omni-flash")
     TEXT_MODELS: list[str] = _chain("TEXT_MODELS", "deepseek/deepseek-v3.2")
-    CLASSIFY_MODELS: list[str] = _chain("CLASSIFY_MODELS", "qwen/qwen3-30b-a3b-instruct-2507")
+    NOTE_DOCUMENTS_ENABLED: bool = os.getenv("NOTE_DOCUMENTS_ENABLED", "true").lower() == "true"
+    NOTE_REVIEW_ENABLED: bool = os.getenv("NOTE_REVIEW_ENABLED", "true").lower() == "true"
+    CLASSIFY_MODELS: list[str] = _chain("CLASSIFY_MODELS", "deepseek/deepseek-v3.2")
     # Hard client timeout on one video call, well inside JOB_DEADLINE_S; on timeout the call is
     # retried once on the rest of the chain (OpenRouter's own fallback never sees a client abort).
     VIDEO_CALL_TIMEOUT_S: int = int(os.getenv("VIDEO_CALL_TIMEOUT_S", "120"))

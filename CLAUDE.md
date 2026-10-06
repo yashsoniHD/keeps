@@ -67,18 +67,18 @@ Key decisions:
 
 ---
 
-## Models (OpenRouter `models: [free, paid]`; paid takes over on 429/error/timeout; defaults in `backend/config.py`)
+## Models (OpenRouter; defaults in `backend/config.py`, all env-overridable)
 
-| Job | Free first | Paid fallback |
+Policy (2026-10-06): **three models**, chosen for quality per dollar. Free heads were trialled on 10-04/05/06 and dropped (429s, fabrication, or too slow for the 270 s worker budget).
+
+| Model | Used for | Why |
 |---|---|---|
-| Reel video + audio | none (free omni demoted: 5-7x slower, capacity-limited) | `google/gemini-2.5-flash-lite` (~$0.002-0.011/clip) |
-| YouTube | none | `google/gemini-2.5-flash-lite` |
-| Images | none (gemma free 429'd every call; ling paid rejects >4 images) | `google/gemini-2.5-flash-lite` |
-| Text notes | none (free head demoted: fabrication) | `deepseek/deepseek-v3.2` |
-| Classify | rules, then none (free head demoted: 0% availability) | `qwen/qwen3-30b-a3b-instruct-2507` |
-| Embeddings (768-dim) | none | `qwen/qwen3-embedding-8b` |
+| `qwen/qwen3.8-omni-flash` | Reels, downloaded video (incl. the YouTube download fallback), images/carousels | Only cheap open-weight model that **hears** video (audio input). ~$0.0023/min of video, 34 s per 60 s clip, verbatim narration in the smoke. Frames-only models (gemma-4, ling-vl, qwen3.x-flash) miss everything said in a reel. Too slow as a text model (timed out composing). |
+| `google/gemini-2.5-flash-lite` | YouTube by URL only | Only Google AI Studio fetches YouTube URLs. |
+| `deepseek/deepseek-v3.2` | All text: page evidence, compose, review, classify | $0.28/$0.42 per M, proven in prod; the review it produces catches real gaps. |
+| `qwen/qwen3-embedding-8b` | Embeddings (768-dim) | unchanged |
 
-Free heads were trialled and demoted on 2026-10-04 per phase0/ab (fabrication, 0% availability, latency); re-trial by setting the *_MODELS env vars. Free endpoints need OpenRouter Settings -> Privacy to allow them.
+Fallback on 429/timeout: single-model chains fall to the existing caption-only thin note (video) or the retained evidence list (compose). Add a second model to a chain via the `*_MODELS` env var if a provider gets flaky.
 
 ---
 

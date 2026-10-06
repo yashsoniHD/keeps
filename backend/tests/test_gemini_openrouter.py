@@ -28,6 +28,9 @@ class _Calls(list):
 def calls(monkeypatch):
     """Capture every create() call; replies come from `calls.replies` (str, Exception, or a
     prebuilt response object)."""
+    # This suite exercises the legacy transport/JSON-repair contract; document stages
+    # and their routing are covered separately in test_note_document.py.
+    monkeypatch.setattr(settings, "NOTE_DOCUMENTS_ENABLED", False)
     seen = _Calls()
     seen.replies = []
 
@@ -425,11 +428,14 @@ def test_wall_clock_timeout_on_last_model_raises_api_timeout(monkeypatch):
 
 # ---------- error-shaped 200s, truncation, thin sources, demoted defaults ----------
 
-def test_default_chains_are_paid_only_after_ab():
-    assert settings.TEXT_MODELS == ["deepseek/deepseek-v3.2"]
-    assert settings.CLASSIFY_MODELS == ["qwen/qwen3-30b-a3b-instruct-2507"]
-    assert settings.VIDEO_MODELS == ["google/gemini-2.5-flash-lite"]
-    assert not any(m.endswith(":free") for m in settings.TEXT_MODELS + settings.CLASSIFY_MODELS)
+def test_default_chains_three_models():
+    """2026-10-06 policy: three models. Gemini only reads YouTube URLs; qwen omni (hears audio)
+    for every other medium; deepseek for all text. No free heads."""
+    assert settings.YOUTUBE_MODELS == ["google/gemini-2.5-flash-lite"]
+    assert settings.VIDEO_MODELS == settings.IMAGE_MODELS == ["qwen/qwen3.8-omni-flash"]
+    assert settings.TEXT_MODELS == settings.CLASSIFY_MODELS == ["deepseek/deepseek-v3.2"]
+    assert len({m for c in (settings.VIDEO_MODELS, settings.YOUTUBE_MODELS, settings.IMAGE_MODELS,
+                            settings.TEXT_MODELS, settings.CLASSIFY_MODELS) for m in c}) == 3
 
 
 def test_error_shaped_200_moves_to_next_model(calls):
