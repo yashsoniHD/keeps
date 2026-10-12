@@ -19,6 +19,10 @@ const firebaseConfig = {
     : {}),
 };
 
+// Fail loudly: a build without these env vars ships `apiKey: undefined` and a blank screen.
+if (!firebaseConfig.apiKey) throw new Error("Missing VITE_FIREBASE_API_KEY at build time");
+if (!firebaseConfig.projectId) throw new Error("Missing VITE_FIREBASE_PROJECT_ID at build time");
+
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 // IndexedDB-backed cache: the feed and note views render from disk instantly (and offline),

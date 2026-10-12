@@ -32,6 +32,18 @@
         } catch (e) {}
       })();
     </script>
+    <!-- If the app crashes before React renders anything, show a reload prompt, not a blank page. -->
+    <script>
+      window.addEventListener("error", function () {
+        setTimeout(function () {
+          var r = document.getElementById("root");
+          if (!r || r.childNodes.length) return;
+          r.textContent = "Keeps couldn't start. Tap to reload.";
+          r.style.cssText = "padding:24px;font:16px system-ui;text-align:center;cursor:pointer";
+          r.onclick = function () { location.reload(); };
+        }, 0);
+      });
+    </script>
     <title>Keeps</title>
     <meta
       name="description"

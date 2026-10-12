@@ -1,10 +1,18 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => {
+  // A build without the Firebase web config ships a blank app; refuse to produce one.
+  // loadEnv merges .env* files with process.env, so local builds and CI vars both count.
+  if (command === "build" && !loadEnv(mode, process.cwd(), "VITE_").VITE_FIREBASE_API_KEY)
+    throw new Error("VITE_FIREBASE_API_KEY is not set; refusing to build a blank app");
+  return config;
+});
+
+const config: UserConfig = {
   plugins: [
     tsconfigPaths(),
     // Router plugin must come before react() so route files are transformed first.
@@ -31,4 +39,4 @@ export default defineConfig({
   // root), whose bare imports can't otherwise resolve. dedupe forces these to resolve
   // from frontend/node_modules — also guaranteeing a single React copy.
   resolve: { dedupe: ["react", "react-dom", "lucide-react"] },
-});
+};
