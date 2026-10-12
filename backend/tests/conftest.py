@@ -217,6 +217,18 @@ def fake_db():
 
 
 @pytest.fixture(autouse=True)
+def _stub_firebase_db(monkeypatch, fake_db):
+    """No test may build a real Firestore client. Routers patch their own `get_db`, but the
+    helpers in services/firebase.py (touch_user_activity, add_user_source, flush_usage, ...)
+    call the module's get_db() directly — without this stub they hit ADC (fails in CI, and
+    locally would write to the real project). Same FakeDb instance as the `fake_db` fixture."""
+    try:
+        monkeypatch.setattr("services.firebase.get_db", lambda: fake_db)
+    except Exception:  # pragma: no cover — firebase deps absent in a minimal env
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _stub_transactional(monkeypatch):
     """Run @fs.async_transactional bodies directly against FakeTransaction — the real
     decorator needs a live Firestore transaction (begin/commit/rollback RPCs)."""
