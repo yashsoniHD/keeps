@@ -237,3 +237,98 @@ async def test_reextract_unreachable_source_does_not_clobber(fake_db, monkeypatc
     assert res["status"] == "failed"
     assert fake_db.docs[("notes", "existing")]["title"] == "Good recipe"  # untouched
     assert [k for k in fake_db.docs if k[0] == "notes"] == [("notes", "existing")]
+
+
+async def test_reextract_of_deleted_note_fails_without_ai_work(fake_db, wire_worker, monkeypatch):
+    """Audit #6: the target was deleted while the job waited → fail, no extract, no resurrect."""
+    calls = []
+
+    async def spy_extract(*a, **k):
+        calls.append(a)
+    monkeypatch.setattr(process_mod.gemini_service, "extract_async", spy_extract)
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://x.com/a", "target_note_id": "gone"})
+
+    res = await process_mod.process_job("j", DummyRequest())
+    assert res["status"] == "failed"
+    assert fake_db.docs[("jobs", "j")]["status"] == "failed"
+    assert calls == []
+    assert not [k for k in fake_db.docs if k[0] == "notes"]
+
+
+async def test_reextract_note_deleted_mid_extract_is_not_recreated(fake_db, wire_worker,
+                                                                   monkeypatch):
+    fake_db.seed("notes", "existing", {"user_id": "u", "title": "Old", "created_at": OLD})
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://x.com/a", "target_note_id": "existing"})
+
+    async def extract_then_delete(url, bundle, ct, note_hint=None, **_):
+        fake_db.docs.pop(("notes", "existing"))  # user deletes the note during the model call
+        return NoteExtraction(content_type=ct, title="New", ai_summary="Fresh summary.",
+                              cover_image_prompt="",
+                              data={"tldr": "the whole point", "keyPoints": ["a", "b"]})
+    monkeypatch.setattr(process_mod.gemini_service, "extract_async", extract_then_delete)
+
+    res = await process_mod.process_job("j", DummyRequest())
+    assert res["status"] == "failed"
+    assert fake_db.docs[("jobs", "j")]["status"] == "failed"
+    assert not [k for k in fake_db.docs if k[0] == "notes"]
+
+
+async def test_metadata_failure_after_save_does_not_salvage_duplicate(fake_db, wire_worker,
+                                                                      monkeypatch):
+    """Audit #7: add_user_category raising after the note write must not mint a bookmark."""
+    async def boom(*a, **k):
+        raise RuntimeError("users doc write failed")
+    monkeypatch.setattr(process_mod, "add_user_category", boom)
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://x.com/a"})
+
+    res = await process_mod.process_job("j", DummyRequest())
+    notes = [(k, v) for k, v in fake_db.docs.items() if k[0] == "notes"]
+    assert len(notes) == 1 and not notes[0][1].get("is_fallback")
+    job = fake_db.docs[("jobs", "j")]
+    assert res["status"] == "completed"
+    assert job["status"] == "completed" and job["note_id"] == notes[0][0][1]
+
+
+async def test_slow_enrichment_is_cut_at_the_job_deadline(fake_db, wire_worker, monkeypatch):
+    """Audit #9: enrichment past the deadline budget → note saved unenriched, promptly."""
+    import asyncio
+    import time
+
+    async def slow_enrich(user_id, ct, d, cover):
+        await asyncio.sleep(5)
+        return {**d, "enriched": True}, "https://poster.jpg"
+    monkeypatch.setattr(process_mod, "enrich_note_data", slow_enrich)
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://x.com/a"})
+
+    process_mod.job_deadline.set(time.monotonic() + process_mod.PERSIST_RESERVE_S + 0.2)
+    t0 = time.monotonic()
+    res = await process_mod._process_job("j")
+    assert time.monotonic() - t0 < 2
+    assert res["status"] == "completed"
+    note = fake_db.docs[("notes", res["note_id"])]
+    assert "enriched" not in note["data"] and note["cover_image_url"] is None
+
+
+async def test_failed_job_completion_does_not_salvage(fake_db, wire_worker, monkeypatch):
+    """Note write + job completion are one commit: if completing the job fails, the error
+    surfaces (sweep re-runs the job) instead of salvaging a second, bookmark note."""
+    tx_cls = type(fake_db.transaction())
+    real_update = tx_cls.update
+
+    def failing_update(self, ref, data):
+        if ref._key[0] == "jobs" and data.get("status") == "completed":
+            raise RuntimeError("commit failed")
+        real_update(self, ref, data)
+    monkeypatch.setattr(tx_cls, "update", failing_update)
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://x.com/a"})
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await process_mod.process_job("j", DummyRequest())
+    notes = [v for k, v in fake_db.docs.items() if k[0] == "notes"]
+    assert len(notes) <= 1 and not any(n.get("is_fallback") for n in notes)
+    assert fake_db.docs[("jobs", "j")]["status"] == "processing"  # stale claim → sweep re-runs

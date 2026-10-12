@@ -61,10 +61,12 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [showAdd, setShowAdd] = useState(false);
   const [optimistic, setOptimistic] = useState<Optimistic[]>([]);
-  const [queued, setQueued] = useState<QueuedCapture[]>(loadQueue);
+  const [queued, setQueued] = useState<QueuedCapture[]>(() => (user ? loadQueue(user.uid) : []));
   const [dupNoteId, setDupNoteId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
   const seq = useRef(0);
+  const uidRef = useRef(user?.uid ?? null);
+  uidRef.current = user?.uid ?? null;
   const pathRef = useRef(pathname);
   pathRef.current = pathname;
 
@@ -108,7 +110,7 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
         if (isQueueableError(e)) {
           // Offline / server down: hold the URL locally and show a "waiting" row — the capture
           // is parked, not lost. Replayed by the effect below.
-          setQueued(enqueueCapture(url));
+          if (user) setQueued(enqueueCapture(user.uid, url));
         } else {
           setToast({
             message:
@@ -118,7 +120,7 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [navigate],
+    [navigate, user],
   );
 
   const settle = useCallback((known: Set<string>) => {
@@ -133,18 +135,30 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
   // failures keep the rest of the queue intact. One replay at a time so a URL isn't ingested twice.
   const replaying = useRef(false);
   const refreshQueue = useCallback(() => {
-    setQueued(loadQueue());
-    if (!user || replaying.current || loadQueue().length === 0) return;
+    if (!user) {
+      setQueued([]);
+      return;
+    }
+    const uid = user.uid;
+    const q = loadQueue(uid);
+    setQueued(q);
+    if (replaying.current || q.length === 0) return;
     replaying.current = true;
-    replayQueue((_url, message) => setToast({ message, error: true }))
-      .then(setQueued)
+    replayQueue(
+      uid,
+      () => uidRef.current === uid,
+      (_url, message) => setToast({ message, error: true }),
+    )
+      .then((rest) => {
+        if (uidRef.current === uid) setQueued(rest);
+      })
       .finally(() => {
         replaying.current = false;
       });
   }, [user]);
   useEffect(() => {
+    refreshQueue(); // also clears `queued` on sign-out
     if (!user) return;
-    refreshQueue();
     window.addEventListener("online", refreshQueue);
     return () => window.removeEventListener("online", refreshQueue);
   }, [user, refreshQueue]);

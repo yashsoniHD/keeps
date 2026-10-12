@@ -33,7 +33,8 @@ from bs4 import BeautifulSoup
 from config import settings
 from models.note import ContentBundle
 from services import acq_cache
-from services.net_guard import guarded_async_client
+from services.net_guard import BlockedURLError, assert_public_url, guarded_async_client
+from services.url_utils import host_matches
 
 log = logging.getLogger("keeps.sources")
 
@@ -63,15 +64,13 @@ os.makedirs(settings.TEMP_DOWNLOAD_DIR, exist_ok=True)
 
 
 def matches(url: str) -> bool:
-    u = url.lower()
-    return any(d in u for d in _DOMAINS)
+    return host_matches(url, _DOMAINS)
 
 
 def _platform(url: str) -> str:
-    u = url.lower()
-    if "instagram" in u:
+    if host_matches(url, ("instagram.com",)):
         return "instagram"
-    if "tiktok" in u:
+    if host_matches(url, ("tiktok.com",)):
         return "tiktok"
     return "facebook"
 
@@ -204,7 +203,21 @@ def _ydl_opts(workdir: str) -> dict:
         "max_filesize": raw_cap(),
         # asyncio.wait_for cannot kill the thread — socket_timeout is what actually frees it.
         "socket_timeout": 30,
+        # Platform extractors only (fullmatch on the lowercased IE name). Never `generic`: it
+        # follows arbitrary pages/embeds with yt-dlp's own HTTP, outside net_guard.
+        "allowed_extractors": [r"(vm\.)?tiktok(:.*)?", r"facebook.*", r"instagram.*"],
     }
+
+
+def _assert_public_media(info: dict) -> None:
+    """yt-dlp fetches media itself, outside guarded_async_client: check every candidate media
+    URL it resolved before it downloads. Raises BlockedURLError."""
+    urls = set()
+    for item in [info, *(e for e in info.get("entries") or [] if isinstance(e, dict))]:
+        for f in [item, *(item.get("formats") or [])]:
+            urls.update(f.get(k) for k in ("url", "manifest_url", "fragment_base_url"))
+    for u in urls - {None}:
+        assert_public_url(u)
 
 
 def _ytdlp_download(url: str) -> tuple[dict, bytes | None, str]:
@@ -219,6 +232,7 @@ def _ytdlp_download(url: str) -> tuple[dict, bytes | None, str]:
                 return info, None, ""          # gate: never download an over-long video
             if not duration:  # can't re-encode without a duration: fetch only what fits as-is
                 ydl.params["max_filesize"] = settings.VIDEO_MAX_BYTES
+            _assert_public_media(info)
             ydl.process_ie_result(info, download=True)
         files = sorted(f for f in os.listdir(workdir) if not f.endswith(".part"))
         if not files:
@@ -364,6 +378,8 @@ async def _ladder(url: str) -> tuple[dict | None, tuple[bytes, str] | None]:
                 if e["caption"]:
                     return e, None  # known too long: don't pay Apify for a video we won't fetch
             leftover = e if e["caption"] else None
+        except BlockedURLError:
+            raise  # permanent: never fall through to Apify for an internal target
         except Exception as ex:  # noqa: BLE001
             log.info("yt-dlp failed for %s (%s): %s", _platform(url), url, str(ex)[:160])
 

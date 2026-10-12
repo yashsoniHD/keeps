@@ -181,3 +181,33 @@ async def test_other_users_note_or_bookmark_is_not_a_duplicate(fake_db, patch_in
                                   "is_fallback": True})
     res = await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u")
     assert res.status == "pending" and patch_ingest == [res.job_id]
+
+
+# --- deferred captures still charge the per-user daily cap ---------------------
+
+async def test_deferred_saves_charge_user_daily_cap(fake_db, patch_ingest):
+    cap = settings.DAILY_GLOBAL_NOTE_CAP
+    fake_db.seed("system", f"usage-{TODAY}", {"note_count": cap})
+    for i in range(settings.MAX_INGESTS_PER_USER_PER_DAY):
+        res = await ingest_mod.ingest(FakeRequest(f'{{"url": "https://example.com/{i}"}}'.encode()),
+                                      user_id="u")
+        assert res.status == "deferred"
+    with pytest.raises(HTTPException) as exc:
+        await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/over"}'), user_id="u")
+    assert exc.value.status_code == 429
+    assert fake_db.docs[("system", f"usage-{TODAY}")]["note_count"] == cap
+
+
+# --- _existing_note: fallback bookmark must not hide the real note ------------
+
+async def test_existing_note_skips_fallback_sorted_first(fake_db):
+    url = "https://example.com/x"
+    fake_db.seed("notes", "fb", {"user_id": "u", "source_url": url, "is_fallback": True})
+    fake_db.seed("notes", "real", {"user_id": "u", "source_url": url})
+    assert await ingest_mod._existing_note(fake_db, "u", url) == "real"
+
+
+async def test_existing_note_only_fallback_is_a_miss(fake_db):
+    url = "https://example.com/x"
+    fake_db.seed("notes", "fb", {"user_id": "u", "source_url": url, "is_fallback": True})
+    assert await ingest_mod._existing_note(fake_db, "u", url) is None

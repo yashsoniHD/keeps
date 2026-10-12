@@ -20,6 +20,7 @@ import httpx
 
 from config import settings
 from models.note import ContentBundle
+from services.url_utils import host_matches
 
 log = logging.getLogger("keeps.sources")
 
@@ -34,8 +35,7 @@ _VIDEO_ID_RE = re.compile(
 
 
 def matches(url: str) -> bool:
-    u = url.lower()
-    return any(d in u for d in _DOMAINS)
+    return host_matches(url, _DOMAINS)
 
 
 def _parse_player_response(page: str) -> dict | None:

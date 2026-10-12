@@ -115,7 +115,7 @@ async def test_drain_failure_mid_way_charges_dispatched_and_sweep_still_reclaims
     r = _client().get("/api/process/sweep", headers={"Authorization": "Bearer c"})
     assert r.status_code == 200, r.text
     assert r.json()["drained"] == 2
-    assert _note_count(fake_db) == 2                      # only dispatched jobs are charged
+    assert _note_count(fake_db) == 3                      # reserved before dispatch: d1 stays charged
     assert ("stale", "/api/process") in dispatched         # reclaim ran after the drain
 
 
@@ -136,3 +136,48 @@ async def test_drain_stops_at_batch_cap(fake_db, dispatched, monkeypatch):
     out = await process._drain_deferred(fake_db)
     assert out["drained"] == 3 and len(dispatched) == 3
     assert _note_count(fake_db) == 3
+
+
+async def test_drain_reserves_only_remaining_global_budget(fake_db, dispatched, monkeypatch):
+    """Audit #11: with one slot left, only one of two deferred jobs is dispatched + charged."""
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    fake_db.seed("system", f"usage-{today}", {"note_count": 5})
+    monkeypatch.setattr(settings, "DAILY_GLOBAL_NOTE_CAP", 6)
+    for i in range(2):
+        fake_db.seed("jobs", f"d{i}", {"status": "deferred", "user_id": "u"})
+
+    out = await process._drain_deferred(fake_db)
+    assert out["drained"] == 1 and len(dispatched) == 1
+    assert _note_count(fake_db) == 6
+    assert sorted(fake_db.docs[("jobs", f"d{i}")]["status"] for i in range(2)) == [
+        "deferred", "pending"]
+
+
+async def test_drain_dispatch_failure_keeps_charge_and_pending(fake_db, dispatched, monkeypatch):
+    fake_db.seed("jobs", "d0", {"status": "deferred", "user_id": "u"})
+
+    def boom(job_id, path="/api/process"):
+        raise RuntimeError("dispatch down")
+    monkeypatch.setattr(process, "enqueue_process_job", boom)
+
+    out = await process._drain_deferred(fake_db)
+    assert out["drained"] == 0
+    assert _note_count(fake_db) == 1                       # charged: the sweep will run it
+    assert fake_db.docs[("jobs", "d0")]["status"] == "pending"
+
+
+async def test_drain_skips_job_already_taken_by_concurrent_drain(fake_db, dispatched,
+                                                                 monkeypatch):
+    """A job flipped to pending by a concurrent drain (which charged it) is not charged or
+    dispatched again."""
+    for i in range(2):
+        fake_db.seed("jobs", f"d{i}", {"status": "deferred", "user_id": "u"})
+
+    def dispatch_and_race(job_id, path="/api/process"):
+        dispatched.append(job_id)
+        fake_db.docs[("jobs", "d1")]["status"] = "pending"  # the other drain got d1 first
+    monkeypatch.setattr(process, "enqueue_process_job", dispatch_and_race)
+
+    out = await process._drain_deferred(fake_db)
+    assert out["drained"] == 1 and dispatched == ["d0"]
+    assert _note_count(fake_db) == 1

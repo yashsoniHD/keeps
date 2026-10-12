@@ -53,16 +53,29 @@ router = APIRouter(tags=["process"])
 log = logging.getLogger("keeps.process")
 
 
+# Seconds of the job deadline kept free for the note write when running optional steps
+# (enrichment, embedding). ponytail: fixed reserves; a slow step is cut, not resumed.
+PERSIST_RESERVE_S = 30
+EMBED_RESERVE_S = 15
+
+
+def _time_left(reserve: float) -> float | None:
+    """Seconds an optional step may take before eating into `reserve`; None = no deadline set."""
+    dl = job_deadline.get()
+    return None if dl is None else dl - time.monotonic() - reserve
+
+
 async def _note_embedding(title: str, ai_summary: str = "",
                           data: dict | None = None) -> Vector | None:
     """Embed a note's text (title + summary + flattened data) for semantic search. Non-fatal:
     on any failure the note is still written (search just misses it until a backfill re-embeds
     it)."""
     text = note_embedding_text(title, ai_summary, data)
-    if not text:
+    left = _time_left(EMBED_RESERVE_S)
+    if not text or (left is not None and left <= 0):
         return None
     try:
-        vec = await embedding_service.embed_document(text)
+        vec = await asyncio.wait_for(embedding_service.embed_document(text), left)
         return Vector(vec) if vec else None
     except Exception as e:
         log.warning("note embedding failed, writing note without it: %s: %s",
@@ -372,32 +385,45 @@ DRAIN_BATCH = 100  # max deferred jobs re-dispatched per drain pass
 async def _drain_deferred(db) -> dict:
     """Re-dispatch captures parked by the global daily cap (status "deferred"), up to the
     budget that has freed up. Bounded by the remaining global budget, so draining can never
-    itself bust the kill-switch."""
+    itself bust the kill-switch. Each job reserves its slot transactionally BEFORE dispatch, so
+    concurrent ingests can't claim the same slots."""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     global_ref = db.collection("system").document(f"usage-{today}")
-    snap = await global_ref.get()
-    used = (snap.to_dict() or {}).get("note_count", 0)
-    budget = settings.DAILY_GLOBAL_NOTE_CAP - used
-    if budget <= 0:
-        return {"drained": 0, "reason": "no budget today"}
 
     now = datetime.now(timezone.utc)
+
+    @fs.async_transactional
+    async def _reserve(tx, job_ref):
+        """None = global cap reached; False = job no longer deferred (a concurrent drain took
+        it, already charged); True = charged and flipped to pending, ready to dispatch."""
+        snap = await global_ref.get(transaction=tx)
+        job = await job_ref.get(transaction=tx)
+        if (snap.to_dict() or {}).get("note_count", 0) >= settings.DAILY_GLOBAL_NOTE_CAP:
+            return None
+        if not job.exists or (job.to_dict() or {}).get("status") != "deferred":
+            return False
+        tx.set(global_ref, {"date": today, "note_count": fs.Increment(1)}, merge=True)
+        tx.update(job_ref, {"status": "pending", "updated_at": now})
+        return True
+
     drained = 0
     # ponytail: one pass handles at most DRAIN_BATCH jobs (sequential dispatch inside the 300 s
     # request kill); the daily cron picks up the rest. Raise it only with concurrent dispatch.
-    q = db.collection("jobs").where("status", "==", "deferred").limit(min(budget, DRAIN_BATCH))
+    q = db.collection("jobs").where("status", "==", "deferred").limit(DRAIN_BATCH)
     async for doc in q.stream():
+        reserved = await _reserve(db.transaction(), doc.reference)
+        if reserved is None:
+            break  # global cap reached
+        if not reserved:
+            continue
         try:
-            await doc.reference.update({"status": "pending", "updated_at": now})
             await asyncio.to_thread(enqueue_process_job, doc.id)
         except Exception as e:  # noqa: BLE001 — one bad dispatch must not stop the drain
             log.error("drain dispatch failed: %s: %s", type(e).__name__, e,
                       extra={"job_id": doc.id})
-            continue  # left "pending" -> the stale sweep re-dispatches it; not charged
+            continue  # left "pending" -> the stale sweep re-dispatches it; already charged
         drained += 1
-        # Charge per job (atomic) so a later failure/kill never loses the cap count.
-        await global_ref.set({"date": today, "note_count": fs.Increment(1)}, merge=True)
-    log.info("drained %d deferred captures (budget was %d)", drained, budget)
+    log.info("drained %d deferred captures", drained)
     return {"drained": drained}
 
 
@@ -519,7 +545,14 @@ async def _process_job(job_id: str) -> dict:
     # (a failed/salvaged job still incurred AI cost that must be attributed).
     meter = start_metering()
     bundle: ContentBundle | None = None
+    committing = False  # True while the note+job commit runs: a failure there must not salvage
+    note_id = target_note_id or _stable_id("note", job_id)
+    note_ref = db.collection("notes").document(note_id)
     try:
+        # A re-extract of a note deleted while the job waited: stop before any paid work.
+        if target_note_id and not (await note_ref.get()).exists:
+            return await _fail_reextract(job_ref, "target note deleted")
+
         # 1. Acquire content per input_type. URLs go through the source-aware resolver;
         #    typed text is already in hand.
         if input_type == "text":
@@ -626,20 +659,21 @@ async def _process_job(job_id: str) -> dict:
         # photos/coords + action links, stop geocoding, price parsing). Best-effort: a miss
         # leaves a valid plain note. A poster/photo is adopted as cover only when the note
         # would otherwise be coverless.
-        if process_ai:
-            extracted.data, cover_override = await enrich_note_data(
-                user_id, extracted.content_type, extracted.data, cover_image_url)
-            cover_image_url = cover_override or cover_image_url
+        # Bounded by the job deadline (keeping PERSIST_RESERVE_S for the write); on timeout
+        # the note is saved unenriched (enrich only assigns data after its lookups finish).
+        left = _time_left(PERSIST_RESERVE_S)
+        if process_ai and (left is None or left > 0):
+            try:
+                extracted.data, cover_override = await asyncio.wait_for(enrich_note_data(
+                    user_id, extracted.content_type, extracted.data, cover_image_url), left)
+                cover_image_url = cover_override or cover_image_url
+            except asyncio.TimeoutError:
+                log.warning("enrichment cut at the job deadline, saving unenriched",
+                            extra={"job_id": job_id, "user_id": user_id, "url": url})
 
         # Every capture is a note. A re-extract targets the existing note (overwrite in place)
         # and keeps its created_at while regenerating everything AI produced.
-        note_id = target_note_id or _stable_id("note", job_id)
         created_at = now
-        if target_note_id:
-            existing = await db.collection("notes").document(note_id).get()
-            if existing.exists:
-                old = existing.to_dict() or {}
-                created_at = old.get("created_at") or now
         # Embed title + summary + the (now enriched) data so search matches the note's content,
         # not just its headline.
         embedding = await _note_embedding(extracted.title, extracted.ai_summary, extracted.data)
@@ -666,16 +700,38 @@ async def _process_job(job_id: str) -> dict:
         if embedding is not None:
             note_doc["embedding"] = embedding
             note_doc["embedding_version"] = EMBED_TEXT_VERSION
-        await db.collection("notes").document(note_id).set(note_doc)
-        await add_user_category(user_id, extracted.content_type)
-        if source_domain:
-            await add_user_source(user_id, source_domain)
         destination = {"kind": "note", "note_id": note_id}
-        await job_ref.update({"status": "completed", "note_id": note_id,
-                              "destination": destination,
-                              "title": extracted.title,
-                              "updated_at": datetime.now(timezone.utc)})
-        await touch_user_activity(user_id, first_note=True)  # activation milestone (best-effort)
+
+        # Note write + job completion commit together, so a failed job update can't leave a
+        # saved note behind a salvage. A re-extract overwrites only if the note still exists
+        # (it may be deleted mid-extract) and keeps its created_at.
+        @fs.async_transactional
+        async def _commit(tx):
+            doc = note_doc
+            if target_note_id:
+                snap = await note_ref.get(transaction=tx)
+                if not snap.exists:
+                    return False
+                doc = {**note_doc, "created_at": (snap.to_dict() or {}).get("created_at") or now}
+            tx.set(note_ref, doc)
+            tx.update(job_ref, {"status": "completed", "note_id": note_id,
+                                "destination": destination, "title": extracted.title,
+                                "updated_at": datetime.now(timezone.utc)})
+            return True
+
+        committing = True
+        if not await _commit(db.transaction()):
+            return await _fail_reextract(job_ref, "target note deleted")
+        committing = False
+        # The note is saved and the job completed: nothing below may trigger a salvage.
+        try:
+            await add_user_category(user_id, extracted.content_type)
+            if source_domain:
+                await add_user_source(user_id, source_domain)
+            await touch_user_activity(user_id, first_note=True)  # activation milestone
+        except Exception as e:  # noqa: BLE001 — category/source chips are cosmetic
+            log.warning("post-save metadata failed: %s: %s", type(e).__name__, e,
+                        extra={"job_id": job_id, "user_id": user_id})
         log.info("note created (%s via %s)", extracted.content_type, bundle.strategy,
                  extra={"job_id": job_id, "user_id": user_id, "url": url, "strategy": bundle.strategy})
         return {"status": "completed", "note_id": note_id, "destination": destination}
@@ -689,6 +745,10 @@ async def _process_job(job_id: str) -> dict:
         return {"status": "failed", "error": str(e)[:200]}
 
     except Exception as e:
+        if committing:
+            # Nothing was written (the commit is atomic); surface it so the job stays claimed
+            # and the sweep re-runs it, instead of salvaging a bookmark for a real note.
+            raise
         if _is_transient(e) and attempt < MAX_TRANSIENT_ATTEMPTS:
             # process_job retries in-process. Status returns to "pending" so the feed keeps showing the in-flight card, not a failure.
             log.warning("transient failure (attempt %d/%d), re-raising for retry: %s: %s",

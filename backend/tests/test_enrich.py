@@ -74,3 +74,18 @@ async def test_unmatched_family_is_a_no_op():
     out, cover = await enrich.enrich_note_data("u", "article", dict(data), None)
     assert out == data
     assert cover is None
+
+
+async def test_enrichment_caps_tmdb_lookups(monkeypatch):
+    """Audit #9: a long listicle gets at most MAX_ENRICH_TITLES lookups; the rest pass through."""
+    calls = []
+
+    async def fake_search(title, year=None, media_hint=None):
+        calls.append(title)
+        return None
+    monkeypatch.setattr(enrich.tmdb, "search_title", fake_search)
+
+    titles = [{"title": f"T{i}"} for i in range(20)]
+    out, _ = await enrich.enrich_note_data("u", "movie", {"titles": list(titles)}, None)
+    assert len(calls) == enrich.MAX_ENRICH_TITLES == 8
+    assert out["titles"] == titles  # all 20 kept, order intact

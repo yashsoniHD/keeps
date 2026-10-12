@@ -27,7 +27,7 @@ async def _enforce_cost_caps(db, user_id: str, *, skip_note_cap: bool = False) -
     however, does NOT reject — erroring a brand-new user on their first save during a launch
     spike is the worst possible first impression. Instead it returns True so the capture is
     queued and drained when budget resets (see /process/drain-deferred). Counters bump
-    transactionally; a deferred capture bumps nothing because it consumes no budget today."""
+    transactionally; a deferred capture charges only the user's daily count (the global counter is charged when it drains)."""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
 
     # Lifetime note cap excludes is_fallback bookmarks — a capture we couldn't fully process
@@ -58,9 +58,11 @@ async def _enforce_cost_caps(db, user_id: str, *, skip_note_cap: bool = False) -
         global_n = (global_snap.to_dict() or {}).get("note_count", 0)
         if user_n >= settings.MAX_INGESTS_PER_USER_PER_DAY:
             raise HTTPException(429, "Daily limit reached. Try again tomorrow.")
-        if global_n >= settings.DAILY_GLOBAL_NOTE_CAP:
-            return True  # defer — park the capture instead of rejecting it
+        # Charge the user's daily intake even when deferring, or a user under their cap could
+        # queue unlimited parked jobs while the global cap is tripped.
         tx.set(user_ref, {"user_id": user_id, "date": today, "ingest_count": user_n + 1}, merge=True)
+        if global_n >= settings.DAILY_GLOBAL_NOTE_CAP:
+            return True  # defer — park the capture; the drain charges the global counter later
         tx.set(global_ref, {"date": today, "note_count": global_n + 1}, merge=True)
         return False
 
@@ -203,7 +205,7 @@ async def _existing_note(db, user_id: str, url: str) -> str | None:
     a link that failed the first time still retries it. Best-effort — any error is a miss."""
     try:
         async for snap in (db.collection("notes").where("user_id", "==", user_id)
-                           .where("source_url", "==", url).limit(1).stream()):
+                           .where("source_url", "==", url).limit(5).stream()):
             if not (snap.to_dict() or {}).get("is_fallback"):
                 return snap.id
     except Exception as e:  # noqa: BLE001

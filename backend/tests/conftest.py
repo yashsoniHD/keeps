@@ -63,7 +63,10 @@ class FakeDocRef:
         return FakeSnap(self._db.docs.get(self._key), self)
 
     async def update(self, data):
-        base = self._db.docs.get(self._key, {})
+        if self._key not in self._db.docs:  # real Firestore update() never creates a doc
+            from google.api_core.exceptions import NotFound
+            raise NotFound(f"No document to update: {self.path}")
+        base = self._db.docs[self._key]
         data = _resolve_transforms(base, data)
         self._db.docs[self._key] = {**base, **data}
         self._db.updates.append((self._key, dict(data)))

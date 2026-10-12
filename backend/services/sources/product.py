@@ -10,6 +10,7 @@ Phase 0 measures which tier Amazon.in actually requires.
 import asyncio
 import json
 import re
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -17,6 +18,7 @@ from bs4 import BeautifulSoup
 from config import settings
 from models.note import ContentBundle
 from services.net_guard import guarded_async_client
+from services.url_utils import host_matches
 
 import logging
 log = logging.getLogger("keeps.sources")
@@ -35,8 +37,15 @@ _HEADERS = {
 
 
 def matches(url: str) -> bool:
-    u = url.lower()
-    return any(d in u for d in _PRODUCT_DOMAINS)
+    # Hostname labels only: "amazon." / "amzn." are any-TLD prefixes (amazon.in, amzn.to).
+    if host_matches(url, _PRODUCT_DOMAINS):
+        return True
+    try:
+        host = "." + (urlparse(url).hostname or "")
+    except ValueError:
+        return False
+    return any(
+        "." + d in host for d in _PRODUCT_DOMAINS if d.endswith("."))
 
 
 def _extract_json_ld(soup: BeautifulSoup) -> dict | None:

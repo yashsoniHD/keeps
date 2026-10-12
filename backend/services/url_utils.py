@@ -1,6 +1,7 @@
 """Pure URL canonicalisation: strip share/tracking params so the same post dedups and the
 resolvers (`apify._url_kind` relies on a `/reel` substring) see one shape."""
 import re
+from collections.abc import Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _TRACKING = {"fbclid", "gclid", "igsh", "igshid", "mibextid", "stkn"}
@@ -10,6 +11,16 @@ _IG_REEL = re.compile(r"^/(?:[^/]+/)?reels?/([\w-]+)/?$")
 
 def _is_host(host: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
+
+
+def host_matches(url: str, domains: Iterable[str]) -> bool:
+    """True when the URL's hostname is one of `domains` or a subdomain of one. Never a substring
+    of the whole URL: `https://evil.example/tiktok.com` must not route to a platform scraper."""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return any(_is_host(host, d) for d in domains)
 
 
 def canonical_url(url: str) -> str:

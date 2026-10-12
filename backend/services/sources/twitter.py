@@ -17,6 +17,7 @@ import httpx
 
 from models.note import ContentBundle
 from services.net_guard import guarded_async_client
+from services.url_utils import host_matches
 
 log = logging.getLogger("keeps.sources")
 
@@ -31,8 +32,7 @@ _NOTE_MIRRORS = ("https://api.fxtwitter.com/status/", "https://api.vxtwitter.com
 
 
 def matches(url: str) -> bool:
-    u = url.lower()
-    return any(d in u for d in _DOMAINS)
+    return host_matches(url, _DOMAINS)
 
 
 def _token(tid: int) -> str:

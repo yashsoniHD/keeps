@@ -91,18 +91,25 @@ function SearchScreen() {
       return;
     }
     setStatus("searching");
+    let cancelled = false; // a late response for an older query must not overwrite the newer one
     const handle = setTimeout(async () => {
       try {
-        setResults(await searchNotes(trimmed));
+        const res = await searchNotes(trimmed);
+        if (cancelled) return;
+        setResults(res);
         setStatus("done");
         setSettled(trimmed);
       } catch {
+        if (cancelled) return;
         setResults([]);
         setStatus("error");
         setSettled(trimmed);
       }
     }, DEBOUNCE_MS);
-    return () => clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
   }, [trimmed]);
 
   const rows = useMemo(() => results.map((h) => ({ h, view: hitView(h) })), [results]);

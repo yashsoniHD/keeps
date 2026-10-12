@@ -84,6 +84,8 @@ function NoteDetail() {
   const [reextracting, setReextracting] = useState(false);
   const [reextractError, setReextractError] = useState<string | null>(null);
   const reextractUnsub = useRef<null | (() => void)>(null);
+  const noteIdRef = useRef(noteId);
+  noteIdRef.current = noteId;
   const onReextract = useCallback(async () => {
     // Guard against a second job from a repeat click (header button + salvage retry both call
     // this) — each job burns a daily ingest-cap slot.
@@ -92,6 +94,7 @@ function NoteDetail() {
     setReextractError(null);
     try {
       const { job_id } = await reextractNote(noteId);
+      if (noteIdRef.current !== noteId) return; // paged away; the reset effect already cleared state
       reextractUnsub.current?.(); // drop any prior watcher
       reextractUnsub.current = watchJob(job_id, async (job) => {
         if (job.status !== "completed" && job.status !== "failed") return;
@@ -100,18 +103,27 @@ function NoteDetail() {
         setReextracting(false);
         if (job.status === "completed") {
           const n = await getNote(noteId).catch(() => null);
-          if (n && n.user_id === user.uid) setNote(n);
+          if (n && n.user_id === user.uid && n.id === noteIdRef.current) setNote(n);
         } else {
           setReextractError(GENERIC_REEXTRACT_FAILURE);
         }
       });
     } catch (err) {
+      if (noteIdRef.current !== noteId) return;
       setReextracting(false);
       setReextractError(err instanceof ApiError ? err.message : GENERIC_REEXTRACT_FAILURE);
     }
   }, [user, noteId, reextracting]);
 
   useEffect(() => () => reextractUnsub.current?.(), []);
+
+  // Paging to another note (component is reused): drop A's watcher and its notice.
+  useEffect(() => {
+    reextractUnsub.current?.();
+    reextractUnsub.current = null;
+    setReextracting(false);
+    setReextractError(null);
+  }, [noteId, user?.uid]);
 
   // Swipe / arrow between notes in the feed order the user came from (all or a category). The
   // feed stashes its visible order; we read this note's neighbours. `replace` navigation keeps

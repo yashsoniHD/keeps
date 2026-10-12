@@ -26,12 +26,17 @@ async def get_user_region(uid: str) -> str:
 
 # ---- entertainment: TMDB ------------------------------------------------------------------
 
+# ponytail: only the first N titles get TMDB lookups (2 sequential calls each); a 30-title
+# listicle keeps the rest plain. Raise with concurrent lookups if long lists matter.
+MAX_ENRICH_TITLES = 8
+
+
 async def _enrich_titles(titles: list, region: str) -> tuple[list, str | None]:
     """Match each extracted title to TMDB and merge poster/providers/overview onto it in place.
     Returns (titles, first_poster_url) — the poster is the cover candidate for coverless notes."""
     cover: str | None = None
     out: list = []
-    for t in titles:
+    for t in titles[:MAX_ENRICH_TITLES]:
         if not isinstance(t, dict) or not (t.get("title") or "").strip():
             out.append(t)
             continue
@@ -58,7 +63,7 @@ async def _enrich_titles(titles: list, region: str) -> tuple[list, str | None]:
             log.warning("title enrichment failed for %r: %s: %s",
                         t.get("title"), type(e).__name__, e)
         out.append(t)
-    return out, cover
+    return out + titles[MAX_ENRICH_TITLES:], cover
 
 
 # ---- entry point ----------------------------------------------------------------------------

@@ -9,6 +9,7 @@ Production hardening (Stage B option): the free OAuth API (client-credentials) r
 block entirely.
 """
 import asyncio
+from urllib.parse import urlparse
 
 import defusedxml.ElementTree as ET
 
@@ -17,6 +18,7 @@ from bs4 import BeautifulSoup
 
 from models.note import ContentBundle
 from services.net_guard import guarded_async_client
+from services.url_utils import host_matches
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -24,8 +26,8 @@ _ATOM = "{http://www.w3.org/2005/Atom}"
 
 
 def matches(url: str) -> bool:
-    u = url.lower()
-    return "reddit.com/r/" in u or "redd.it" in u
+    return (host_matches(url, ("reddit.com",)) and urlparse(url).path.lower().startswith("/r/")
+            or host_matches(url, ("redd.it",)))
 
 
 def _comment_lines_json(children: list, limit: int = 12) -> list[str]:
