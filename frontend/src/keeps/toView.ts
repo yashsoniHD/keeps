@@ -130,6 +130,7 @@ function generic(data: R): Mapped {
   out.duration = str(data.videoLength) || undefined;
   for (const [key, v] of Object.entries(data)) {
     if (v == null || SKIP_KEYS.has(key)) continue;
+    if (key === "note" && data.thin === true) continue; // the note page banner shows it (degradedState)
     const rule = KEY_RULES[key] ?? {};
     const heading = rule.heading ?? humanize(key);
     try {
@@ -165,9 +166,32 @@ function generic(data: R): Mapped {
   return out;
 }
 
+// "03:12" / "1:02:03" -> seconds; anything else (model free text) -> null.
+function tsSeconds(t: string): number | null {
+  if (!/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) return null;
+  const parts = t.split(":").map(Number);
+  if (parts.slice(-2).some((p) => p >= 60)) return null; // minutes and seconds stay under 60
+  return parts.reduce((acc, p) => acc * 60 + p, 0);
+}
+const mmss = (sec: number) => {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${String(m).padStart(2, "0")}:${ss}`;
+};
+
 // New notes choose their own block order independently of category and legacy template.
-function documentNote(data: R): Mapped {
+function documentNote(data: R, note?: Note): Mapped {
   const blocks: Block[] = [];
+  // YouTube: each block links to the earliest moment its evidence came from.
+  const src = safeUrl(note?.source_url).split("#")[0]; // t= must come before any #fragment
+  const isYouTube = /(^|\.)(youtube\.com|youtu\.be)$/i.test(str(note?.source_domain)) && !!src;
+  const evidenceTs = new Map<string, number>();
+  if (isYouTube)
+    for (const e of recs(data._evidence)) {
+      const sec = tsSeconds(str(e.timestamp));
+      if (str(e.id) && sec !== null) evidenceTs.set(str(e.id), sec);
+    }
   const kinds = new Set(["text", "list", "steps", "facts", "checklist", "quote", "table", "code"]);
   for (const b of recs(isRec(data.document) ? data.document.blocks : [])) {
     const kind = str(b.kind);
@@ -176,6 +200,16 @@ function documentNote(data: R): Mapped {
     const links = recs(b.links)
       .map((l) => ({ label: str(l.label), url: safeUrl(l.url) }))
       .filter((l) => l.label && l.url);
+    const secs = strs(b.evidence_ids)
+      .map((id) => evidenceTs.get(id))
+      .filter((n): n is number => n !== undefined);
+    if (secs.length) {
+      const t = Math.min(...secs);
+      links.unshift({
+        label: `▶ ${mmss(t)}`,
+        url: `${src}${src.includes("?") ? "&" : "?"}t=${t}s`,
+      });
+    }
     if (kind === "table") {
       const columns = strs(b.columns);
       // Firestore converts nested arrays into {cells: []} maps.
@@ -189,11 +223,13 @@ function documentNote(data: R): Mapped {
     }
   }
   // Preserve supplementary TMDB details without forcing the document into WatchNote.
+  // With thin, data.note is the banner (degradedState); otherwise keep it in the body.
+  if (str(data.note) && data.thin !== true)
+    blocks.push(...block("Source limitation", "text", [str(data.note)]));
   const enriched = recs(data.titles).filter(
     (t) => t.tmdb_id || t.poster_url || arr(t.providers).length,
   );
   if (enriched.length) blocks.push(...entertainment({ titles: enriched }).blocks);
-  if (str(data.note)) blocks.push(...block("Source limitation", "text", [str(data.note)]));
   return { facts: [], blocks };
 }
 
@@ -385,6 +421,47 @@ function resources(d: R): Mapped {
   return { facts: [], blocks };
 }
 
+// Why a note is degraded, most specific first. Shared by the card chip (degradedLabel) and
+// the note page banner. canRegenerate is false where a re-run gives the same result.
+export type DegradedReason =
+  | "bookmark"
+  | "too_long"
+  | "caption"
+  | "transcript"
+  | "unformatted"
+  | "none";
+export function degradedState(note: Note): {
+  reason: DegradedReason;
+  label: string;
+  banner: string;
+  canRegenerate: boolean;
+} {
+  const data: R = isRec(note.data) ? note.data : {};
+  const acq = str(note.acquisition);
+  const quality = isRec(data._quality) ? data._quality : {};
+  const reason: DegradedReason = note.is_fallback
+    ? "bookmark"
+    : data.thin === true && str(data.note) // the backend writes `note` only with `thin`
+      ? "too_long"
+      : acq.endsWith("_thin") || acq === "social_og" || acq === "reel_caption" || data.thin === true
+        ? "caption"
+        : acq === "youtube_fallback"
+          ? "transcript"
+          : quality.composition === "fallback"
+            ? "unformatted"
+            : "none";
+  const copy: Record<DegradedReason, [string, string]> = {
+    bookmark: ["Bookmark", "Couldn't read this link. Saved as a bookmark."],
+    too_long: ["Partial", str(data.note)],
+    caption: ["Caption only", "Only the caption could be read, not the video."],
+    transcript: ["Transcript", ""],
+    unformatted: ["", "Saved unformatted."],
+    none: ["", ""],
+  };
+  const [label, banner] = copy[reason];
+  return { reason, label, banner, canRegenerate: reason !== "too_long" && reason !== "transcript" };
+}
+
 const MAPPERS: Record<string, (d: R, n: Note) => Mapped> = {
   document: documentNote,
   recipe,
@@ -459,11 +536,13 @@ export function toView(note: Note): NoteView {
     category: ct ? noteLabel(ct) : "",
     platform: PLATFORMS[label.toLowerCase()] ?? label,
     creator: m.creator || undefined,
-    image: str(note.cover_image_url) || undefined,
+    // cover_thumb: a small data: URI stored at ingest; signed CDN covers (Instagram) expire.
+    image: str(note.cover_thumb) || str(note.cover_image_url) || undefined,
     url: str(note.source_url),
     age: age(note, ms),
     duration: m.duration || undefined,
     thin: !!note.is_fallback || data.thin === true,
+    degradedLabel: degradedState(note).label,
     facts: m.facts,
     // A block that only repeats the card summary (e.g. generic tldr) adds nothing.
     blocks: m.blocks.filter(

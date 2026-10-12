@@ -81,6 +81,7 @@ def salvaged_notes(fake_db):
 async def test_extraction_failure_salvages_bookmark(fake_db, monkeypatch):
     """A permanent extraction failure produces a bookmark note, not a failed job."""
     seed_job(fake_db)
+    fake_db.docs[("jobs", "job-1")]["submitted_url"] = "https://ex.co/short"
     patch_pipeline(monkeypatch, extract_exc=RuntimeError("model exploded"))
 
     result = await process.process_job("job-1", DummyRequest())
@@ -99,6 +100,7 @@ async def test_extraction_failure_salvages_bookmark(fake_db, monkeypatch):
     assert note["title"] == "A Great Post"           # from the acquired bundle
     assert note["cover_image_url"] == "https://cdn.example.com/cover.jpg"
     assert note["data"]["facts"][0] == {"label": "Source", "value": "example.com"}
+    assert note["submitted_url"] == "https://ex.co/short"   # re-saving the link dedupes here
 
 
 async def test_empty_extraction_salvages(fake_db, monkeypatch):

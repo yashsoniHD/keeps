@@ -1,5 +1,5 @@
-import { ApiError, ingest } from "@/lib/api";
-import { replayWith, type QueuedCapture } from "./capture-queue-core.ts";
+import { ingest } from "@/lib/api";
+import { isQueueable, replayWith, type QueuedCapture } from "./capture-queue-core.ts";
 
 // localStorage-backed capture queue: a pasted/shared URL that can't reach the backend
 // (offline, fetch failure, 5xx) is held here and replayed when the connection returns.
@@ -11,14 +11,8 @@ export {
   type QueuedCapture,
 } from "./capture-queue-core.ts";
 
-// Queue only what a later retry can fix: network failures (fetch rejects with
-// TypeError), explicit offline, and 5xx. A 4xx (rate cap, invalid URL) would fail
-// identically on every replay — surface it instead.
-export function isQueueableError(e: unknown): boolean {
-  if (e instanceof ApiError) return e.status >= 500;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return true;
-  return e instanceof TypeError;
-}
+// What a later retry can fix (network, offline, 5xx, 429): see capture-queue-core.ts.
+export const isQueueableError = isQueueable;
 
 export function replayQueue(
   uid: string,

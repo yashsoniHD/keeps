@@ -59,6 +59,29 @@ function primeKeyboard() {
 
 type RowKind = "processing" | "queued" | "waiting" | "failed";
 
+// Backend job errors are codes or exception text (`private_or_blocked`, `BlockedURL: …`,
+// `transient: APITimeoutError: …`): never render them raw.
+function jobErrorMessage(error: string | null | undefined): string {
+  const e = error ?? "";
+  if (e.startsWith("private_or_blocked"))
+    return "This post is private or needs a login, so Keeps can't read it.";
+  if (/^(BlockedURL|blocked)/.test(e)) return "This link can't be saved.";
+  if (/^(transient|Timed out|timeout)/i.test(e)) return "Keeps took too long. Tap Retry.";
+  if (e.startsWith("unreachable")) return "We couldn't reach that site.";
+  if (e.startsWith("Couldn't queue")) return e;
+  return "Something went wrong. Retry to try again.";
+}
+
+// Dismissals are versioned by updated_at, so a job that changes state after being dismissed
+// (a retried stale job that later really fails) shows again.
+// Job ids this tab's captures produced (remembered after the placeholder settles, and across
+// in-app navigation). A re-save of a bookmark comes back as a target_note_id job and must
+// still show its row.
+// ponytail: per-tab memory; after a reload such a job is hidden like a note-page Regenerate.
+const ownJobIds = new Set<string>();
+
+const jobKey = (j: Job) => `${j.id}@${j.updated_at?.toMillis?.() ?? ""}`;
+
 // A not-yet-a-note row: same silhouette as NoteRow, status copy instead of a summary.
 function JobRow({
   kind,
@@ -83,7 +106,7 @@ function JobRow({
           : "Extracting the useful bits";
   const body =
     kind === "failed"
-      ? error || "Something went wrong. Retry to try again."
+      ? jobErrorMessage(error)
       : kind === "queued"
         ? "We’re busy right now. Your link is saved and will start soon."
         : kind === "waiting"
@@ -130,6 +153,20 @@ export function Library({ typeParam }: { typeParam?: string }) {
     user ? hasCached(`feed:${user.uid}:${typeParam ?? "all"}`) : false,
   );
   const [feedError, setFeedError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0); // bump to re-subscribe after a listener error
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
   const [max, setMax] = useState(PAGE);
   const [userCategories, setUserCategories] = useState<string[]>([]);
   const [active, setActive] = useState<string>(typeParam ?? "all");
@@ -215,7 +252,7 @@ export function Library({ typeParam }: { typeParam?: string }) {
       },
       { max, contentType: types, onError: () => setFeedError(true) },
     );
-  }, [user, max, active, activeKey]);
+  }, [user, max, active, activeKey, retryKey]);
 
   // users/{uid}.categories is the chip source of truth, so chips survive a narrowing filter.
   useEffect(() => {
@@ -228,8 +265,8 @@ export function Library({ typeParam }: { typeParam?: string }) {
   // In-flight captures (works for every capture path).
   useEffect(() => {
     if (!user) return;
-    return watchPendingJobs(user.uid, setJobs);
-  }, [user]);
+    return watchPendingJobs(user.uid, setJobs, undefined, () => setFeedError(true));
+  }, [user, retryKey]);
 
   // Follow a `?type=` deep link (and clearing it) into the chip filter.
   useEffect(() => {
@@ -268,10 +305,37 @@ export function Library({ typeParam }: { typeParam?: string }) {
     if (user) setOnboardingDone(user.uid).catch(() => {});
   };
 
-  // Retire each local placeholder once its real job (same url) or finished note arrives.
+  for (const o of optimistic) if (o.jobId) ownJobIds.add(o.jobId);
+
+  // Jobs that render a row: not dismissed (a dismissed stale job must not swallow a retry's
+  // placeholder) and not a note-page Regenerate (that page reports those).
+  const visibleJobs = useMemo(
+    () =>
+      jobs.filter(
+        (j) =>
+          (!j.target_note_id || ownJobIds.has(j.id)) &&
+          !(
+            j.status === "failed" &&
+            (dismissedJobs.includes(j.id) || dismissedJobs.includes(jobKey(j)))
+          ),
+      ),
+    // optimistic: a placeholder gaining its jobId can un-hide that job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jobs, dismissedJobs, optimistic],
+  );
+
+  // Retire each local placeholder once its real job (same url or job id) or finished note arrives.
   useEffect(() => {
-    settle(new Set([...jobs.map((j) => j.url), ...notes.map((n) => n.source_url)]));
-  }, [jobs, notes, settle]);
+    settle(
+      new Set([
+        ...visibleJobs.map((j) => j.url),
+        // visibleJobs, not all jobs: it now includes this tab's target_note_id jobs, and a
+        // dismissed stale job (same id returned by a Retry) must not swallow the placeholder.
+        ...visibleJobs.map((j) => j.id),
+        ...notes.map((n) => n.source_url),
+      ]),
+    );
+  }, [visibleJobs, notes, settle]);
 
   // Funnel signals: a per-day "returned" visit, and activation the moment a first note renders.
   useEffect(() => {
@@ -298,29 +362,32 @@ export function Library({ typeParam }: { typeParam?: string }) {
     if (active !== "all")
       return { rows: [] as { key: string; kind: RowKind; url: string }[], failed: [] as Job[] };
     const noteUrls = new Set(notes.map((n) => n.source_url));
-    const jobUrls = new Set(jobs.map((j) => j.url));
+    const jobUrls = new Set(visibleJobs.map((j) => j.url));
+    const jobIds = new Set(visibleJobs.map((j) => j.id));
     const rows: { key: string; kind: RowKind; url: string }[] = [];
     for (const o of optimistic)
-      if (!jobUrls.has(o.url) && !noteUrls.has(o.url))
+      if (!jobUrls.has(o.url) && !noteUrls.has(o.url) && !(o.jobId && jobIds.has(o.jobId)))
         rows.push({ key: o.id, kind: "processing", url: o.url });
     for (const q of queued)
       if (!jobUrls.has(q.url) && !noteUrls.has(q.url))
         rows.push({ key: `queued-${q.url}`, kind: "waiting", url: q.url });
-    for (const j of jobs) {
-      if (noteUrls.has(j.url)) continue;
+    for (const j of visibleJobs) {
+      // A bookmark re-save rewrites an existing note (same url): keep its row until it completes.
+      if (noteUrls.has(j.url) && !j.target_note_id) continue;
       if (j.status === "deferred") rows.push({ key: j.id, kind: "queued", url: j.url });
       else if (j.status === "pending" || j.status === "processing")
         rows.push({ key: j.id, kind: "processing", url: j.url });
     }
     // Failed captures stay visible (with the error) until dismissed or retried — a row that
     // silently disappears reads as data loss.
-    const failed = jobs.filter((j) => j.status === "failed" && !dismissedJobs.includes(j.id));
+    const failed = visibleJobs.filter((j) => j.status === "failed");
     return { rows, failed };
-  }, [active, jobs, optimistic, queued, notes, dismissedJobs]);
+  }, [active, visibleJobs, optimistic, queued, notes]);
 
-  const dismissJob = (jobId: string) =>
+  const dismissJob = (job: Job) =>
     setDismissedJobs((prev) => {
-      const next = [...prev.filter((id) => id !== jobId), jobId].slice(-100);
+      const k = jobKey(job);
+      const next = [...prev.filter((id) => id !== k), k].slice(-100);
       try {
         localStorage.setItem("keeps.dismissedJobs", JSON.stringify(next));
       } catch {
@@ -328,8 +395,11 @@ export function Library({ typeParam }: { typeParam?: string }) {
       }
       return next;
     });
+  // A stale job's retry may return the SAME job id (ingest reuses the in-flight job): the
+  // versioned dismissal hides the stale card, and the placeholder (keyed on that id) shows
+  // "processing" until the worker claims the job.
   const retryJob = (job: Job) => {
-    dismissJob(job.id);
+    dismissJob(job);
     capture(job.url);
   };
 
@@ -427,9 +497,24 @@ export function Library({ typeParam }: { typeParam?: string }) {
         </div>
 
         <section className="library" aria-label="Saved links">
+          {!online && (
+            <div className="offline-banner" role="status">
+              You're offline. Saves will sync when you're back.
+            </div>
+          )}
           {feedError && (
             <p className="library-alert" role="alert">
-              Couldn’t load your notes. Check your connection and refresh.
+              Couldn’t load your notes.{" "}
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setFeedError(false);
+                  setRetryKey((k) => k + 1);
+                }}
+              >
+                Retry
+              </button>
             </p>
           )}
 
@@ -445,7 +530,13 @@ export function Library({ typeParam }: { typeParam?: string }) {
           {!notesReady && !feedError ? (
             <div className="note-list library-list" aria-busy="true">
               {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="note-row skeleton-row" />
+                <div key={i} className="note-row skeleton-row">
+                  <div className="sk-thumb" />
+                  <div className="sk-text">
+                    <div className="sk-line" />
+                    <div className="sk-line short" />
+                  </div>
+                </div>
               ))}
             </div>
           ) : empty ? (
@@ -474,7 +565,7 @@ export function Library({ typeParam }: { typeParam?: string }) {
                     url={j.url}
                     error={j.error}
                     onRetry={() => retryJob(j)}
-                    onDismiss={() => dismissJob(j.id)}
+                    onDismiss={() => dismissJob(j)}
                   />
                 ))}
                 {pending.rows.map((r) => (

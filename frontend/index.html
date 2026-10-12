@@ -2,8 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="color-scheme" content="light dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!-- Static light value (Keeps --bg); the inline script below overwrites it to the dark
          value before first paint when dark mode resolves, so this tag must come before that
          script in document order (the script runs synchronously during parsing and can only
@@ -35,14 +40,18 @@
     <!-- If the app crashes before React renders anything, show a reload prompt, not a blank page. -->
     <script>
       window.addEventListener("error", function () {
+        // Never touch #root (React may still mount); show a sibling only if it stayed empty.
         setTimeout(function () {
           var r = document.getElementById("root");
-          if (!r || r.childNodes.length) return;
-          r.textContent = "Keeps couldn't start. Tap to reload.";
-          r.style.cssText = "padding:24px;font:16px system-ui;text-align:center;cursor:pointer";
-          r.onclick = function () { location.reload(); };
-        }, 0);
-      });
+          if (!r || r.childNodes.length || document.getElementById("boot-error")) return;
+          var b = document.createElement("button");
+          b.id = "boot-error";
+          b.textContent = "Keeps couldn't start. Tap to reload.";
+          b.style.cssText = "display:block;width:100%;padding:24px;font:16px system-ui;text-align:center;cursor:pointer;background:none;border:0;color:inherit";
+          b.onclick = function () { location.reload(); };
+          document.body.appendChild(b);
+        }, 1500);
+      }, true); // capture: a failed <script> load fires on the element and never bubbles
     </script>
     <title>Keeps</title>
     <meta

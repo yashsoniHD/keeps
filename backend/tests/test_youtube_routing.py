@@ -121,6 +121,13 @@ def test_captions_text_json3_and_xml():
     assert yt._captions_text('<transcript><text start="0">a &amp; b</text><text>c</text></transcript>') == "a & b c"
 
 
+def test_captions_json3_keeps_timestamps_every_30s():
+    ev = [{"tStartMs": t, "segs": [{"utf8": w}]} for t, w in
+          [(0, "intro "), (12000, "more "), (31000, "step "), (95000, "end")]]
+    text = " ".join(yt._captions_text(json.dumps({"events": ev})).split())
+    assert text == "[00:00] intro more [00:31] step [01:35] end"
+
+
 
 async def test_direct_threshold_comes_from_config(stubs, monkeypatch):
     monkeypatch.setattr(yt.settings, "YOUTUBE_MAX_DIRECT_SECONDS", 300)

@@ -3,7 +3,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { createToken, listTokensCached, revokeToken, type ShortcutToken } from "@/lib/api";
 import { useTheme, type Theme } from "@/lib/theme";
-import { getInstallPrompt, isAndroid, isIOS, isStandalone } from "@/lib/platform";
+import {
+  getInstallPrompt,
+  isAndroid,
+  isIOS,
+  isStandalone,
+  onInstallStateChange,
+  promptInstall,
+} from "@/lib/platform";
 import { Icon, Logo, Sheet } from "@/keeps/ui";
 import Onboarding from "@/keeps/Onboarding";
 
@@ -181,11 +188,10 @@ function ConnectPhone() {
   const showIOS = ios || (!ios && !android);
   const showAndroid = android || (!ios && !android);
 
+  const [, rerender] = useState(0);
+  useEffect(() => onInstallStateChange(() => rerender((n) => n + 1)), []);
   const installPrompt = getInstallPrompt();
-  const handleInstall = async () => {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-  };
+  const handleInstall = () => void promptInstall();
 
   // Cached read (dedupes with GettingStarted's identical fetch). create/revoke invalidate the
   // "tokens:" cache key, so calling refresh() after a mutation refetches fresh, not stale.

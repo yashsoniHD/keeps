@@ -31,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { noteAccent, noteIcon, noteLabel } from "@/lib/note-meta";
+import { Img } from "./templates/parts";
 import type { Block, NoteView } from "./view";
 
 const icons = {
@@ -113,9 +114,16 @@ export function Thumbnail({ note, large = false }: { note: NoteView; large?: boo
   return (
     <div className={`thumbnail ${large ? "large" : ""}`}>
       {note.image && !failed ? (
-        <img src={note.image} alt="" loading="lazy" onError={() => setFailed(true)} />
+        <img
+          src={note.image}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+        />
       ) : (
-        <Icon name="BookOpen" size={28} />
+        <ThumbFallback note={note} />
       )}
       {large && note.duration && (
         <span className="play-overlay">
@@ -127,6 +135,23 @@ export function Thumbnail({ note, large = false }: { note: NoteView; large?: boo
 }
 
 const PLATFORM_GLYPH: Record<string, string> = { instagram: "◎", youtube: "▶", tiktok: "♪" };
+
+/** No cover (or it expired): a category-tinted tile with the category icon + platform glyph. */
+function ThumbFallback({ note }: { note: NoteView }) {
+  const Ico = noteIcon(note.categorySlug);
+  const a = noteAccent(note.categorySlug);
+  const key = note.platform.toLowerCase();
+  return (
+    <div className={`thumb-fallback ${a.wash} ${a.text}`}>
+      <Ico size={28} strokeWidth={1.65} aria-hidden="true" />
+      {Object.hasOwn(PLATFORM_GLYPH, key) && (
+        <span className="thumb-glyph" aria-hidden="true">
+          {PLATFORM_GLYPH[key]}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function Source({ note }: { note: NoteView }) {
   const key = note.platform.toLowerCase();
@@ -164,6 +189,7 @@ export function NoteRow({
   onActions: (note: NoteView) => void;
   description?: ReactNode;
 }) {
+  const degraded = note.degradedLabel ?? (note.thin ? "Caption only" : "");
   return (
     <article
       className="note-row"
@@ -179,7 +205,7 @@ export function NoteRow({
           <p>{description ?? note.summary}</p>
           <div className="note-meta">
             <CategoryChip slug={note.categorySlug} label={note.category} />
-            {note.thin && <span className="note-thin">Caption only</span>}
+            {degraded && <span className="note-thin">{degraded}</span>}
           </div>
         </div>
       </button>
@@ -258,8 +284,18 @@ export function Sheet({
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const dismissRef = useRef(() => {});
   const drag = useRef<{ id: number; y0: number; t0: number; y: number; t: number } | null>(null);
   const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Every close (X, backdrop, Escape, drag) slides the sheet down first, like a native sheet.
+  const dismiss = () => {
+    const el = ref.current;
+    if (!el || reduced()) return onCloseRef.current();
+    el.style.transition = "transform 0.18s ease-in";
+    el.style.transform = "translateY(100%)";
+    window.setTimeout(() => onCloseRef.current(), 170);
+  };
+  dismissRef.current = dismiss;
   // Drag-down-to-dismiss from the handle/header (touch + pen). Follows the finger; closes past
   // 100px or on a fast flick, otherwise springs back.
   const zone = {
@@ -292,10 +328,7 @@ export function Sheet({
       const v = dy / Math.max(1, e.timeStamp - d.t0);
       const motion = !reduced();
       if (dy > 100 || (dy > 30 && v > 0.6)) {
-        if (!motion) return onCloseRef.current();
-        el.style.transition = "transform 0.18s ease-in";
-        el.style.transform = "translateY(100%)";
-        window.setTimeout(() => onCloseRef.current(), 170);
+        dismiss();
       } else {
         el.style.transition = motion ? "transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2)" : "none";
         el.style.transform = "";
@@ -326,7 +359,7 @@ export function Sheet({
     document.body.style.overflow = "hidden";
     (ref.current?.querySelector<HTMLElement>("[data-initial-focus]") || ref.current)?.focus();
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key === "Escape") dismissRef.current();
       if (e.key !== "Tab") return;
       const els = ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
       if (!els?.length) return;
@@ -342,7 +375,27 @@ export function Sheet({
       }
     };
     document.addEventListener("keydown", handler);
+    // iOS: the keyboard overlays the fixed sheet. While a field inside it has focus, lift the
+    // sheet above the keyboard and cap it to the visible viewport (Android resizes the layout).
+    const vv = window.visualViewport;
+    const sheet = ref.current;
+    const fit = () => {
+      if (!vv || !sheet) return;
+      const typing =
+        sheet.contains(document.activeElement) &&
+        !!document.activeElement?.matches("input, textarea, select");
+      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      sheet.style.maxHeight = typing ? `${vv.height - 8}px` : "";
+      sheet.style.marginBottom = typing && covered ? `${covered}px` : "";
+    };
+    const refit = () => requestAnimationFrame(fit);
+    vv?.addEventListener("resize", fit);
+    sheet?.addEventListener("focusin", refit);
+    sheet?.addEventListener("focusout", refit);
     return () => {
+      vv?.removeEventListener("resize", fit);
+      sheet?.removeEventListener("focusin", refit);
+      sheet?.removeEventListener("focusout", refit);
       document.body.style.overflow = original;
       document.removeEventListener("keydown", handler);
       if (returnTo?.isConnected) returnTo.focus();
@@ -352,7 +405,7 @@ export function Sheet({
     <div
       className="sheet-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) dismiss();
       }}
     >
       <div
@@ -366,7 +419,7 @@ export function Sheet({
         <div className="sheet-handle sheet-handle-zone" {...zone} />
         <header className="sheet-handle-zone" {...zone}>
           <h2>{title}</h2>
-          <IconButton icon="X" label="Close dialog" onClick={onClose} />
+          <IconButton icon="X" label="Close dialog" onClick={dismiss} />
         </header>
         {children}
       </div>
@@ -400,7 +453,7 @@ export function KnowledgeBlock({ block }: { block: Block }) {
   return (
     <section className={`knowledge-block block-${block.kind}`}>
       {block.heading && <h2>{block.heading}</h2>}
-      {block.image && <img className="block-image" src={block.image} alt="" loading="lazy" />}
+      {block.image && <Img className="block-image" src={block.image} alt="" />}
       {block.kind === "table" ? (
         <div
           className="document-table-scroll"

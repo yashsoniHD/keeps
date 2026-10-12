@@ -15,6 +15,7 @@ Failure ladder (a capture must always produce a note):
     salvage Firestore write fails does the job end up failed.
 """
 import asyncio
+import base64
 import logging
 import time
 import uuid
@@ -45,6 +46,7 @@ from services.enrich import enrich_note_data
 from services.gemini import (ProviderError, VideoUnreadable, closest_existing, gemini_service,
                              job_deadline, match_existing, normalize_slug)
 from services.net_guard import BlockedURLError, guarded_async_client
+from services.sources import social_video
 from services.worker_auth import verify_worker_secret
 from services.dispatch import enqueue_process_job
 from services.usage_meter import start_metering
@@ -191,7 +193,8 @@ async def _link_preview(url: str) -> dict:
 
 async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: str,
                         user_title: str | None, bundle: ContentBundle | None,
-                        now: datetime, note_id: str | None = None) -> str:
+                        now: datetime, note_id: str | None = None,
+                        submitted_url: str | None = None) -> str:
     """Writes a minimal note so the capture is never lost.
 
     For URL captures: title/cover tiers are bundle metadata → lightweight og: fetch → domain.
@@ -239,6 +242,8 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: 
         "created_at": now,
         "updated_at": now,
     }
+    if submitted_url:  # re-saving the same link dedupes onto this bookmark
+        note_doc["submitted_url"] = submitted_url
     if embedding is not None:
         note_doc["embedding"] = embedding
         note_doc["embedding_version"] = EMBED_TEXT_VERSION
@@ -249,14 +254,15 @@ async def _salvage_note(db, *, user_id: str, url: str, source: str, input_type: 
 async def _salvage_and_complete(db, job_ref, *, job_id: str, user_id: str, url: str,
                                 source: str, input_type: str, title: str | None,
                                 bundle: ContentBundle | None, now: datetime,
-                                error: str) -> dict:
+                                error: str, submitted_url: str | None = None) -> dict:
     """Write an honest is_fallback bookmark and mark the job completed with it. Shared by the
     unreachable-source short-circuit and the extraction-failure ladder so both preserve the
     capture identically (stable salvage id → idempotent on a retry)."""
     note_id = await _salvage_note(db, user_id=user_id, url=url, source=source,
                                   input_type=input_type, user_title=title,
                                   bundle=bundle, now=now,
-                                  note_id=_stable_id("salvage", job_id))
+                                  note_id=_stable_id("salvage", job_id),
+                                  submitted_url=submitted_url)
     try:
         await add_user_category(user_id, "bookmark")
         if input_type == "url" and url:
@@ -325,7 +331,10 @@ async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
             return (await _extract_from_video(bundle, video, mime, content_type, categories),
                     bundle)
         except VideoUnreadable as e:
-            log.info("video unreadable, extracting from caption: %s", e, extra={"url": url})
+            log.warning("video unreadable, extracting from caption: %s", e,
+                        extra={"url": url, "event": "video_unreadable",
+                               "error_type": type(e.__cause__ or e).__name__})
+            bundle.metadata["video_error"] = _video_error(e)
             if not ((bundle.text or "").strip() or bundle.metadata.get("caption")
                     or bundle.image_parts):
                 # Nothing but a URL + platform left: a text extract would invent the note.
@@ -338,14 +347,50 @@ async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
             return (await gemini_service.extract_async(url, bundle, content_type, note_hint,
                                                        categories=categories), bundle)
         except VideoUnreadable as e:
-            log.info("youtube unreadable, running fallback scraper: %s", e,
-                     extra={"url": url, "event": "youtube_fallback"})
+            log.warning("youtube unreadable, running fallback scraper: %s", e,
+                        extra={"url": url, "event": "video_unreadable",
+                               "error_type": type(e.__cause__ or e).__name__})
             bundle = await sources.youtube.fallback(url, bundle)
+            bundle.metadata["video_error"] = _video_error(e)
             if bundle.kind == "metadata_only":  # nothing to extract from → salvage bookmark
                 raise ValueError("youtube unreadable and the fallback found no content")
             return await _extract(url, bundle, content_type, note_hint, categories)
     return (await gemini_service.extract_async(url, bundle, content_type, note_hint,
                                                categories=categories), bundle)
+
+
+def _video_error(e: Exception) -> str:
+    """Persisted to data._quality.video_error: Vercel Hobby keeps logs for 1 h only."""
+    return f"{type(e).__name__}: {str(e)[:200]}"
+
+
+_THUMB_HOSTS = ("cdninstagram.com", "fbcdn.net", "tiktokcdn.com", "tiktokcdn-us.com")
+COVER_THUMB_MAX = 40_000  # chars of data: URI; Firestore docs cap at 1 MB
+COVER_THUMB_TIMEOUT_S = 25
+
+
+async def _fetch_thumb(url: str) -> str | None:
+    async with guarded_async_client(timeout=10.0, follow_redirects=True) as client:
+        resp = await client.get(url)
+    resp.raise_for_status()
+    if len(resp.content) > 8 * 1024 * 1024:
+        return None
+    small = await social_video._downscale(resp.content, width=240, q=8)
+    uri = "data:image/jpeg;base64," + base64.b64encode(small).decode() if small else None
+    return uri if uri and len(uri) <= COVER_THUMB_MAX else None
+
+
+async def _cover_thumb(url: str | None) -> str | None:
+    """Signed IG/FB/TikTok cover URLs expire within days: keep a ~240 px data: URI copy.
+    Any failure → None (the note keeps only cover_image_url)."""
+    host = (urlparse(url or "").hostname or "").lower()
+    if not any(host == d or host.endswith("." + d) for d in _THUMB_HOSTS):
+        return None
+    try:
+        return await asyncio.wait_for(_fetch_thumb(url), COVER_THUMB_TIMEOUT_S)
+    except Exception as e:  # noqa: BLE001 — a thumbnail is an optimisation only
+        log.info("cover thumb failed: %s: %s", type(e).__name__, str(e)[:120])
+        return None
 
 
 def _hm(seconds: int) -> str:
@@ -595,7 +640,8 @@ async def _process_job(job_id: str) -> dict:
                 db, job_ref, job_id=job_id, user_id=user_id, url=url, source=source,
                 input_type=input_type, title=title, bundle=bundle,
                 now=datetime.now(timezone.utc),
-                error="unreachable: content could not be retrieved")
+                error="unreachable: content could not be retrieved",
+                submitted_url=job.get("submitted_url"))
 
         if input_type == "text" and not process_ai:
             # Save-as-is: skip Gemini entirely. The text is the note; the user titles and
@@ -641,6 +687,11 @@ async def _process_job(job_id: str) -> dict:
             # No video reached the model (caption/cover only): flag it so the UI can say so.
             if bundle.metadata.get("thin") or bundle.metadata.get("too_long"):
                 extracted.data["thin"] = True
+            if bundle.metadata.get("video_error"):
+                quality = extracted.data.get("_quality")
+                if not isinstance(quality, dict):
+                    quality = extracted.data["_quality"] = {}
+                quality["video_error"] = bundle.metadata["video_error"]
             if bundle.metadata.get("too_long"):
                 extracted.data["note"] = too_long_note(
                     bundle.metadata.get("duration") or 0,
@@ -677,6 +728,9 @@ async def _process_job(job_id: str) -> dict:
         # Embed title + summary + the (now enriched) data so search matches the note's content,
         # not just its headline.
         embedding = await _note_embedding(extracted.title, extracted.ai_summary, extracted.data)
+        left = _time_left(PERSIST_RESERVE_S)
+        cover_thumb = (await _cover_thumb(cover_image_url)
+                       if left is None or left > 30 else None)  # 10 s fetch + 15 s ffmpeg
         note_doc = {
             "user_id": user_id,
             "input_type": input_type,
@@ -697,6 +751,10 @@ async def _process_job(job_id: str) -> dict:
             "created_at": created_at,
             "updated_at": now,
         }
+        if cover_thumb:
+            note_doc["cover_thumb"] = cover_thumb  # not embedded; search projects it out
+        if job.get("submitted_url"):  # lets ingest dedupe rewritten URLs (/share/, short links)
+            note_doc["submitted_url"] = job["submitted_url"]
         if embedding is not None:
             note_doc["embedding"] = embedding
             note_doc["embedding_version"] = EMBED_TEXT_VERSION
@@ -776,7 +834,8 @@ async def _process_job(job_id: str) -> dict:
                 db, job_ref, job_id=job_id, user_id=user_id, url=url, source=source,
                 input_type=input_type, title=title, bundle=bundle,
                 now=datetime.now(timezone.utc),
-                error=f"salvaged: {type(e).__name__}: {e}")
+                error=f"salvaged: {type(e).__name__}: {e}",
+                submitted_url=job.get("submitted_url"))
         except Exception as salvage_exc:
             # Even the URL-only Firestore write failed — the one path left is "failed".
             log.error("salvage write failed: %s: %s", type(salvage_exc).__name__, salvage_exc,

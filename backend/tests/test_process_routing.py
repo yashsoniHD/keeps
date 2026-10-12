@@ -76,6 +76,18 @@ async def test_recipe_capture_creates_a_note(fake_db, monkeypatch):
     assert fake_db.docs[("jobs", "j")]["note_id"] == res["note_id"]
 
 
+async def test_note_keeps_submitted_url_for_ingest_dedupe(fake_db, monkeypatch):
+    _wire(monkeypatch, fake_db, content_type="summary")
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://ex.com/full", "submitted_url": "https://ex.co/s"})
+    await process.process_job("j", DummyRequest())
+    assert _notes(fake_db)[0]["submitted_url"] == "https://ex.co/s"
+    fake_db.seed("jobs", "k", {"status": "pending", "user_id": "u", "input_type": "url",
+                               "url": "https://ex.com/other"})
+    await process.process_job("k", DummyRequest())
+    assert sum("submitted_url" in n for n in _notes(fake_db)) == 1   # absent → not written
+
+
 async def test_entertainment_capture_gets_enriched_data_and_poster_cover(fake_db, monkeypatch):
     enriched = {"titles": [{"title": "Dune", "poster_url": "https://img/d.jpg",
                             "providers": [{"name": "Netflix"}]}]}
@@ -152,6 +164,8 @@ async def test_unreadable_video_degrades_to_thin_caption_note(fake_db, monkeypat
     assert note["data"]["thin"] is True
     assert note["acquisition"] == "reel_video_thin"
     assert note["cover_image_url"] == "https://cdn/t.jpg"
+    assert note["data"]["_quality"]["video_error"] == "VideoUnreadable: too big"
+    assert "cover_thumb" not in note                  # not an IG/FB/TikTok CDN host
 
 
 async def test_youtube_unreadable_runs_fallback_scraper(fake_db, monkeypatch):
@@ -177,6 +191,7 @@ async def test_youtube_unreadable_runs_fallback_scraper(fake_db, monkeypatch):
     await process.process_job("j", DummyRequest())
     assert calls == ["youtube_direct", "youtube_fallback"]
     assert _notes(fake_db)[0]["acquisition"] == "youtube_fallback"
+    assert _notes(fake_db)[0]["data"]["_quality"]["video_error"] == "VideoUnreadable: age gated"
 
 
 async def test_capped_taxonomy_snaps_category_but_keeps_recipe_template(fake_db, monkeypatch):
@@ -240,3 +255,65 @@ async def test_too_long_bundle_writes_thin_and_note(fake_db, monkeypatch):
     data = _notes(fake_db)[0]["data"]
     assert data["thin"] is True
     assert data["note"] == "Video is 2 h 14 m, over the 10-minute limit; note built from the caption."
+
+
+def _ig_cover_wire(monkeypatch, fake_db, handler, downscaled=b"JPEG"):
+    import httpx
+    bundle = ContentBundle(kind="text", text="x" * 60, strategy="social_og",
+                           images=["https://scontent-bom1-1.cdninstagram.com/v/t.jpg?oe=1"],
+                           metadata={"platform": "instagram"})
+    _wire(monkeypatch, fake_db, content_type="summary", bundle=bundle)
+    monkeypatch.setattr(process, "guarded_async_client", lambda **kw: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), timeout=kw.get("timeout")))
+    seen = {}
+
+    async def downscale(data, width=768, q=4):
+        seen.update(data=data, width=width)
+        return downscaled
+    monkeypatch.setattr(process.social_video, "_downscale", downscale)
+    _seed(fake_db, "https://www.instagram.com/p/abc/")
+    return seen
+
+
+async def test_instagram_cover_gets_a_small_data_uri_thumb(fake_db, monkeypatch):
+    import httpx
+    seen = _ig_cover_wire(monkeypatch, fake_db, lambda req: httpx.Response(200, content=b"IMG"))
+    await process.process_job("j", DummyRequest())
+    note = _notes(fake_db)[0]
+    assert note["cover_thumb"] == "data:image/jpeg;base64,SlBFRw=="
+    assert note["cover_image_url"].startswith("https://scontent-bom1-1.cdninstagram.com/")
+    assert seen == {"data": b"IMG", "width": 240}
+    assert "cover_thumb" not in str(note["data"])     # never part of the embedded data
+
+
+async def test_cover_thumb_failure_or_oversize_is_skipped(fake_db, monkeypatch):
+    import httpx
+    _ig_cover_wire(monkeypatch, fake_db, lambda req: httpx.Response(403))
+    await process.process_job("j", DummyRequest())
+    assert "cover_thumb" not in _notes(fake_db)[0]
+    assert await process._cover_thumb(None) is None
+    _ig_cover_wire(monkeypatch, fake_db, lambda req: httpx.Response(200, content=b"IMG"),
+                   downscaled=b"x" * 40_000)          # > 40 KB once base64-encoded
+    assert await process._cover_thumb("https://x.fbcdn.net/a.jpg") is None
+
+
+async def test_cover_thumb_host_match_and_timeout(monkeypatch):
+    fetched = []
+
+    async def fetch(url):
+        fetched.append(url)
+        return "data:image/jpeg;base64,AA=="
+    monkeypatch.setattr(process, "_fetch_thumb", fetch)
+    for bad in ("https://evilcdninstagram.com/a.jpg", "https://cdninstagram.com.evil.io/a.jpg",
+                "https://cdn.example/fbcdn.net.jpg"):
+        assert await process._cover_thumb(bad) is None
+    assert fetched == []
+    assert await process._cover_thumb("https://p16-sign.tiktokcdn-us.com/a.jpg")
+
+    import asyncio
+
+    async def hang(url):
+        await asyncio.sleep(5)
+    monkeypatch.setattr(process, "_fetch_thumb", hang)
+    monkeypatch.setattr(process, "COVER_THUMB_TIMEOUT_S", 0.01)
+    assert await process._cover_thumb("https://scontent.cdninstagram.com/a.jpg") is None

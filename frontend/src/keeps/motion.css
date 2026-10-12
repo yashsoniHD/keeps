@@ -21,7 +21,7 @@ body {
 }
 .note-list > * {
   content-visibility: auto;
-  contain-intrinsic-size: auto 96px;
+  contain-intrinsic-size: auto 152px;
 }
 
 ::view-transition-old(root) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import { useAuth } from "@/contexts/auth-context";
-import { searchNotes, type SearchResult } from "@/lib/api";
+import { ApiError, searchNotes, type SearchResult } from "@/lib/api";
 import { getNote } from "@/lib/firestore";
 import { goToNote } from "@/lib/nav";
 import { noteLabel, sourceLabel } from "@/lib/note-meta";
@@ -66,6 +66,7 @@ function SearchScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [status, setStatus] = useState<Status>("idle");
+  const [errorText, setErrorText] = useState("");
   const [settled, setSettled] = useState(""); // the query `results`/`status` belong to
   const [actionView, setActionView] = useState<NoteView | null>(null);
 
@@ -99,8 +100,16 @@ function SearchScreen() {
         setResults(res);
         setStatus("done");
         setSettled(trimmed);
-      } catch {
+      } catch (e) {
         if (cancelled) return;
+        // 4xx (daily cap, rate limit) carries an actionable message; offline gets its own hint.
+        setErrorText(
+          !navigator.onLine
+            ? "You're offline. Search needs a connection."
+            : e instanceof ApiError && e.status >= 400 && e.status < 500
+              ? e.message
+              : "Search didn't work just now. Try again.",
+        );
         setResults([]);
         setStatus("error");
         setSettled(trimmed);
@@ -136,7 +145,9 @@ function SearchScreen() {
         // Any tap outside the search field and interactive content goes back; taps on results,
         // controls or the field itself (and keyboard-dismiss taps) never do.
         // With a query typed, the first tap only dismisses the keyboard (keeps the results).
-        if (actionView || (inputWasFocused.current && trimmed)) return;
+        // Only in the idle state: with results or an error on screen, a stray tap must not leave.
+        if (actionView || trimmed.length >= MIN_CHARS || (inputWasFocused.current && trimmed))
+          return;
         const t = e.target as HTMLElement;
         if (
           t.closest(
@@ -177,7 +188,7 @@ function SearchScreen() {
           </div>
         ) : status === "error" ? (
           <p className="error-text" role="alert">
-            Search didn't work just now. Try again.
+            {errorText}
           </p>
         ) : rows.length === 0 ? (
           <EmptyState

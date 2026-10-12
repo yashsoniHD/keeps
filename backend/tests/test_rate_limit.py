@@ -45,3 +45,11 @@ def test_reads_are_never_throttled():
     client.post("/api/ingest")  # consume the only token
     for _ in range(5):
         assert client.get("/api/notes").status_code == 200
+
+
+def test_unhandled_500_hides_exception_text():
+    import asyncio, json
+    from main import unhandled_exception_handler
+    r = asyncio.run(unhandled_exception_handler(None if False else type("R", (), {"method": "GET", "url": type("U", (), {"path": "/x"})()})(), RuntimeError("secret-internal")))
+    assert b"secret-internal" not in r.body
+    assert "Something went wrong" in json.loads(r.body)["detail"]

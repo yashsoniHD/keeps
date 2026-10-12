@@ -1,7 +1,7 @@
 // Run: cd frontend && node src/keeps/toView.check.ts   (or: npx tsx src/keeps/toView.check.ts)
 import assert from "node:assert/strict";
 import type { Note } from "../lib/types.ts";
-import { toView } from "./toView.ts";
+import { degradedState, toView } from "./toView.ts";
 
 const ts = (n: number) =>
   ({ toMillis: () => n, toDate: () => new Date(n) }) as unknown as Note["created_at"];
@@ -236,3 +236,106 @@ const malformed = toView(
   }),
 );
 assert.deepEqual(malformed.blocks, []);
+
+// cover_thumb (data URI stored at ingest) wins over the expiring CDN cover
+assert.equal(
+  toView(
+    mk({
+      cover_image_url: "https://cdn/x.jpg",
+      cover_thumb: "data:image/jpeg;base64,AA",
+    } as Partial<Note>),
+  ).image,
+  "data:image/jpeg;base64,AA",
+);
+assert.equal(toView(mk({ cover_image_url: "https://cdn/x.jpg" })).image, "https://cdn/x.jpg");
+
+// degraded reason order + copy
+const dr = (p: Partial<Note>) => degradedState(mk(p));
+assert.equal(dr({ is_fallback: true, data: { note: "long" } }).reason, "bookmark");
+assert.equal(dr({ data: { note: "no thin flag" } }).reason, "none");
+assert.deepEqual(dr({ data: { thin: true, note: "Video is 31 m." } }), {
+  reason: "too_long",
+  label: "Partial",
+  banner: "Video is 31 m.",
+  canRegenerate: false,
+});
+assert.equal(dr({ acquisition: "reel_video_thin" }).label, "Caption only");
+assert.equal(dr({ acquisition: "social_og" }).reason, "caption");
+assert.equal(dr({ acquisition: "youtube_fallback" }).banner, "");
+assert.equal(dr({ acquisition: "youtube_fallback" }).canRegenerate, false);
+assert.equal(dr({ data: { _quality: { composition: "fallback" } } }).label, "");
+assert.equal(dr({ data: { _quality: { composition: "fallback" } } }).banner, "Saved unformatted.");
+assert.equal(dr({}).reason, "none");
+assert.equal(toView(mk({ is_fallback: true })).degradedLabel, "Bookmark");
+
+// YouTube document blocks get a timestamp link to the earliest cited moment
+const yt = toView(
+  mk({
+    source_domain: "youtube.com",
+    source_url: "https://www.youtube.com/watch?v=abc",
+    data: {
+      document: {
+        version: 1,
+        blocks: [
+          { kind: "list", heading: "A", items: ["x"], evidence_ids: ["e2", "e1"] },
+          { kind: "list", heading: "B", items: ["y"], evidence_ids: ["e3"] },
+        ],
+      },
+      _evidence: [
+        { id: "e1", timestamp: "03:12" },
+        { id: "e2", timestamp: "1:02:03" },
+        { id: "e3", timestamp: "around the end" },
+      ],
+    },
+  }),
+);
+assert.deepEqual(yt.blocks[0].links?.[0], {
+  label: "▶ 03:12",
+  url: "https://www.youtube.com/watch?v=abc&t=192s",
+});
+assert.equal(yt.blocks[1].links?.length ?? 0, 0);
+const ig = toView(
+  mk({
+    data: {
+      document: { version: 1, blocks: [{ kind: "list", items: ["x"], evidence_ids: ["e1"] }] },
+      _evidence: [{ id: "e1", timestamp: "00:05" }],
+    },
+  }),
+);
+assert.equal(ig.blocks[0].links?.length ?? 0, 0);
+const ytFrag = toView(
+  mk({
+    source_domain: "youtu.be",
+    source_url: "https://youtu.be/abc#frag",
+    data: {
+      document: {
+        version: 1,
+        blocks: [
+          { kind: "list", items: ["x"], evidence_ids: ["e1"] },
+          { kind: "list", items: ["y"], evidence_ids: ["e2"] },
+        ],
+      },
+      _evidence: [
+        { id: "e1", timestamp: "00:05" },
+        { id: "e2", timestamp: "75:00" },
+      ],
+    },
+  }),
+);
+assert.equal(ytFrag.blocks[0].links?.[0].url, "https://youtu.be/abc?t=5s");
+assert.equal(ytFrag.blocks[1].links?.length ?? 0, 0);
+// data.note without thin stays in the body; with thin it is the banner only
+const shown = (d: Record<string, unknown>) => {
+  const v = toView(mk({ data: d }));
+  return JSON.stringify([v.facts, v.blocks]).includes("Heads up");
+};
+assert.ok(shown({ note: "Heads up" }));
+assert.ok(!shown({ thin: true, note: "Heads up", body: "x".repeat(50) }));
+const docNote = (thin: boolean) =>
+  shown({
+    thin,
+    note: "Heads up",
+    document: { version: 1, blocks: [{ kind: "text", items: ["a"] }] },
+  });
+assert.ok(docNote(false) && !docNote(true));
+console.log("toView.check: degraded/timestamps ok");

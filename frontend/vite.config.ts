@@ -1,8 +1,42 @@
-import { defineConfig, loadEnv, type UserConfig } from "vite";
+import { defineConfig, loadEnv, type Plugin, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { execSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Stamp dist/sw.js with a short build id so each deploy ships a byte-different service worker.
+function swBuildStamp(): Plugin {
+  let outDir = "dist";
+  return {
+    name: "sw-build-stamp",
+    apply: "build",
+    configResolved: (c) => void (outDir = resolve(c.root, c.build.outDir)),
+    closeBundle() {
+      const file = resolve(outDir, "sw.js");
+      if (!existsSync(file)) return; // failed build: don't mask its real error
+      let id: string;
+      try {
+        id = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+          .toString()
+          .trim();
+      } catch {
+        id = "";
+      }
+      // ponytail: git sha alone repeats for uncommitted local builds; the timestamp keeps them unique.
+      id = `${id || "nogit"}-${Date.now().toString(36)}`;
+      const assets = readdirSync(resolve(outDir, "assets")).map((f) => `/assets/${f}`);
+      writeFileSync(
+        file,
+        readFileSync(file, "utf8")
+          .replaceAll("__BUILD__", id)
+          .replace("/*__ASSETS__*/ []", JSON.stringify(assets)),
+      );
+    },
+  };
+}
 
 export default defineConfig(({ command, mode }) => {
   // A build without the Firebase web config ships a blank app; refuse to produce one.
@@ -19,6 +53,7 @@ const config: UserConfig = {
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
     tailwindcss(),
     react(),
+    swBuildStamp(),
   ],
   server: { port: 3000 },
   build: {

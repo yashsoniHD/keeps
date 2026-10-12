@@ -33,6 +33,7 @@ export interface NoteView {
   age: string; // "2 hours ago", "Yesterday", "3 Oct"
   duration?: string; // "0:58" when the data carries a video length
   thin: boolean; // salvage / caption-only note (is_fallback)
+  degradedLabel?: string; // degraded chip text ("Transcript", "Partial"...); "" hides it; undefined = thin ? "Caption only" : none
   facts: string[]; // "At a glance" chips: "25 minutes", "Serves 2"
   blocks: Block[];
   tags: string[];

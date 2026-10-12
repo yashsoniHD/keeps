@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud import firestore as fs
@@ -44,7 +45,7 @@ async def _enforce_cost_caps(db, user_id: str, *, skip_note_cap: bool = False) -
         fallback_agg = await notes_q.where("is_fallback", "==", True).count().get()
         note_count = total_agg[0][0].value - fallback_agg[0][0].value
         if note_count >= settings.MAX_NOTES_PER_USER:
-            raise HTTPException(429, "Note limit reached for this account.")
+            raise HTTPException(429, f"You've reached {settings.MAX_NOTES_PER_USER} notes. Delete some to save more.")
 
     transaction = db.transaction()
 
@@ -57,7 +58,7 @@ async def _enforce_cost_caps(db, user_id: str, *, skip_note_cap: bool = False) -
         user_n = (user_snap.to_dict() or {}).get("ingest_count", 0)
         global_n = (global_snap.to_dict() or {}).get("note_count", 0)
         if user_n >= settings.MAX_INGESTS_PER_USER_PER_DAY:
-            raise HTTPException(429, "Daily limit reached. Try again tomorrow.")
+            raise HTTPException(429, f"You've saved {settings.MAX_INGESTS_PER_USER_PER_DAY} links today. The limit resets at midnight UTC.")
         # Charge the user's daily intake even when deferring, or a user under their cap could
         # queue unlimited parked jobs while the global cap is tripped.
         tx.set(user_ref, {"user_id": user_id, "date": today, "ingest_count": user_n + 1}, merge=True)
@@ -130,6 +131,7 @@ async def _create_job(db, user_id: str, body: IngestRequest,
         "content": body.content,          # device-extracted text (PWA/shortcut), if any
         "source": body.source,            # "web" | "shortcut" | "pwa" | "ai_chat" | "upload"
         "note_hint": body.note_hint,      # user instructions for Gemini (from Clip AI chat)
+        "submitted_url": body.url or None,  # canonical URL as submitted; the worker may store it on the note so a redirect-resolved source_url still dedupes
         "status": status,                 # "deferred" → parked until budget resets (drain endpoint)
         "note_id": None,
         "error": None,
@@ -199,17 +201,40 @@ async def _redispatch_own_stale(db, user_id: str) -> None:
                     extra={"user_id": user_id})
 
 
-async def _existing_note(db, user_id: str, url: str) -> str | None:
-    """Exact-duplicate capture: this user already has a (non-bookmark) note for this canonical
-    URL. One indexed equality lookup; a salvaged is_fallback bookmark doesn't count, so re-saving
-    a link that failed the first time still retries it. Best-effort — any error is a miss."""
+async def _existing_note(db, user_id: str, url: str, *, fallback: bool = False) -> str | None:
+    """Exact-duplicate capture: this user already has a note whose source_url (or submitted_url,
+    the URL as pasted, when the worker resolved a redirect) is this canonical URL. By default a
+    salvaged is_fallback bookmark doesn't count, so re-saving a failed link retries it;
+    `fallback=True` returns only such a bookmark (to re-extract it in place). Best-effort — any
+    error is a miss."""
     try:
-        async for snap in (db.collection("notes").where("user_id", "==", user_id)
-                           .where("source_url", "==", url).limit(5).stream()):
-            if not (snap.to_dict() or {}).get("is_fallback"):
-                return snap.id
+        for field in ("source_url", "submitted_url"):
+            async for snap in (db.collection("notes").where("user_id", "==", user_id)
+                               .where(field, "==", url).limit(5).stream()):
+                if bool((snap.to_dict() or {}).get("is_fallback")) == fallback:
+                    return snap.id
     except Exception as e:  # noqa: BLE001
         log.warning("duplicate lookup failed: %s: %s", type(e).__name__, e,
+                    extra={"user_id": user_id, "url": url})
+    return None
+
+
+async def _inflight_job(db, user_id: str, url: str) -> tuple[str, str] | None:
+    """A pending/processing/deferred job for this user + URL: re-dispatch it if stale (reusing
+    the sweep helper) and return its id instead of minting a duplicate job. Best-effort."""
+    try:
+        # Equality filters only (single-field indexes, no composite); newest picked in Python.
+        live = [snap async for snap in (db.collection("jobs").where("user_id", "==", user_id)
+                                        .where("url", "==", url).limit(50).stream())
+                if (snap.to_dict() or {}).get("status") in ("pending", "processing", "deferred")]
+        if live:
+            snap = max(live, key=lambda x: (x.to_dict() or {}).get("created_at")
+                       or datetime.min.replace(tzinfo=timezone.utc))
+            from routers.process import redispatch_stale  # local import avoids a cycle
+            await redispatch_stale([snap])
+            return snap.id, snap.to_dict()["status"]
+    except Exception as e:  # noqa: BLE001
+        log.warning("in-flight job lookup failed: %s: %s", type(e).__name__, e,
                     extra={"user_id": user_id, "url": url})
     return None
 
@@ -244,8 +269,10 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
         if not (body.text or "").strip():
             raise HTTPException(status_code=400, detail="Note text is empty.")
     else:  # url
-        if not body.url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="Invalid URL")
+        if not body.url:
+            raise HTTPException(status_code=400, detail="Keeps saves links. Nothing to save here.")
+        if not body.url.startswith(("http://", "https://")) or not urlparse(body.url).hostname:
+            raise HTTPException(status_code=400, detail="That doesn't look like a complete link.")
         # SSRF gate at the boundary: instant 400 instead of a doomed job (the worker
         # re-checks before fetching, so this is feedback, not the security boundary).
         try:
@@ -258,7 +285,14 @@ async def ingest(request: Request, user_id: str = Depends(require_user)):
         out = await _completed_duplicate_job(db, user_id, body, dup)
         out.message = "Already in Keeps ✓"
         return out
-    out = await _create_job(db, user_id, body)
+    fallback_id = None
+    if body.input_type == "url":
+        if inflight := await _inflight_job(db, user_id, body.url):
+            job_id, status = inflight
+            return JobStatus(job_id=job_id, status=status,
+                             message=_MESSAGES.get(status, _MESSAGES["pending"]))
+        fallback_id = await _existing_note(db, user_id, body.url, fallback=True)
+    out = await _create_job(db, user_id, body, target_note_id=fallback_id)
     # Fire-and-forget: up to 10 sequential dispatches must not delay the response.
     _bg_tasks.add(t := asyncio.create_task(_redispatch_own_stale(db, user_id)))
     t.add_done_callback(_bg_tasks.discard)

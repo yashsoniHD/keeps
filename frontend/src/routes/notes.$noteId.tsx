@@ -1,23 +1,31 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { getNote, watchJob } from "@/lib/firestore";
+import { getNote, isStaleJob, watchJob } from "@/lib/firestore";
 import { reextractNote, ApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { toView } from "@/keeps/toView";
+import { degradedState, toView } from "@/keeps/toView";
 import { NoteActions } from "@/keeps/NoteActions";
 import { CategoryChip, Icon, IconButton, Thumbnail } from "@/keeps/ui";
 import { NoteBody } from "@/keeps/templates/NoteBody";
 import { peekNote } from "@/keeps/noteCache";
 import { feedNeighbors } from "@/lib/note-nav";
-import type { Note } from "@/lib/types";
+import type { Job, Note } from "@/lib/types";
 import { analytics } from "@/lib/analytics";
 
-export const Route = createFileRoute("/notes/$noteId")({ component: NoteDetail });
+export const Route = createFileRoute("/notes/$noteId")({
+  // ?dup=1: arrived from a share of a link that was already saved.
+  validateSearch: (s: Record<string, unknown>): { dup?: number } => (s.dup ? { dup: 1 } : {}),
+  component: NoteDetail,
+});
+
+// A regenerate job that hasn't finished by now was lost (or is stuck): stop spinning.
+const REEXTRACT_TIMEOUT_MS = 5 * 60 * 1000;
 
 function NoteDetail() {
   const { noteId } = Route.useParams();
+  const { dup } = Route.useSearch();
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const router = useRouter();
@@ -83,7 +91,9 @@ function NoteDetail() {
   const GENERIC_REEXTRACT_FAILURE = "Re-extract failed. Your note was left unchanged.";
   const [reextracting, setReextracting] = useState(false);
   const [reextractError, setReextractError] = useState<string | null>(null);
+  const [reextractSlow, setReextractSlow] = useState(false); // past REEXTRACT_TIMEOUT_MS, still live
   const reextractUnsub = useRef<null | (() => void)>(null);
+  const reextractTimer = useRef<ReturnType<typeof setInterval>>(undefined);
   const noteIdRef = useRef(noteId);
   noteIdRef.current = noteId;
   const onReextract = useCallback(async () => {
@@ -92,15 +102,41 @@ function NoteDetail() {
     if (!user || reextracting) return;
     setReextracting(true);
     setReextractError(null);
+    setReextractSlow(false);
     try {
       const { job_id } = await reextractNote(noteId);
       if (noteIdRef.current !== noteId) return; // paged away; the reset effect already cleared state
       reextractUnsub.current?.(); // drop any prior watcher
-      reextractUnsub.current = watchJob(job_id, async (job) => {
-        if (job.status !== "completed" && job.status !== "failed") return;
+      clearInterval(reextractTimer.current);
+      // Past REEXTRACT_TIMEOUT_MS: "Still working…". Once the job is stale by the library's rule
+      // (pending/processing, untouched 10 min) no worker will finish it: stop and offer Retry.
+      const started = Date.now();
+      let last: Partial<Job> = {};
+      const giveUpIfStale = () => {
+        if (!isStaleJob(last)) return false;
         reextractUnsub.current?.();
         reextractUnsub.current = null;
+        clearInterval(reextractTimer.current);
         setReextracting(false);
+        setReextractSlow(false);
+        setReextractError("Regenerating is taking too long. Your note was left unchanged.");
+        return true;
+      };
+      reextractTimer.current = setInterval(() => {
+        if (!giveUpIfStale() && Date.now() - started >= REEXTRACT_TIMEOUT_MS)
+          setReextractSlow(true);
+      }, 30_000);
+      reextractUnsub.current = watchJob(job_id, async (job) => {
+        last = job;
+        if (job.status !== "completed" && job.status !== "failed") {
+          giveUpIfStale();
+          return;
+        }
+        reextractUnsub.current?.();
+        reextractUnsub.current = null;
+        clearInterval(reextractTimer.current);
+        setReextracting(false);
+        setReextractSlow(false);
         if (job.status === "completed") {
           const n = await getNote(noteId).catch(() => null);
           if (n && n.user_id === user.uid && n.id === noteIdRef.current) setNote(n);
@@ -115,13 +151,21 @@ function NoteDetail() {
     }
   }, [user, noteId, reextracting]);
 
-  useEffect(() => () => reextractUnsub.current?.(), []);
+  useEffect(
+    () => () => {
+      reextractUnsub.current?.();
+      clearInterval(reextractTimer.current);
+    },
+    [],
+  );
 
   // Paging to another note (component is reused): drop A's watcher and its notice.
   useEffect(() => {
     reextractUnsub.current?.();
     reextractUnsub.current = null;
+    clearInterval(reextractTimer.current);
     setReextracting(false);
+    setReextractSlow(false);
     setReextractError(null);
   }, [noteId, user?.uid]);
 
@@ -166,12 +210,18 @@ function NoteDetail() {
   }
   if (loading || (!note && !notFound)) {
     return (
-      <div
-        className="flex min-h-screen items-center justify-center"
-        role="status"
-        aria-label="Loading"
-      >
-        <Loader2 size={28} className="spin" aria-hidden="true" />
+      <div className="app-shell min-h-dvh" role="status" aria-label="Loading">
+        <main className="main">
+          <div className="reader">
+            <div className="note-heading skeleton-row">
+              <div className="sk-thumb" />
+              <div className="sk-text">
+                <div className="sk-line" />
+                <div className="sk-line short" />
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     );
   }
@@ -180,6 +230,7 @@ function NoteDetail() {
   }
 
   const view = toView(note);
+  const degraded = degradedState(note);
   const age = view.age && view.age.charAt(0).toLowerCase() + view.age.slice(1); // "3 Oct" stays
   // Back to wherever the user came from inside the app; otherwise the library.
   const back = () => (canGoBack ? router.history.back() : navigate({ to: "/" }));
@@ -222,23 +273,35 @@ function NoteDetail() {
           {reextracting && (
             <div className="notice" role="status">
               <Loader2 size={16} className="spin" aria-hidden="true" />
-              Regenerating this note from the source. This can take a minute.
+              {reextractSlow
+                ? "Still working… this is taking longer than usual."
+                : "Regenerating this note from the source. This can take a minute."}
+            </div>
+          )}
+          {dup && (
+            <div className="notice" role="status">
+              Already in your library.
             </div>
           )}
           {reextractError && (
             <div className="notice" role="alert">
               {reextractError}
+              <button type="button" className="text-button" onClick={onReextract}>
+                Retry
+              </button>
               <button type="button" className="text-button" onClick={() => setReextractError(null)}>
                 Dismiss
               </button>
             </div>
           )}
-          {view.thin && !reextracting && (
+          {degraded.banner && !reextracting && (
             <div className="notice" role="status">
-              Only the caption could be read.
-              <button type="button" className="text-button" onClick={onReextract}>
-                Regenerate
-              </button>
+              {degraded.banner}
+              {degraded.canRegenerate && (
+                <button type="button" className="text-button" onClick={onReextract}>
+                  Regenerate
+                </button>
+              )}
             </div>
           )}
 

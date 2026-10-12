@@ -78,8 +78,16 @@ const FAILED_JOB_TTL_MS = 6 * 60 * 60 * 1000;
 // A `pending` job that never advances is orphaned — a backend enqueue failure or a network
 // partition dropped the capture, so no worker will ever pick it up. Past this age we stop
 // rendering it as an immortal "Saving…" placeholder and surface it through the failed-card path
-// instead (dismissible + retryable). `processing`/`deferred` are real live states — left alone.
+// instead (dismissible + retryable). Same for `processing` (Vercel kills the worker at 300 s);
+// both measured from updated_at. `deferred` is a real parked state — left alone.
 const STALE_PENDING_MS = 10 * 60 * 1000;
+
+// Still pending/processing but untouched for STALE_PENDING_MS: no worker will finish it.
+export function isStaleJob(j: Partial<Job>, now = Date.now()): boolean {
+  if (j.status !== "pending" && j.status !== "processing") return false;
+  const ts = (j.updated_at ?? j.created_at)?.toMillis?.();
+  return ts !== undefined && now - ts > STALE_PENDING_MS;
+}
 
 // In-flight + recently-failed captures: drives the "processing" and "failed" cards in
 // the feed. Reuses the existing (user_id, created_at) jobs index — a freshly created job
@@ -90,6 +98,7 @@ export function watchPendingJobs(
   userId: string,
   callback: (jobs: Job[]) => void,
   max = 15,
+  onError?: (e: Error) => void,
 ): Unsubscribe {
   const q = query(
     collection(db, "jobs"),
@@ -97,31 +106,35 @@ export function watchPendingJobs(
     orderBy("created_at", "desc"),
     limit(max),
   );
-  return onSnapshot(q, (snap) => {
-    const now = Date.now();
-    const failedCutoff = now - FAILED_JOB_TTL_MS;
-    const jobs: Job[] = [];
-    for (const d of snap.docs) {
-      const j = { id: d.id, ...d.data() } as Job;
-      const ts = (j.updated_at ?? j.created_at)?.toMillis() ?? now;
-      if (j.status === "pending") {
-        if (now - ts > STALE_PENDING_MS) {
-          // Orphaned pending job → present as failed so the feed shows a dismissible/retryable
-          // card instead of "Saving…" forever. No failed-TTL gate: these were never explicitly
-          // marked failed, so they render until dismissed or they fall out of the recent window.
-          jobs.push({ ...j, status: "failed", error: j.error || "Capture didn't go through" });
-        } else {
-          jobs.push(j); // still fresh — a genuine in-flight capture
+  return onSnapshot(
+    q,
+    (snap) => {
+      const now = Date.now();
+      const failedCutoff = now - FAILED_JOB_TTL_MS;
+      const jobs: Job[] = [];
+      for (const d of snap.docs) {
+        const j = { id: d.id, ...d.data() } as Job;
+        const ts = (j.updated_at ?? j.created_at)?.toMillis() ?? now;
+        if (j.status === "pending" || j.status === "processing") {
+          if (isStaleJob(j, now)) {
+            // Orphaned job (lost dispatch, or a worker killed mid-run) → present as failed so the
+            // feed shows a dismissible/retryable card instead of a spinner forever. No failed-TTL
+            // gate: these render until dismissed or they fall out of the recent window.
+            jobs.push({ ...j, status: "failed", error: j.error || "Capture didn't go through" });
+          } else {
+            jobs.push(j); // still fresh — a genuine in-flight capture
+          }
+        } else if (j.status === "deferred") {
+          // deferred = parked by the global cap — shown as "Queued"
+          jobs.push(j);
+        } else if (j.status === "failed" && ts > failedCutoff) {
+          jobs.push(j);
         }
-      } else if (j.status === "processing" || j.status === "deferred") {
-        // deferred = parked by the global cap — shown as "Queued"
-        jobs.push(j);
-      } else if (j.status === "failed" && ts > failedCutoff) {
-        jobs.push(j);
       }
-    }
-    callback(jobs);
-  });
+      callback(jobs);
+    },
+    (err) => onError?.(err),
+  );
 }
 
 // One doc read against users/{uid}.categories — never scan the notes collection.

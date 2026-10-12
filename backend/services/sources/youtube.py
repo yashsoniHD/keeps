@@ -84,9 +84,18 @@ async def _oembed(url: str) -> dict:
 
 
 def _captions_text(raw: str) -> str:
-    try:  # json3
+    try:  # json3; a [MM:SS] marker about every 30 s lets the note keep real timestamps
         events = _json.loads(raw).get("events", [])
-        return "".join(seg.get("utf8", "") for ev in events for seg in (ev.get("segs") or []))
+        out, next_mark = [], 0
+        for ev in events:
+            seg = "".join(s.get("utf8", "") for s in (ev.get("segs") or []))
+            t = ev.get("tStartMs")
+            if isinstance(t, (int, float)) and t >= next_mark and seg.strip():
+                s = int(t // 1000)
+                out.append(f" [{s // 60:02d}:{s % 60:02d}] ")
+                next_mark = t + 30000
+            out.append(seg)
+        return "".join(out)
     except ValueError:  # XML (<text ...>line</text>)
         return " ".join(html.unescape(m) for m in re.findall(r"<text[^>]*>(.*?)</text>", raw, re.S))
 

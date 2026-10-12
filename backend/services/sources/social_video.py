@@ -251,13 +251,13 @@ def _ytdlp_download(url: str) -> tuple[dict, bytes | None, str]:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-async def _downscale(data: bytes) -> bytes | None:
-    """≤768 px wide JPEG via ffmpeg (already in the image). None = keep the original."""
+async def _downscale(data: bytes, width: int = SLIDE_WIDTH, q: int = 4) -> bytes | None:
+    """≤`width` px wide JPEG (mjpeg `q`, 2 best–31 worst) via ffmpeg. None = keep the original."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-loglevel", "error", "-i", "pipe:0",
-            "-vf", f"scale='min({SLIDE_WIDTH},iw)':-2", "-frames:v", "1",
-            "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "4", "pipe:1",
+            "-vf", f"scale='min({width},iw)':-2", "-frames:v", "1",
+            "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", str(q), "pipe:1",
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL)
         out, _ = await asyncio.wait_for(proc.communicate(data), timeout=FFMPEG_TIMEOUT_SECONDS)

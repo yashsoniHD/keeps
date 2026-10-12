@@ -40,6 +40,16 @@ function urlFrom(...candidates: (string | undefined)[]): string | null {
   return null;
 }
 
+// Drop a consumed stash so Cache Storage doesn't grow with every share.
+function dropShared(id: string) {
+  globalThis.caches
+    ?.keys()
+    .then((names) =>
+      names.forEach((n) => caches.open(n).then((c) => c.delete(`/__shared/${id}/meta`))),
+    )
+    .catch(() => {});
+}
+
 // Read the SW-stashed payload back out of the Cache (via the SW's /__shared/ handler).
 async function loadShared(id: string): Promise<SharedMeta | null> {
   try {
@@ -87,16 +97,27 @@ function SharePage() {
         if (search.shared) {
           const meta = await loadShared(search.shared);
           link = urlFrom(meta?.url, meta?.text, meta?.title);
-          if (link) await ingestLink(link);
-          else if (meta?.text?.trim()) await ingestText(meta.text.trim(), meta.title || undefined);
+          // A link is safe to drop now (a failed ingest queues it); text only once it's saved.
+          if (link) {
+            dropShared(search.shared);
+            await ingestLink(link);
+          } else if (meta?.text?.trim()) {
+            await ingestText(meta.text.trim(), meta.title || undefined);
+            dropShared(search.shared);
+          } else {
+            if (meta) dropShared(search.shared);
+            return setError("Keeps saves links. This share didn't include one.");
+          }
         } else {
           // Legacy GET share (url/text/title in the query).
           link = urlFrom(search.url, search.text, search.title);
           if (link) await ingestLink(link);
           else if (search.text?.trim())
             await ingestText(search.text.trim(), search.title || undefined);
+          else return setError("Keeps saves links. This share didn't include one.");
         }
-        if (dupNoteId) navigate({ to: "/notes/$noteId", params: { noteId: dupNoteId } });
+        if (dupNoteId)
+          navigate({ to: "/notes/$noteId", params: { noteId: dupNoteId }, search: { dup: 1 } });
         else navigate({ to: "/" }); // → the Notes feed, where the processing card gives feedback
       } catch (e) {
         // A link share that couldn't reach the backend is parked in the replay queue; a

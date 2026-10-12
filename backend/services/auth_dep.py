@@ -11,6 +11,7 @@ from services.firebase import get_db, verify_firebase_token
 # A locked token must be revoked + recreated from the web app. The lock check runs
 # BEFORE the bcrypt compare so brute-force attempts on a locked token cost no CPU.
 MAX_FAILED_PAT_ATTEMPTS = 10
+_PAT_RENEW = "Your Keeps shortcut needs a new token. Open Keeps → Settings."
 
 
 async def _verify_pat(token: str) -> str:
@@ -19,11 +20,11 @@ async def _verify_pat(token: str) -> str:
     try:
         token_id, secret = token.removeprefix("cn_").split(".", 1)
     except ValueError:
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(401, _PAT_RENEW)
     db = get_db()
     snap = await db.collection("shortcut_tokens").document(token_id).get()
     if not snap.exists:
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(401, _PAT_RENEW)
     data = snap.to_dict()
     failed = data.get("failed_attempts", 0)
     if failed >= MAX_FAILED_PAT_ATTEMPTS:
@@ -34,7 +35,7 @@ async def _verify_pat(token: str) -> str:
     if not ok:
         # Atomic: concurrent brute-force attempts must not undercount via read-modify-write.
         await snap.reference.update({"failed_attempts": fs.Increment(1)})
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(401, _PAT_RENEW)
     update = {"last_used_at": datetime.now(timezone.utc)}
     if failed:
         update["failed_attempts"] = 0

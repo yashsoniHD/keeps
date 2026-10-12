@@ -7,7 +7,8 @@ const store = new Map<string, string>();
   setItem: (k: string, v: string) => void store.set(k, v),
   removeItem: (k: string) => void store.delete(k),
 };
-const { enqueueCapture, loadQueue, replayWith } = await import("./capture-queue-core.ts");
+const { enqueueCapture, loadQueue, replayWith, isQueueable } =
+  await import("./capture-queue-core.ts");
 
 // (a) a queue written for A is invisible to B
 enqueueCapture("A", "https://a.com/1");
@@ -35,4 +36,40 @@ assert.deepEqual(
 );
 assert.equal(loadQueue("A").length, 2);
 assert.deepEqual(loadQueue("B"), []);
+
+// (c) error classes: 429 / 5xx / network / Firebase lie-fi queue; other 4xx do not
+const err = (status: number) => Object.assign(new Error("x"), { status });
+assert.ok(isQueueable(err(429)) && isQueueable(err(503)) && isQueueable(new TypeError("fetch")));
+assert.ok(isQueueable({ code: "auth/network-request-failed" }));
+assert.ok(!isQueueable(err(400)) && !isQueueable(err(404)));
+
+// (d) a 429 mid-replay stops and keeps the rest; a 400 drops the entry and names the host
+enqueueCapture("C", "https://www.ok.com/1");
+enqueueCapture("C", "https://rate.com/2");
+enqueueCapture("C", "https://after.com/3");
+const rest = await replayWith(
+  "C",
+  () => true,
+  async (url) => {
+    if (url.includes("rate")) throw err(429);
+  },
+  isQueueable,
+);
+assert.deepEqual(
+  rest.map((q) => q.url),
+  ["https://rate.com/2", "https://after.com/3"],
+);
+enqueueCapture("D", "https://www.bad.com/x");
+const rejected: string[] = [];
+await replayWith(
+  "D",
+  () => true,
+  async () => {
+    throw err(400);
+  },
+  isQueueable,
+  (_u, m) => rejected.push(m),
+);
+assert.equal(loadQueue("D").length, 0);
+assert.ok(rejected[0].includes("bad.com"));
 console.log("capture-queue.check: ok");

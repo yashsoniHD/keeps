@@ -37,6 +37,7 @@ def _project(doc_id: str, d: dict) -> dict:
         "ai_summary": d.get("ai_summary", ""),
         "source_domain": d.get("source_domain", ""),
         "cover_image_url": d.get("cover_image_url"),
+        "cover_thumb": d.get("cover_thumb"),
         "ref_id": doc_id,
     }
 
@@ -111,6 +112,7 @@ async def search(
                 query_vector=Vector(query_vec),
                 distance_measure=DistanceMeasure.COSINE,
                 limit=settings.SEARCH_LIMIT + 10,  # over-fetch: keyword hits dedupe some away
+                distance_threshold=settings.SEARCH_MAX_DISTANCE,  # server-side: drops weak hits
             )
             vector_hits = [_project(doc.id, doc.to_dict() or {}) async for doc in vector_query.stream()]
     except Exception as e:
@@ -122,4 +124,15 @@ async def search(
         if d["id"] not in seen:
             seen.add(d["id"])
             results.append(d)
-    return {"results": results[: settings.SEARCH_LIMIT]}
+    results = results[: settings.SEARCH_LIMIT]
+    # Thumbnails (<=40 KB each) are fetched only for the final hits, not the 500-note keyword scan.
+    try:
+        refs = [db.collection("notes").document(r["id"]) for r in results if not r.get("cover_thumb")]
+        if refs:
+            thumbs = {snap.id: (snap.to_dict() or {}).get("cover_thumb")
+                      async for snap in db.get_all(refs, field_paths=["cover_thumb"])}
+            for r in results:
+                r["cover_thumb"] = r.get("cover_thumb") or thumbs.get(r["id"])
+    except Exception as e:
+        log.warning("thumb fetch failed: %s: %s", type(e).__name__, e, extra={"user_id": user_id})
+    return {"results": results}

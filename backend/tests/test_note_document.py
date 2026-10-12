@@ -6,8 +6,8 @@ import pytest
 
 from config import settings
 from models.note import ContentBundle
-from services.gemini import GeminiService, job_deadline, parse_json
-from services.note_document import generate_document
+from services.gemini import JSON_NUDGE, GeminiService, job_deadline, parse_json
+from services.note_document import COMPOSE_PROMPT, EVIDENCE_PROMPT, REVIEW_PROMPT, generate_document
 from services.embeddings import note_embedding_text
 from services.firebase import firestore_safe
 
@@ -27,7 +27,7 @@ def run(monkeypatch, replies, **kw):
         reply = replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
-        return json.dumps(reply), chain[0], "stop"
+        return (reply if isinstance(reply, str) else json.dumps(reply)), chain[0], "stop"
     note, model = generate_document(chat, parse_json, ["video-model"], "source context", "", **kw)
     return note, calls
 
@@ -46,7 +46,8 @@ def test_separate_evidence_composition_review_and_media_once(monkeypatch):
 def test_one_revision_and_immutable_evidence(monkeypatch):
     revised = copy.deepcopy(DRAFT)
     revised["document"]["blocks"][0]["kind"] = "list"
-    note, calls = run(monkeypatch, [PACKET, DRAFT, {"decision": "revise", "issues": ["Not a complete procedure"], "revision": revised}])
+    note, calls = run(monkeypatch, [PACKET, DRAFT, {"decision": "revise", "issues": ["Not a complete procedure"], "revision": revised}],
+                      video_url="video")
     assert len(calls) == 3
     assert note.data["document"]["blocks"][0]["kind"] == "list"
     assert note.data["_quality"]["review"] == "revised"
@@ -135,7 +136,7 @@ def test_duplicate_evidence_rejected(monkeypatch):
     packet = copy.deepcopy(PACKET)
     packet["evidence"][1]["id"] = "e1"
     with pytest.raises(ValueError, match="duplicate evidence"):
-        run(monkeypatch, [packet])
+        run(monkeypatch, [packet, packet])  # text sources retry the evidence stage once
 
 
 def test_review_cannot_add_clickable_unsourced_links(monkeypatch):
@@ -156,3 +157,95 @@ def test_real_source_links_survive(monkeypatch):
         return json.dumps(replies.pop(0)), "model", "stop"
     note, _ = generate_document(chat, parse_json, ["model"], "Read https://example.com/guide", "")
     assert note.data["document"]["blocks"][0]["links"][0]["url"] == "https://example.com/guide"
+
+
+def test_bad_evidence_json_gets_one_text_only_repair_nudge(monkeypatch):
+    note, calls = run(monkeypatch, ["Sure! {broken", PACKET, DRAFT, {"decision": "pass"}],
+                      video_url="video")
+    assert calls[1][1].endswith(JSON_NUDGE) and calls[1][2] == "Sure! {broken"
+    assert "video_url" not in calls[1][3]                     # the repair never re-sends media
+    assert note.data["_evidence"] == PACKET["evidence"]
+
+
+def test_evidence_packet_is_tolerant(monkeypatch):
+    packet = copy.deepcopy(PACKET)
+    packet["extra"] = 1
+    packet["evidence"][0].update(source="audio", text="x" * 3000, speaker="creator")
+    note, _ = run(monkeypatch, [packet, DRAFT, {"decision": "pass"}], video_url="video")
+    ev = note.data["_evidence"][0]
+    assert ev["source"] == "video" and len(ev["text"]) == 2400 and "speaker" not in ev
+
+
+def test_text_source_labels_transcript_as_page_and_retries_invalid_packet(monkeypatch):
+    note, calls = run(monkeypatch, [{"evidence": []}, PACKET, DRAFT, {"decision": "pass"}])
+    assert len(calls) == 4                                    # one evidence retry
+    assert {e["source"] for e in note.data["_evidence"]} == {"page"}
+
+
+def test_video_source_does_not_retry_invalid_packet(monkeypatch):
+    with pytest.raises(ValueError):
+        run(monkeypatch, [{"evidence": []}], video_url="video")
+
+
+def test_deterministic_draft_fixes(monkeypatch):
+    packet = copy.deepcopy(PACKET)
+    packet["evidence"].append({"id": "c1", "text": "My dosa tips!", "source": "caption"})
+    draft = {"title": "**Crispy Dosa Batter That Never Sticks To Any Pan At All Ever Again** Recipe",
+             "ai_summary": "Preheat and test the pan.",
+             "document": {"version": 1, "blocks": [
+                 {"kind": "steps", "heading": "## Ingredients", "items": ["**1 cup** rice"], "evidence_ids": ["e1"]},
+                 {"kind": "quote", "heading": "Caption", "items": ["My dosa tips!"], "evidence_ids": ["c1"]},
+                 {"kind": "code", "heading": "Code", "items": ["__init__"], "evidence_ids": ["e2"]}]}}
+    note, _ = run(monkeypatch, [packet, draft, {"decision": "pass"}], video_url="video")
+    blocks = note.data["document"]["blocks"]
+    assert note.title.startswith("Crispy Dosa Batter") and note.title.endswith("…")
+    assert len(note.title) <= 60 and "*" not in note.title and "Recipe" not in note.title
+    assert blocks[0]["kind"] == "checklist" and blocks[0]["heading"] == "Ingredients"
+    assert blocks[0]["items"] == ["1 cup rice"]
+    assert [b["kind"] for b in blocks] == ["checklist", "code"]    # caption quote dropped
+    assert blocks[1]["items"] == ["__init__"]                      # code left untouched
+    assert note.data["_quality"].get("lint") is None
+
+
+def test_title_filler_stripped():
+    from services.note_document import Draft
+    d = Draft(title="Paneer butter garlic recipe", ai_summary="s",
+              document={"blocks": [{"kind": "text", "items": ["x"], "evidence_ids": ["e1"]}]})
+    assert d.title == "Paneer butter garlic"
+
+
+def test_lint_reaches_review_and_long_summary_is_cut(monkeypatch):
+    draft = copy.deepcopy(DRAFT)
+    draft["ai_summary"] = "A recipe for dosa. " + "Preheat the pan well " * 15
+    draft["document"]["blocks"].append({"kind": "text", "items": ["More."], "evidence_ids": ["e1"]})
+    note, calls = run(monkeypatch, [PACKET, draft, {"decision": "pass"}])
+    issues = json.loads(calls[2][2])["known_issues"]
+    assert len(issues) == 3 and note.data["_quality"]["lint"] == issues
+    assert note.ai_summary == "A recipe for dosa."                 # first sentence, ≤200
+
+
+def test_prompts_carry_style_actionability_and_language_rules():
+    for prompt in (EVIDENCE_PROMPT, COMPOSE_PROMPT):
+        assert "2-6 words" in prompt and "15-25 words" in prompt
+    assert "(translated)" in COMPOSE_PROMPT and "(translated)" in REVIEW_PROMPT
+    assert "(translated)" not in EVIDENCE_PROMPT           # evidence stays verbatim
+    assert "Try this" in COMPOSE_PROMPT and "no\n'steps' block" in COMPOSE_PROMPT
+    assert "known_issues" in REVIEW_PROMPT and "not steps" in REVIEW_PROMPT
+
+
+@pytest.mark.parametrize("raw,plain", [
+    ("**1 cup** rice", "1 cup rice"), ("__very good__ tip", "very good tip"),
+    ("## Ingredients", "Ingredients"), ("call __init__ first", "call __init__ first"),
+    ("2**10 and 3**4", "2**10 and 3**4"), ("snake_case__name", "snake_case__name")])
+def test_plain_strips_only_paired_markdown(raw, plain):
+    from services.note_document import _plain
+    assert _plain(raw) == plain
+
+
+@pytest.mark.parametrize("heading,match", [
+    ("Ingredients", True), ("Equipment", True), ("What you'll need", True),
+    ("Packing list", True), ("What to pack", True),
+    ("How to package leftovers", False), ("Main ingredients explained", False)])
+def test_gather_heading(heading, match):
+    from services.note_document import _GATHER_HEADING
+    assert bool(_GATHER_HEADING.search(heading)) is match

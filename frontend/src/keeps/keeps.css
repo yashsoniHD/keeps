@@ -849,7 +849,7 @@ textarea {
 }
 .error-text {
   font-size: 12px;
-  color: #ae4338;
+  color: var(--k-danger);
   margin-bottom: 15px;
 }
 .action-list {
@@ -870,7 +870,7 @@ textarea {
   color: var(--k-muted);
 }
 .danger {
-  color: #b14b41;
+  color: var(--k-danger);
 }
 .danger-button {
   background: #a74238;
@@ -976,8 +976,11 @@ details textarea {
 .toast button {
   display: flex;
   align-items: center;
-  padding: 3px;
-  margin-left: 7px;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -13px -13px -13px -5px;
 }
 .toast button:hover {
   background: none;
@@ -1731,6 +1734,7 @@ details textarea {
   --k-accent: #242424;
   --k-tint: #f1f1f1;
   --k-hover: #f6f6f6;
+  --k-danger: #ae4338;
   color-scheme: light;
   color: var(--k-text);
   background: var(--k-bg);
@@ -1745,6 +1749,7 @@ details textarea {
   --k-accent: #eeeeee;
   --k-tint: #1c1c1c;
   --k-hover: #181818;
+  --k-danger: #ff8a7a;
   color-scheme: dark;
 }
 body {
@@ -1890,13 +1895,13 @@ textarea {
   min-height: 22px;
 }
 .note-row .category-tag {
-  font-size: 11px;
+  font-size: 12px;
 }
 .note-row .category-tag svg {
   display: block;
 }
 .note-row .note-age {
-  font-size: 11px;
+  font-size: 12px;
 }
 .library-list .note-row > .icon-button {
   position: absolute;
@@ -2157,7 +2162,7 @@ textarea {
   text-wrap: pretty;
 }
 .saved-caption {
-  font-size: 11px;
+  font-size: 12px;
 }
 .reader-toolbar {
   gap: 6px;
@@ -2234,7 +2239,7 @@ textarea {
   }
   .note-row .category-tag,
   .note-row .note-age {
-    font-size: 10px;
+    font-size: 12px;
   }
   .reader-toolbar .text-button {
     font-size: 11px;
@@ -2324,12 +2329,14 @@ textarea {
   height: 44px;
 }
 .note-thin {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--k-muted);
 }
 .block-image {
   display: block;
   width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
   max-height: 220px;
   object-fit: cover;
   border-radius: 10px;
@@ -2395,7 +2402,7 @@ textarea {
   color: var(--k-muted);
 }
 .login-error {
-  color: #c0392b;
+  color: var(--k-danger);
   font-size: 13px;
 }
 
@@ -2500,7 +2507,7 @@ textarea {
   flex: 1;
 }
 .setting-row.full-button.danger {
-  color: #b14b41;
+  color: var(--k-danger);
 }
 .search-back {
   min-height: 44px;
@@ -2528,7 +2535,7 @@ textarea {
   object-fit: cover;
 }
 .library-alert {
-  color: #c0392b;
+  color: var(--k-danger);
   font-size: 13px;
   margin: 0 0 14px;
 }
@@ -2546,12 +2553,43 @@ textarea {
 }
 .skeleton-row {
   min-height: 112px;
-  opacity: 0.5;
   animation: skeleton-pulse 1.4s ease-in-out infinite;
 }
 @keyframes skeleton-pulse {
   50% {
-    opacity: 0.2;
+    opacity: 0.45;
+  }
+}
+/* Mirrors NoteRow: thumbnail box + title and summary bars. */
+.library-list .skeleton-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.skeleton-row .sk-thumb {
+  width: 88px;
+  aspect-ratio: 4 / 5;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--k-soft);
+}
+.skeleton-row .sk-text {
+  flex: 1;
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+.skeleton-row .sk-line {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--k-soft);
+}
+.skeleton-row .sk-line.short {
+  width: 60%;
+}
+@media (max-width: 375px) {
+  .skeleton-row .sk-thumb {
+    width: 76px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2687,7 +2725,8 @@ textarea {
    here must not set background/color on [data-category] chips or they would beat the utilities). */
 .filter-chips {
   gap: 8px;
-  padding-block: 4px;
+  padding-block: 0;
+  align-items: center;
   scroll-behavior: smooth;
   scroll-snap-type: none;
   -webkit-overflow-scrolling: touch;
@@ -2696,7 +2735,7 @@ textarea {
   display: none;
 }
 .filter-chips button {
-  min-height: 36px;
+  min-height: 44px;
   margin: 0;
   padding: 5px 11px;
   gap: 5px;
@@ -2708,6 +2747,14 @@ textarea {
 .filter-chips button:not([data-category]) {
   background: transparent;
   color: var(--k-muted);
+  /* "All" is its own visual: keep it 36px and extend the hit area to 44px. */
+  min-height: 36px;
+  position: relative;
+}
+.filter-chips button:not([data-category])::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
 }
 .filter-chips button:not([data-category]):hover {
   background: var(--k-soft);
@@ -2796,4 +2843,76 @@ button {
     margin-inline: -16px;
     padding-inline: 16px;
   }
+}
+
+/* Edge-to-edge (viewport-fit=cover): routes without the sticky library header pad the top
+   inset themselves; the sticky header already pads it. Landscape side insets on the shell. */
+.app-shell {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.app-shell > .main:not(:has(> .sticky-top)) {
+  padding-top: env(safe-area-inset-top);
+}
+.center-screen {
+  padding-top: calc(24px + env(safe-area-inset-top));
+}
+
+/* Thumbnail fallback (no or expired cover): colours come from noteAccent() utilities, so no
+   background/color here. */
+.thumb-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.thumb-glyph {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+/* In-flight rows: a long hostname truncates instead of widening the page. */
+.job-row .note-age {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Long-press on a card: no iOS image callout or text selection. */
+.note-row {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Sheets slide up from the bottom edge (exit is driven from Sheet in ui.tsx). */
+.sheet {
+  animation: sheet-up 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* "New version available" prompt, appended by main.tsx when a new service worker takes over. */
+.update-banner {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  top: calc(12px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 12px 16px;
+  min-height: 44px;
+  border-radius: 10px;
+  background: var(--k-text);
+  color: var(--k-bg);
+  font-size: 13px;
+  box-shadow: 0 4px 20px #0002;
 }

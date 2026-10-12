@@ -60,3 +60,21 @@ async def test_result_cap_is_enforced(fake_db):
         fake_db.seed("notes", f"n{i}", {"user_id": "u", "title": f"pinterest board {i}"})
     result = await search_mod.search(q="pinterest", user_id="u")
     assert len(result["results"]) == settings.SEARCH_LIMIT
+
+
+async def test_vector_query_uses_server_side_threshold_and_thumbs_attach(fake_db, monkeypatch):
+    async def emb(q):
+        return [0.0] * 8
+    monkeypatch.setattr(search_mod.embedding_service, "embed_query", emb)
+    seen = {}
+    FakeCollection = type(fake_db.collection("notes"))
+    orig = FakeCollection.find_nearest
+
+    def spy(self, **kw):
+        seen.update(kw)
+        return orig(self, **kw)
+    monkeypatch.setattr(FakeCollection, "find_nearest", spy)
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "zzzqqq", "cover_thumb": "data:image/jpeg;base64,AA"})
+    res = await search_mod.search(q="zzzqqq", user_id="u")
+    assert seen["distance_threshold"] == settings.SEARCH_MAX_DISTANCE
+    assert res["results"][0]["cover_thumb"] == "data:image/jpeg;base64,AA"

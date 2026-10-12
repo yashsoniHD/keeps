@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/contexts/auth-context";
 import { listTokensCached } from "@/lib/api";
-import { getInstallPrompt, isIOS, isStandalone } from "@/lib/platform";
+import {
+  getInstallPrompt,
+  isInstalled,
+  isIOS,
+  onInstallStateChange,
+  promptInstall,
+} from "@/lib/platform";
 import { Icon, IconButton } from "./ui";
 
 // New-user checklist: save a link -> install -> connect the phone. Steps self-mark complete where
@@ -21,7 +27,9 @@ export function Guide({
 }) {
   const { user } = useAuth();
   const [hasToken, setHasToken] = useState(false);
-  const [installed, setInstalled] = useState(isStandalone);
+  const [, rerender] = useState(0);
+  useEffect(() => onInstallStateChange(() => rerender((n) => n + 1)), []);
+  const installed = isInstalled();
   useEffect(() => {
     if (!user) return;
     listTokensCached(user.uid)
@@ -31,11 +39,7 @@ export function Guide({
 
   const ios = isIOS();
   const installPrompt = getInstallPrompt();
-  const install = async () => {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-    setTimeout(() => setInstalled(isStandalone()), 1500);
-  };
+  const install = () => void promptInstall();
 
   const steps = [
     {

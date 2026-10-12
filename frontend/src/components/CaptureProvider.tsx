@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/contexts/auth-context";
-import { ingest } from "@/lib/api";
+import { ApiError, ingest } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import {
   enqueueCapture,
@@ -29,6 +29,8 @@ import { Toast } from "@/keeps/ui";
 export interface Optimistic {
   id: string;
   url: string;
+  /** The server job this placeholder stands for, once ingest returned it. */
+  jobId?: string;
 }
 interface CaptureCtx {
   openCapture: () => void;
@@ -38,10 +40,12 @@ interface CaptureCtx {
   optimistic: Optimistic[];
   /** Offline-held captures waiting for the connection. */
   queued: QueuedCapture[];
-  /** Drop placeholders whose URL the server now knows about (a job or note exists). */
-  settle: (knownUrls: Set<string>) => void;
+  /** Drop placeholders whose URL or job id the server now shows (a visible job or note). */
+  settle: (known: Set<string>) => void;
   /** Re-read the offline queue from storage and replay it (call after enqueueing elsewhere). */
   refreshQueue: () => void;
+  /** App-wide toast (survives the caller unmounting, e.g. a sheet closing after delete). */
+  notify: (message: string, error?: boolean) => void;
 }
 const CaptureContext = createContext<CaptureCtx>({
   openCapture: () => {},
@@ -50,6 +54,7 @@ const CaptureContext = createContext<CaptureCtx>({
   queued: [],
   settle: () => {},
   refreshQueue: () => {},
+  notify: () => {},
 });
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -96,21 +101,36 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
       if (pathRef.current !== "/") navigate({ to: "/" });
       try {
         const r = await ingest(url);
-        if (r.status === "completed") {
+        if (r.status === "completed" || r.status === "failed") {
           // Exact duplicate: no job will appear, so drop the placeholder and point at the note.
+          // Failed (dispatch failed): the failed job card replaces the placeholder.
           setOptimistic((prev) => prev.filter((o) => o.id !== tempId));
-          if (r.note_id) setDupNoteId(r.note_id);
+          if (r.status === "failed")
+            setToast({ message: "Couldn't start building this note. Tap Retry.", error: true });
+          else if (r.note_id) setDupNoteId(r.note_id);
           return;
         }
+        // Match the placeholder on the job id (the job stores the canonical URL, not the raw one).
+        if (r.job_id)
+          setOptimistic((prev) =>
+            prev.map((o) => (o.id === tempId ? { ...o, jobId: r.job_id } : o)),
+          );
         analytics.firstCapture(); // funnel: first successful capture (once per browser)
         analytics.noteSaved();
-        setToast({ message: "Link saved. Building your note…" });
+        setToast({
+          message:
+            r.status === "deferred"
+              ? "Saved. Queued, it'll be ready soon."
+              : "Link saved. Building your note…",
+        });
       } catch (e) {
         setOptimistic((prev) => prev.filter((o) => o.id !== tempId));
         if (isQueueableError(e)) {
-          // Offline / server down: hold the URL locally and show a "waiting" row — the capture
-          // is parked, not lost. Replayed by the effect below.
+          // Offline / server down / rate-limited: hold the URL locally and show a "waiting" row —
+          // the capture is parked, not lost. Replayed by the effects below.
           if (user) setQueued(enqueueCapture(user.uid, url));
+          if (e instanceof ApiError && e.status === 429)
+            setToast({ message: `${e.message} Keeps will retry this link.`, error: true });
         } else {
           setToast({
             message:
@@ -125,7 +145,7 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
 
   const settle = useCallback((known: Set<string>) => {
     setOptimistic((prev) => {
-      const next = prev.filter((o) => !known.has(o.url));
+      const next = prev.filter((o) => !known.has(o.url) && !(o.jobId && known.has(o.jobId)));
       return next.length === prev.length ? prev : next;
     });
   }, []);
@@ -160,8 +180,22 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
     refreshQueue(); // also clears `queued` on sign-out
     if (!user) return;
     window.addEventListener("online", refreshQueue);
-    return () => window.removeEventListener("online", refreshQueue);
+    // iOS fires `online` unreliably; returning to the app is the other natural retry point.
+    const onVisible = () => document.visibilityState === "visible" && refreshQueue();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", refreshQueue);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [user, refreshQueue]);
+  // A 5xx/429 while online fires no `online` event: one backoff timer while anything is queued.
+  useEffect(() => {
+    if (!queued.length) return;
+    const t = setTimeout(refreshQueue, 30_000);
+    return () => clearTimeout(t);
+  }, [queued, refreshQueue]);
+
+  const notify = useCallback((message: string, error = false) => setToast({ message, error }), []);
 
   // A URL pasted on the landing page before sign-in is parked in localStorage and captured
   // here once the user is authed, so "Try it free" lands a real first note.
@@ -181,8 +215,8 @@ export function CaptureProvider({ children }: { children: ReactNode }) {
   }, [user, capture]);
 
   const value = useMemo(
-    () => ({ openCapture, capture, optimistic, queued, settle, refreshQueue }),
-    [openCapture, capture, optimistic, queued, settle, refreshQueue],
+    () => ({ openCapture, capture, optimistic, queued, settle, refreshQueue, notify }),
+    [openCapture, capture, optimistic, queued, settle, refreshQueue, notify],
   );
 
   return (

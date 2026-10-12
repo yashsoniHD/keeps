@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useCapture } from "@/components/CaptureProvider";
 import { ApiError, deleteNote, reextractNote, updateNote } from "@/lib/api";
 import { getUserCategories, slugifyCategory } from "@/lib/firestore";
 import type { Note } from "@/lib/types";
@@ -29,6 +30,7 @@ export function NoteActions({
   onReextract?: () => void;
 }) {
   const { user } = useAuth();
+  const { notify } = useCapture();
   const [mode, setMode] = useState<Mode>("menu");
   const [title, setTitle] = useState(view.title);
   const [summary, setSummary] = useState(view.summary);
@@ -68,7 +70,10 @@ export function NoteActions({
     setMode("menu");
   };
   const fail = (e: unknown, fallback: string) =>
-    setError(e instanceof ApiError ? e.message : fallback);
+    setError(
+      (typeof navigator !== "undefined" && !navigator.onLine ? "You're offline. " : "") +
+        (e instanceof ApiError ? e.message : fallback),
+    );
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -83,6 +88,7 @@ export function NoteActions({
     try {
       await updateNote(view.id, patch);
       onUpdated?.(patch);
+      notify("Saved");
       onClose();
     } catch (err) {
       fail(err, "Couldn't update the note.");
@@ -114,6 +120,7 @@ export function NoteActions({
     try {
       await deleteNote(view.id);
       onDeleted?.();
+      notify("Note deleted");
       onClose();
     } catch (err) {
       fail(err, "Couldn't delete the note.");
@@ -157,6 +164,7 @@ export function NoteActions({
               Title
               <input
                 required
+                maxLength={300}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 data-initial-focus
@@ -164,7 +172,12 @@ export function NoteActions({
             </label>
             <label className="field-label">
               In short
-              <textarea rows={4} value={summary} onChange={(e) => setSummary(e.target.value)} />
+              <textarea
+                rows={4}
+                maxLength={2000}
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+              />
             </label>
             <label className="field-label">
               Category

@@ -53,6 +53,7 @@ class Settings:
     EMBED_MODEL: str = os.getenv("EMBED_MODEL", "qwen/qwen3-embedding-8b")
     EMBED_DIM: int = int(os.getenv("EMBED_DIM", "768"))
     # Top-K notes returned by a semantic search.
+    SEARCH_MAX_DISTANCE: float = float(os.getenv("SEARCH_MAX_DISTANCE", "0.55"))  # cosine; drops weak vector hits
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "20"))
     # Per-user daily cap on /api/search — each search embeds the query (a paid embedding call,
     # tiny but previously unbounded). Generous: real usage is a handful of searches a day.

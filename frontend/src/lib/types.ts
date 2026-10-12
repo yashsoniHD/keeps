@@ -15,6 +15,8 @@ export interface Note {
   data: Record<string, unknown>;
   acquisition?: string;
   is_fallback?: boolean; // salvage "bookmark" note — content couldn't be processed
+  cover_thumb?: string; // small JPEG data: URI stored at ingest (CDN covers expire)
+  submitted_url?: string; // canonical URL as submitted, when the worker resolved a redirect
   // Old notes may still carry removed-feature fields (is_public, is_favorite, pinned_at,
   // collection_id(s), annotations). They are deliberately untyped and ignored by the UI.
 
@@ -72,6 +74,7 @@ export interface Job {
   destination?: JobDestination | null; // preferred navigation target; note_id kept for back-compat
   title?: string | null; // display title, stamped by the worker on completion (older jobs lack it)
   error: string | null;
+  target_note_id?: string; // re-extract: the note this job rewrites in place
   attempt_count: number;
   created_at: Timestamp;
   updated_at?: Timestamp;

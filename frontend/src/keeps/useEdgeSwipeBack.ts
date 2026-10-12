@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
+import { isIOS, isStandalone } from "@/lib/platform";
 
 const EDGE = 24; // px from the left edge where a swipe may start
 const COMMIT_FRACTION = 0.35;
@@ -31,15 +32,13 @@ export function useEdgeSwipeBack(ref: React.RefObject<HTMLElement | null>) {
     const el = ref.current;
     if (!el) return;
     // Browser tabs / Android already have an OS back gesture; ours would double-fire there.
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    if (!standalone) return;
+    if (!isStandalone() || !isIOS()) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     let x0 = 0;
     let y0 = 0;
-    let t0 = 0;
     let dx = 0;
+    let samples: { t: number; x: number }[] = []; // recent moves, for release velocity
+    let shade: HTMLDivElement | null = null; // dims the blank area the page slides off
     let mode: "none" | "pending" | "drag" = "none";
     let raf = 0;
 
@@ -50,10 +49,16 @@ export function useEdgeSwipeBack(ref: React.RefObject<HTMLElement | null>) {
       el.style.transform = "";
       el.style.boxShadow = "";
       el.style.willChange = "";
+      el.style.position = "";
+      el.style.zIndex = "";
+      shade?.remove();
+      shade = null;
+      document.removeEventListener("touchmove", onMove);
     };
     const paint = () => {
       raf = 0;
       el.style.transform = `translate3d(${dx}px,0,0)`;
+      if (shade) shade.style.opacity = String(0.25 * (1 - dx / window.innerWidth));
     };
     const goBack = () => {
       // Our slide is the transition; suppress the router's view transition for this nav.
@@ -73,9 +78,11 @@ export function useEdgeSwipeBack(ref: React.RefObject<HTMLElement | null>) {
       if (isTextEntry(e.target) || scrollsHorizontally(e.target)) return;
       x0 = t.clientX;
       y0 = t.clientY;
-      t0 = e.timeStamp;
       dx = 0;
+      samples = [{ t: e.timeStamp, x: 0 }];
       mode = "pending";
+      // Non-passive only for edge touches, so ordinary scrolls never wait on the main thread.
+      document.addEventListener("touchmove", onMove, { passive: false });
     };
     const onMove = (e: TouchEvent) => {
       if (mode === "none") return;
@@ -84,21 +91,35 @@ export function useEdgeSwipeBack(ref: React.RefObject<HTMLElement | null>) {
       const my = t.clientY - y0;
       if (mode === "pending") {
         if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
-        if (mx <= 0 || Math.abs(my) > Math.abs(mx)) return void (mode = "none"); // vertical: leave scroll / pull-to-refresh alone
+        if (mx <= 0 || Math.abs(my) > Math.abs(mx)) {
+          mode = "none"; // vertical: leave scroll / pull-to-refresh alone
+          return document.removeEventListener("touchmove", onMove);
+        }
         mode = "drag";
         if (!reduced.matches) {
           el.style.willChange = "transform";
           el.style.boxShadow = "-12px 0 32px rgba(0,0,0,.18)";
+          el.style.position = "relative";
+          el.style.zIndex = "1";
+          shade = document.createElement("div");
+          shade.style.cssText =
+            "position:fixed;inset:0;background:#000;opacity:.25;pointer-events:none";
+          el.before(shade);
         }
       }
       if (e.cancelable) e.preventDefault();
       dx = Math.max(0, mx);
+      samples.push({ t: e.timeStamp, x: dx });
+      while (samples.length > 2 && e.timeStamp - samples[1].t > 50) samples.shift();
       if (!reduced.matches && !raf) raf = requestAnimationFrame(paint);
     };
     const onEnd = (e: TouchEvent) => {
+      document.removeEventListener("touchmove", onMove);
       if (mode !== "drag") return void (mode = "none");
       const w = window.innerWidth;
-      const fast = dx / Math.max(1, e.timeStamp - t0) > FLICK_VELOCITY && dx > 30;
+      // Velocity over the last ~50 ms, so a slow drag that ends in a flick still commits.
+      const s0 = samples[0];
+      const fast = (dx - s0.x) / Math.max(1, e.timeStamp - s0.t) > FLICK_VELOCITY && dx > 30;
       const commit = dx > w * COMMIT_FRACTION || fast;
       cancelAnimationFrame(raf);
       mode = "none";
@@ -108,6 +129,10 @@ export function useEdgeSwipeBack(ref: React.RefObject<HTMLElement | null>) {
       }
       el.style.transition = "transform 180ms cubic-bezier(.2,.8,.2,1)";
       el.style.transform = `translate3d(${commit ? w : 0}px,0,0)`;
+      if (shade) {
+        shade.style.transition = "opacity 180ms cubic-bezier(.2,.8,.2,1)";
+        shade.style.opacity = commit ? "0" : ".25";
+      }
       let done = false;
       const finish = () => {
         if (done) return;
@@ -126,12 +151,12 @@ export function useEdgeSwipeBack(ref: React.RefObject<HTMLElement | null>) {
       setTimeout(finish, 250);
     };
     const onCancel = () => {
+      document.removeEventListener("touchmove", onMove);
       if (mode === "drag") reset();
       mode = "none";
     };
 
     document.addEventListener("touchstart", onStart, { passive: true });
-    document.addEventListener("touchmove", onMove, { passive: false });
     document.addEventListener("touchend", onEnd, { passive: true });
     document.addEventListener("touchcancel", onCancel, { passive: true });
     return () => {

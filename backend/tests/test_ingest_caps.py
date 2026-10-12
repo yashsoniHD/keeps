@@ -211,3 +211,60 @@ async def test_existing_note_only_fallback_is_a_miss(fake_db):
     url = "https://example.com/x"
     fake_db.seed("notes", "fb", {"user_id": "u", "source_url": url, "is_fallback": True})
     assert await ingest_mod._existing_note(fake_db, "u", url) is None
+
+
+# --- audit C5/C14/C15/C18/C19 ----------------------------------------------
+
+async def test_inflight_job_is_reused_not_duplicated(fake_db, patch_ingest):
+    fake_db.seed("jobs", "j1", {"user_id": "u", "url": "https://example.com/x", "status": "processing"})
+    res = await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u")
+    assert res.job_id == "j1"
+    assert res.status == "processing"
+    assert [k for k in fake_db.docs if k[0] == "jobs"] == [("jobs", "j1")]
+
+
+async def test_failed_job_does_not_block_new_job(fake_db, patch_ingest):
+    fake_db.seed("jobs", "j1", {"user_id": "u", "url": "https://example.com/x", "status": "failed"})
+    res = await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u")
+    assert res.job_id != "j1"
+    assert fake_db.docs[("jobs", res.job_id)]["submitted_url"] == "https://example.com/x"
+
+
+async def test_existing_note_matches_submitted_url(fake_db):
+    fake_db.seed("notes", "n1", {"user_id": "u", "source_url": "https://final.example/y",
+                                 "submitted_url": "https://short.example/y"})
+    assert await ingest_mod._existing_note(fake_db, "u", "https://short.example/y") == "n1"
+
+
+async def test_fallback_duplicate_reextracts_in_place(fake_db, patch_ingest):
+    fake_db.seed("notes", "fb", {"user_id": "u", "source_url": "https://example.com/x", "is_fallback": True})
+    res = await ingest_mod.ingest(FakeRequest(b'{"url": "https://example.com/x"}'), user_id="u")
+    assert fake_db.docs[("jobs", res.job_id)]["target_note_id"] == "fb"
+
+
+async def test_copy_empty_and_malformed_url(fake_db):
+    for body, msg in ((b'{"url": ""}', "Keeps saves links. Nothing to save here."),
+                      (b'{"url": "https://"}', "That doesn't look like a complete link."),
+                      (b'{"url": "ftp://x.com"}', "That doesn't look like a complete link.")):
+        with pytest.raises(HTTPException) as exc:
+            await ingest_mod.ingest(FakeRequest(body), user_id="u")
+        assert exc.value.detail == msg
+
+
+async def test_cap_messages_use_real_values(fake_db):
+    fake_db.seed("usage", f"u-{TODAY}", {"ingest_count": settings.MAX_INGESTS_PER_USER_PER_DAY})
+    with pytest.raises(HTTPException) as exc:
+        await ingest_mod._enforce_cost_caps(fake_db, "u", skip_note_cap=True)
+    assert str(settings.MAX_INGESTS_PER_USER_PER_DAY) in exc.value.detail
+    assert "midnight UTC" in exc.value.detail
+
+
+async def test_inflight_picks_newest_live_job(fake_db, patch_ingest):
+    u = "https://example.com/x"
+    fake_db.seed("jobs", "old", {"user_id": "u", "url": u, "status": "pending",
+                                 "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc)})
+    fake_db.seed("jobs", "new", {"user_id": "u", "url": u, "status": "deferred",
+                                 "created_at": datetime(2026, 2, 1, tzinfo=timezone.utc)})
+    for i in range(20):
+        fake_db.seed("jobs", f"done{i}", {"user_id": "u", "url": u, "status": "completed"})
+    assert await ingest_mod._inflight_job(fake_db, "u", u) == ("new", "deferred")

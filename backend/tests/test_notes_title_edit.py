@@ -50,14 +50,17 @@ async def test_empty_title_rejected(fake_db):
     assert fake_db.docs[("notes", "n1")]["title"] == "old"  # unchanged
 
 
-async def test_oversized_title_rejected_at_model():
-    with pytest.raises(ValidationError):
-        NoteUpdate(title="x" * 301)
-
-
 async def test_non_owner_gets_404(fake_db):
     fake_db.seed("notes", "n1", {"user_id": "owner", "title": "old", "ai_summary": ""})
     with pytest.raises(HTTPException) as exc:
         await notes_mod.update_note("n1", NoteUpdate(title="hacked"), user_id="intruder")
     assert exc.value.status_code == 404
     assert fake_db.docs[("notes", "n1")]["title"] == "old"
+
+
+async def test_too_long_title_is_plain_string_422(fake_db):
+    fake_db.seed("notes", "n1", {"user_id": "u", "title": "old", "ai_summary": ""})
+    with pytest.raises(HTTPException) as exc:
+        await notes_mod.update_note("n1", NoteUpdate(title="x" * 301), user_id="u")
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "Title must be 300 characters or fewer."

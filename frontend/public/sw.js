@@ -1,18 +1,37 @@
 // Minimal service worker: required for PWA installability (which puts Keeps in the
-// OS share sheet via the manifest's share_target). It only handles the share POST and
-// caches hashed static assets. Everything else (index.html, API, Firestore, images) is not
-// intercepted at all, so it goes network-direct with no SW hop and no stale app shell.
+// OS share sheet via the manifest's share_target). It handles the share POST, caches hashed
+// static assets, and serves navigations network-first with a cached index.html fallback so
+// the installed app opens offline. API, Firestore and images are not intercepted.
+// Replaced with a per-deploy hash by vite.config.ts (swBuildStamp), so every deploy changes
+// this file: the browser installs the new SW, activate prunes the previous build's caches, and
+// main.tsx offers a refresh. The dev server serves the placeholder as-is.
+const BUILD = "__BUILD__";
+// The build's /assets/* paths (also filled in by swBuildStamp; empty on the dev server).
+const ASSETS = /*__ASSETS__*/ [];
 const SHARE_CACHE = "keeps-shared";
-const STATIC_CACHE = "keeps-static-v1";
+const STATIC_CACHE = `keeps-static-${BUILD}`;
+const SHELL_CACHE = `keeps-shell-${BUILD}`;
 
-self.addEventListener("install", () => self.skipWaiting());
+// Precache this build's shell and every asset before taking over: activate prunes the previous
+// build's caches, so an offline launch must find everything here. If any fetch fails, install
+// fails and the old SW (with its complete caches) stays in control.
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    Promise.all([
+      caches.open(SHELL_CACHE).then((c) => c.add(new Request("/index.html", { cache: "reload" }))),
+      caches.open(STATIC_CACHE).then((c) => c.addAll(ASSETS)),
+    ]).then(() => self.skipWaiting()),
+  );
+});
 self.addEventListener("activate", (event) =>
   event.waitUntil(
     caches
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((k) => k !== SHARE_CACHE && k !== STATIC_CACHE).map((k) => caches.delete(k)),
+          keys
+            .filter((k) => k !== SHARE_CACHE && k !== STATIC_CACHE && k !== SHELL_CACHE)
+            .map((k) => caches.delete(k)),
         ),
       )
       .then(() => self.clients.claim()),
@@ -45,8 +64,27 @@ async function cacheFirst(request) {
   const hit = await cache.match(request);
   if (hit) return hit;
   const res = await fetch(request);
-  if (res.ok) cache.put(request, res.clone());
+  // Hosting rewrites a missing chunk to index.html (200); never cache that as the asset.
+  if (res.ok && !res.headers.get("content-type")?.includes("text/html"))
+    cache.put(request, res.clone());
   return res;
+}
+
+// Navigations: always the network while online (no stale shell); the cached index.html only
+// when the network fails, so the app (and the offline capture queue) still opens offline.
+async function navigate(request) {
+  try {
+    const res = await fetch(request);
+    if (res.ok && res.headers.get("content-type")?.includes("text/html")) {
+      const copy = res.clone();
+      caches.open(SHELL_CACHE).then((c) => c.put("/index.html", copy));
+    }
+    return res;
+  } catch (err) {
+    const hit = await caches.match("/index.html", { cacheName: SHELL_CACHE });
+    if (hit) return hit;
+    throw err;
+  }
 }
 
 self.addEventListener("fetch", (event) => {
@@ -70,6 +108,10 @@ self.addEventListener("fetch", (event) => {
   }
   if (event.request.method === "GET" && url.pathname.startsWith("/assets/")) {
     event.respondWith(cacheFirst(event.request));
+    return;
+  }
+  if (event.request.mode === "navigate" && event.request.method === "GET") {
+    event.respondWith(navigate(event.request));
   }
   // Anything else falls through untouched (no respondWith).
 });

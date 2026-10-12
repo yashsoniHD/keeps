@@ -45,6 +45,26 @@ export function dequeueCapture(uid: string, url: string): QueuedCapture[] {
   return queue;
 }
 
+// Queue only what a later retry can fix: network failures (fetch rejects with TypeError),
+// explicit offline, a token refresh on a flaky connection, 5xx and 429 (rate limit: wait it
+// out). Other 4xx (invalid URL, note cap) fail identically on every replay, so surface them.
+// Duck-typed on `status` (ApiError) so this runs in plain node.
+export function isQueueable(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  if (typeof status === "number") return status >= 500 || status === 429;
+  if ((e as { code?: unknown } | null)?.code === "auth/network-request-failed") return true;
+  if (typeof navigator !== "undefined" && !navigator.onLine) return true;
+  return e instanceof TypeError;
+}
+
+function host(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 // Replays the queue in order. Stops at the first still-unreachable entry (the rest
 // would fail the same way) or as soon as `isCurrent()` is false (the signed-in user
 // changed); drops entries the server permanently rejects so they don't wedge the queue,
@@ -66,7 +86,10 @@ export async function replayWith(
       if (isQueueable(e)) break;
       queue = dequeueCapture(uid, item.url);
       if (isCurrent())
-        onRejected?.(item.url, e instanceof Error ? e.message : "Couldn't save this link.");
+        onRejected?.(
+          item.url,
+          `Couldn't save ${host(item.url)}: ${e instanceof Error ? e.message : "the link was rejected."}`,
+        );
     }
   }
   return queue;

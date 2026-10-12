@@ -210,6 +210,10 @@ class FakeDb:
     def seed(self, collection, doc_id, data):
         self.docs[(collection, doc_id)] = data
 
+    async def get_all(self, refs, field_paths=None):
+        for ref in refs:
+            yield await ref.get()
+
 
 @pytest.fixture
 def fake_db():

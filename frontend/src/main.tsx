@@ -28,10 +28,32 @@ window.addEventListener("unhandledrejection", (e) =>
   ),
 );
 
+// iOS only applies :active press styles when a touchstart listener exists.
+document.addEventListener("touchstart", () => {}, { passive: true });
+
 if ("serviceWorker" in navigator) {
   // Installability (and thus the OS share-sheet entry) requires a registered SW.
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((reg) => {
+        // A long-suspended installed app checks for a new deploy when it comes back.
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
+      })
+      .catch(() => {});
+    // A new SW took over (a deploy landed): offer a reload instead of a surprise one later.
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || document.querySelector(".update-banner")) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "update-banner";
+      b.textContent = "New version available. Tap to refresh";
+      b.onclick = () => window.location.reload();
+      document.body.appendChild(b);
+    });
   });
 }
 

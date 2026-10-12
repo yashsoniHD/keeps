@@ -5,6 +5,7 @@ steps) — far more precise than scraped prose, so it is extracted and passed to
 verbatim as ground truth. Articles often embed schema.org/Article with author/date.
 """
 import json
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -67,6 +68,8 @@ async def acquire(url: str) -> ContentBundle:
     for prop in ("og:image", "twitter:image"):
         if tag := (soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})):
             thumbnail = tag.get("content")
+            if thumbnail:  # a relative og:image would otherwise load against keeps.web.app
+                thumbnail = urljoin(str(resp.url), thumbnail)
             break
 
     for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe"]):

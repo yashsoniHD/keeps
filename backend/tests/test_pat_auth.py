@@ -62,3 +62,9 @@ async def test_success_resets_failed_attempts(fake_db):
     seed_token(fake_db, failed_attempts=3)
     assert await auth_dep._verify_pat(f"cn_tok123.{SECRET}") == "uid-1"
     assert fake_db.docs[("shortcut_tokens", "tok123")]["failed_attempts"] == 0
+
+
+async def test_pat_401_copy_points_to_settings(fake_db):
+    with pytest.raises(HTTPException) as e:
+        await auth_dep._verify_pat("cn_missing.secret")
+    assert e.value.detail == "Your Keeps shortcut needs a new token. Open Keeps → Settings."

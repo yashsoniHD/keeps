@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.cloud.firestore_v1.vector import Vector
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from models.note import IngestRequest
 from routers.ingest import _create_job
@@ -24,8 +24,8 @@ router = APIRouter(tags=["notes"])
 class NoteUpdate(BaseModel):
     """Owner-editable fields. All optional — send only what changes."""
     content_type: str | None = None
-    title: str | None = Field(default=None, max_length=300)
-    ai_summary: str | None = Field(default=None, max_length=2000)
+    title: str | None = None  # length checked in update_note (plain-string 422)
+    ai_summary: str | None = None
     data: dict[str, Any] | None = None  # body/structured fields
 
 
@@ -76,6 +76,10 @@ async def update_note(note_id: str, body: NoteUpdate, user_id: str = Depends(req
     # Title / summary / body edits are applied together so a body edit that also refreshes
     # the excerpt re-embeds only once.
     updates: dict[str, Any] = {}
+    if body.title is not None and len(body.title) > 300:
+        raise HTTPException(422, "Title must be 300 characters or fewer.")
+    if body.ai_summary is not None and len(body.ai_summary) > 2000:
+        raise HTTPException(422, "Summary must be 2000 characters or fewer.")
     if body.title is not None:
         title = body.title.strip()
         if not title:
