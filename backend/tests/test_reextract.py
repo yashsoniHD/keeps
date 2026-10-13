@@ -332,3 +332,42 @@ async def test_failed_job_completion_does_not_salvage(fake_db, wire_worker, monk
     notes = [v for k, v in fake_db.docs.items() if k[0] == "notes"]
     assert len(notes) <= 1 and not any(n.get("is_fallback") for n in notes)
     assert fake_db.docs[("jobs", "j")]["status"] == "processing"  # stale claim → sweep re-runs
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_reextract_thin_video_preserves_full_note(fake_db, wire_worker, monkeypatch, legacy):
+    original = {"user_id": "u", "title": "Full watched note", "source_url": "https://www.instagram.com/reel/a/",
+                "created_at": OLD, "data": {} if legacy else {"_evidence": [{"source": "video", "text": "spoken detail"}]}}
+    fake_db.seed("notes", "existing", original)
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "url": original["source_url"],
+                               "target_note_id": "existing"})
+    async def acquire(url):
+        return ContentBundle(kind="text", text="caption " * 20, strategy="reel_caption", metadata={"thin": True})
+    monkeypatch.setattr(process_mod.sources, "acquire", acquire)
+    result = await process_mod.process_job("j", DummyRequest())
+    assert result["status"] == "failed"
+    assert "preserved" in result["error"]
+    assert fake_db.docs[("notes", "existing")] == original
+
+
+async def test_reextract_thin_video_can_refresh_existing_thin_note(fake_db, wire_worker, monkeypatch):
+    original = {"user_id": "u", "title": "Old thin note", "source_url": "https://youtu.be/a", "created_at": OLD,
+                "data": {"thin": True}}
+    fake_db.seed("notes", "existing", original)
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "url": original["source_url"],
+                               "target_note_id": "existing"})
+    async def acquire(url):
+        return ContentBundle(kind="text", text="caption " * 20, strategy="youtube_fallback", metadata={"thin": True})
+    monkeypatch.setattr(process_mod.sources, "acquire", acquire)
+    result = await process_mod.process_job("j", DummyRequest())
+    assert result["status"] == "completed"
+    assert fake_db.docs[("notes", "existing")]["title"] == "Re-extracted title"
+
+
+async def test_reextract_retains_durable_cover_when_regeneration_has_none(fake_db, wire_worker):
+    fake_db.seed("notes", "existing", {"user_id": "u", "source_url": "https://x.com/a", "created_at": OLD,
+                                       "cover_thumb": "data:image/jpeg;base64,old"})
+    fake_db.seed("jobs", "j", {"status": "pending", "user_id": "u", "url": "https://x.com/a",
+                               "target_note_id": "existing"})
+    await process_mod.process_job("j", DummyRequest())
+    assert fake_db.docs[("notes", "existing")]["cover_thumb"] == "data:image/jpeg;base64,old"

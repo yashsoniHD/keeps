@@ -451,9 +451,9 @@ def test_empty_choices_on_last_model_raises_never_empty_string(calls):
         gemini_service._chat(["b"], "S", "t")
 
 
-def test_error_shaped_200_on_video_is_video_unreadable(calls):
+def test_error_shaped_200_on_video_remains_transient(calls):
     calls.replies.append(SimpleNamespace(error={"message": "bad video"}, choices=None, usage=None))
-    with pytest.raises(VideoUnreadable, match="bad video"):
+    with pytest.raises(gemini.ProviderError, match="bad video"):
         gemini_service._extract_from_video(b"v", "video/mp4", "", [], None)
 
 
@@ -490,3 +490,27 @@ def test_thin_bundle_gets_caption_only_rule(calls, kw):
 def test_normal_bundle_has_no_thin_rule(calls):
     gemini_service.extract("https://e.com", _bundle(), "summary")
     assert gemini.THIN_RULE not in _user_parts(calls[0])
+
+
+@pytest.mark.parametrize("youtube", [False, True])
+@pytest.mark.parametrize("status", [429, 503])
+def test_video_transient_status_propagates_for_worker_retry(calls, youtube, status):
+    response = httpx.Response(status, request=httpx.Request("POST", "https://openrouter.ai"))
+    error = openai.APIStatusError("provider unavailable", response=response, body={})
+    calls.replies.append(error)
+    with pytest.raises(openai.APIStatusError):
+        if youtube:
+            gemini_service.extract("https://youtu.be/x", _bundle(
+                kind="video_uri", video_uri="https://youtu.be/x", strategy="youtube_direct"), None)
+        else:
+            gemini_service._extract_from_video(b"v", "video/mp4", "caption", [], None)
+
+
+@pytest.mark.parametrize("sources,thin", [(["caption", "comment"], True), (["video", "caption"], False)])
+def test_video_marks_actual_metadata_only_evidence(calls, sources, thin):
+    note = {**NOTE, "data": {"_evidence": [{"source": src, "text": "detail"} for src in sources]}}
+    calls.replies.append(json.dumps(note))
+    result = gemini_service._extract_from_video(b"v", "video/mp4", "caption", [], None)
+    assert bool(result.data.get("thin")) is thin
+    if thin:
+        assert result.data["_quality"]["media_coverage"] == "caption_only"

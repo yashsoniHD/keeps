@@ -27,7 +27,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from urllib.parse import urlparse
 
 import httpx
-from openai import APITimeoutError, OpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from pydantic import ValidationError
 
 from config import settings
@@ -45,6 +45,26 @@ class ProviderError(ValueError):
 class VideoUnreadable(Exception):
     """The video model could not produce a note from this video (or YouTube URL). The caller
     falls back (YouTube scraper / caption-only note); the message carries the cause."""
+
+
+def is_transient_provider_error(error: Exception) -> bool:
+    """Provider failures worth retrying before degrading a video to caption-only."""
+    return (isinstance(error, (APIConnectionError, httpx.TimeoutException,
+                               httpx.TransportError, ProviderError))
+            or isinstance(error, APIStatusError)
+            and (error.status_code == 429 or error.status_code >= 500))
+
+
+def _mark_media_coverage(note: NoteExtraction) -> None:
+    """A valid media reply may still contain only post metadata, not video observations."""
+    evidence = note.data.get("_evidence")
+    if (isinstance(evidence, list) and evidence
+            and all(isinstance(e, dict) and e.get("source") in ("caption", "comment")
+                    for e in evidence)):
+        note.data["thin"] = True
+        quality = note.data.setdefault("_quality", {})
+        if isinstance(quality, dict):
+            quality["media_coverage"] = "caption_only"
 
 
 def normalize_slug(raw: str) -> str:
@@ -807,7 +827,8 @@ class GeminiService:
                 note_hint: str | None = None, deadline: float | None = None,
                 categories: list[str] | None = None) -> NoteExtraction:
         """One extraction call. Routing: YouTube URL → YOUTUBE_MODELS (Google AI Studio pinned,
-        ONE attempt; any failure raises VideoUnreadable); carousel images → IMAGE_MODELS; else
+        permanent failures raise VideoUnreadable, transient provider failures propagate);
+        carousel images → IMAGE_MODELS; else
         TEXT_MODELS. content_type None → the model picks it (normalized slug). The model that
         answered is written to bundle.metadata["model"]. Transient failures propagate to
         process_job's retry; bad JSON gets one nudge. `categories` = the user's existing
@@ -824,7 +845,10 @@ class GeminiService:
                                                deadline=deadline, video_url=yt, pin_google=True,
                                                timeout=yt_timeout, reserve=VIDEO_RESERVE_S)
             except Exception as e:
+                if is_transient_provider_error(e):
+                    raise
                 raise VideoUnreadable(f"{type(e).__name__}: {e}") from e
+            _mark_media_coverage(parsed)
         elif bundle.image_parts:
             parsed, used = self._extract_note(settings.IMAGE_MODELS, system, prompt,
                                            deadline=deadline, images=bundle.image_parts,
@@ -867,7 +891,10 @@ class GeminiService:
                 "\n\n".join(parts), video_url=data_url,
                 timeout=timeout, reserve=VIDEO_RESERVE_S)
         except Exception as e:
+            if is_transient_provider_error(e):
+                raise
             raise VideoUnreadable(f"{type(e).__name__}: {e}") from e
+        _mark_media_coverage(parsed)
         parsed.content_type = type_hint or normalize_slug(parsed.content_type)
         return parsed
 
@@ -878,8 +905,9 @@ class GeminiService:
         `video_url` part, VIDEO_CALL_TIMEOUT_S per call). type_hint None → the model picks the
         content_type, seeing `categories` (the user's existing ones) to reuse. Timeout is
         min(VIDEO_CALL_TIMEOUT_S, remaining budget - 60 s); under 75 s left, no call is made.
-        Any failure (budget, size cap, API error/timeout, unrepairable JSON) raises
-        VideoUnreadable. The model that answered is on the request meter (`last_model`)."""
+        Permanent failures (budget, size cap, unsupported media, unrepairable JSON) raise
+        VideoUnreadable; transient API failures propagate for bounded worker retries.
+        The model that answered is on the request meter (`last_model`)."""
         return await asyncio.to_thread(self._extract_from_video, video_bytes, mime, caption,
                                        comments, type_hint, categories)
 

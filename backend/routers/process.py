@@ -44,9 +44,10 @@ from services.firebase import (
 )
 from services.enrich import enrich_note_data
 from services.gemini import (ProviderError, VideoUnreadable, closest_existing, gemini_service,
-                             job_deadline, match_existing, normalize_slug)
+                             is_video_source, job_deadline, match_existing, normalize_slug)
 from services.net_guard import BlockedURLError, guarded_async_client
 from services.sources import social_video
+from services.video_thumbnail import video_thumbnail
 from services.worker_auth import verify_worker_secret
 from services.dispatch import enqueue_process_job
 from services.usage_meter import start_metering
@@ -319,18 +320,25 @@ def _drop_unsourced_urls(data: dict, bundle: ContentBundle) -> None:
 
 
 async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
-                   note_hint: str | None, categories: list[str] | None = None
+                   note_hint: str | None, categories: list[str] | None = None,
+                   *, allow_transient_fallback: bool = False
                    ) -> tuple[NoteExtraction, ContentBundle]:
     """Video bytes → the video model; a YouTube URL → the model watches it, falling back to the
     scraper on VideoUnreadable; everything else → the text/vision extract. A video the model
     can't read degrades to a thin caption-only note — a save never fails for a missing video."""
     video = bundle.metadata.pop("video_bytes", None)
+    # This also covers files acquired by the recursive YouTube fallback.
+    thumb_budget = _time_left(PERSIST_RESERVE_S + 75)
+    if video and (thumb_budget is None or thumb_budget > 8):
+        bundle.metadata["frame_thumb"] = await video_thumbnail(video)
     mime = bundle.metadata.pop("video_mime", None) or "video/mp4"
     if video:
         try:
             return (await _extract_from_video(bundle, video, mime, content_type, categories),
                     bundle)
-        except VideoUnreadable as e:
+        except Exception as e:
+            if not isinstance(e, VideoUnreadable) and not (allow_transient_fallback and _is_transient(e)):
+                raise
             log.warning("video unreadable, extracting from caption: %s", e,
                         extra={"url": url, "event": "video_unreadable",
                                "error_type": type(e.__cause__ or e).__name__})
@@ -346,7 +354,9 @@ async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
         try:
             return (await gemini_service.extract_async(url, bundle, content_type, note_hint,
                                                        categories=categories), bundle)
-        except VideoUnreadable as e:
+        except Exception as e:
+            if not isinstance(e, VideoUnreadable) and not (allow_transient_fallback and _is_transient(e)):
+                raise
             log.warning("youtube unreadable, running fallback scraper: %s", e,
                         extra={"url": url, "event": "video_unreadable",
                                "error_type": type(e.__cause__ or e).__name__})
@@ -354,7 +364,8 @@ async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
             bundle.metadata["video_error"] = _video_error(e)
             if bundle.kind == "metadata_only":  # nothing to extract from → salvage bookmark
                 raise ValueError("youtube unreadable and the fallback found no content")
-            return await _extract(url, bundle, content_type, note_hint, categories)
+            return await _extract(url, bundle, content_type, note_hint, categories,
+                                  allow_transient_fallback=allow_transient_fallback)
     return (await gemini_service.extract_async(url, bundle, content_type, note_hint,
                                                categories=categories), bundle)
 
@@ -362,6 +373,21 @@ async def _extract(url: str, bundle: ContentBundle, content_type: str | None,
 def _video_error(e: Exception) -> str:
     """Persisted to data._quality.video_error: Vercel Hobby keeps logs for 1 h only."""
     return f"{type(e).__name__}: {str(e)[:200]}"
+
+
+def _reextract_degrades_video(existing: dict, candidate: dict) -> bool:
+    old_data = existing.get("data") or {}
+    new_data = candidate.get("data") or {}
+    if not new_data.get("thin") or old_data.get("thin") or existing.get("is_fallback"):
+        return False
+    evidence = old_data.get("_evidence") or []
+    if any(isinstance(e, dict) and e.get("source") == "video" for e in evidence):
+        return True
+    # Legacy notes did not store evidence. Preserve full notes from known video sources.
+    acquisition = existing.get("acquisition") or ""
+    return (acquisition != "salvage" and not acquisition.endswith("_thin")
+            and is_video_source(existing.get("source_url") or "",
+                                ContentBundle(kind="text", strategy=acquisition)))
 
 
 _THUMB_HOSTS = ("cdninstagram.com", "fbcdn.net", "tiktokcdn.com", "tiktokcdn-us.com")
@@ -658,7 +684,9 @@ async def _process_job(job_id: str) -> dict:
             # 3. Type-focused extraction (structured data only — never HTML).
             # The user's categories go to the extractor too: for video sources (classify → None)
             # the model picks the type and should reuse one of them.
-            extracted, bundle = await _extract(url, bundle, content_type, note_hint, existing)
+            extracted, bundle = await _extract(
+                url, bundle, content_type, note_hint, existing,
+                allow_transient_fallback=attempt >= MAX_TRANSIENT_ATTEMPTS)
 
             if not extracted.data or len(str(extracted.data)) < 40:
                 raise ValueError("Extraction produced empty or suspiciously short data")
@@ -731,6 +759,7 @@ async def _process_job(job_id: str) -> dict:
         left = _time_left(PERSIST_RESERVE_S)
         cover_thumb = (await _cover_thumb(cover_image_url)
                        if left is None or left > 30 else None)  # 10 s fetch + 15 s ffmpeg
+        cover_thumb = cover_thumb or bundle.metadata.get("frame_thumb")
         note_doc = {
             "user_id": user_id,
             "input_type": input_type,
@@ -769,18 +798,27 @@ async def _process_job(job_id: str) -> dict:
             if target_note_id:
                 snap = await note_ref.get(transaction=tx)
                 if not snap.exists:
-                    return False
-                doc = {**note_doc, "created_at": (snap.to_dict() or {}).get("created_at") or now}
+                    return "deleted"
+                previous = snap.to_dict() or {}
+                if _reextract_degrades_video(previous, note_doc):
+                    return "degraded"
+                doc = {**note_doc, "created_at": previous.get("created_at") or now}
+                if (not doc.get("cover_thumb") and previous.get("cover_thumb")
+                        and previous.get("source_url") == doc.get("source_url")):
+                    doc["cover_thumb"] = previous["cover_thumb"]
             tx.set(note_ref, doc)
             tx.update(job_ref, {"status": "completed", "note_id": note_id,
                                 "destination": destination, "title": extracted.title,
                                 "updated_at": datetime.now(timezone.utc)})
-            return True
+            return "saved"
 
         committing = True
-        if not await _commit(db.transaction()):
-            return await _fail_reextract(job_ref, "target note deleted")
+        commit_result = await _commit(db.transaction())
         committing = False
+        if commit_result == "deleted":
+            return await _fail_reextract(job_ref, "target note deleted")
+        if commit_result == "degraded":
+            return await _fail_reextract(job_ref, "reextract degraded to caption-only; existing note preserved")
         # The note is saved and the job completed: nothing below may trigger a salvage.
         try:
             await add_user_category(user_id, extracted.content_type)

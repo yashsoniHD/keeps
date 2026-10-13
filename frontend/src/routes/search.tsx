@@ -29,7 +29,7 @@ function hitView(h: SearchResult): NoteView {
     categorySlug: h.content_type ?? "",
     category: noteLabel(h.content_type ?? ""),
     platform: sourceLabel(h.source_domain ?? ""),
-    image: h.cover_image_url ?? undefined,
+    image: h.cover_thumb ?? h.cover_image_url ?? undefined,
     url: "",
     age: sourceLabel(h.source_domain ?? ""),
     thin: false,

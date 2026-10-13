@@ -82,7 +82,7 @@ _IMAGES_FIELDS = ("images", "imageUrls")
 MAX_CAROUSEL_IMAGES = 6
 
 
-def _carousel_images(item: dict) -> list[str]:
+def _carousel_images(item: dict, limit: int | None = MAX_CAROUSEL_IMAGES) -> list[str]:
     """All slide image URLs for a carousel/sidecar post, in order, deduped. Falls back to
     the single displayUrl for a normal image post."""
     urls: list[str] = []
@@ -104,7 +104,7 @@ def _carousel_images(item: dict) -> list[str]:
     # Order-preserving dedup, then cap.
     seen: set[str] = set()
     out = [u for u in urls if not (u in seen or seen.add(u))]
-    return out[:MAX_CAROUSEL_IMAGES]
+    return out[:limit] if limit is not None else out
 
 
 @dataclass(frozen=True)
@@ -215,15 +215,17 @@ def _normalize(item: dict) -> dict:
         video = video or vm.get("downloadAddr") or vm.get("playAddr")
         thumb = thumb or vm.get("coverUrl") or vm.get("originalCoverUrl")
         dur = dur or vm.get("duration")
-    images = _carousel_images(item)
+    available_images = _carousel_images(item, limit=None)
+    images = available_images[:MAX_CAROUSEL_IMAGES]
     return {
         "video_url": video,
         "caption": caption,
-        # No dedicated title field — lead with the caption's first line, else the author.
-        "title": (caption.splitlines()[0][:120] if caption else None)
+        # Preserve a dedicated title (YouTube); otherwise use caption first line or author.
+        "title": _first(item, ("title",)) or (caption.splitlines()[0][:120] if caption else None)
                  or _first(item, _AUTHOR_FIELDS),
         "thumbnail": thumb or (images[0] if images else None),
         "images": images,        # every carousel slide (≥1 for image posts), [] for video
+        "image_count": len(available_images),
         "comments": _comments(item),
         "subtitles": _subtitles_text(item),
         "author": _first(item, _AUTHOR_FIELDS),

@@ -28,6 +28,7 @@ import tempfile
 from urllib.parse import urlparse
 
 import yt_dlp
+import httpx
 from bs4 import BeautifulSoup
 
 from config import settings
@@ -99,7 +100,7 @@ def too_long(duration: int) -> bool:
     return duration > settings.MAX_VIDEO_SECONDS
 
 
-def _reencode(path: str, duration: int) -> bytes | None:
+def _reencode(path: str, duration: int, *, failure: dict | None = None) -> bytes | None:
     """Shrink an oversized file to fit VIDEO_MAX_BYTES: one ffmpeg pass, ≤360p, bitrate from the
     duration, mono 48 kbps AAC. None when the duration is unknown or ffmpeg fails/still too big.
     # ponytail: single-pass ABR can overshoot a little; the 0.9 headroom + final size check cover it."""
@@ -124,6 +125,8 @@ def _reencode(path: str, duration: int) -> bytes | None:
         with open(out, "rb") as f:
             return f.read()
     except Exception as e:  # noqa: BLE001 — fall back to a thin caption note
+        if failure is not None:
+            failure["reason"] = "transient"
         log.info("re-encode failed: %s: %s", type(e).__name__, str(e)[:160])
         return None
     finally:
@@ -131,7 +134,7 @@ def _reencode(path: str, duration: int) -> bytes | None:
             os.remove(out)
 
 
-def _fit(data: bytes, mime: str, duration: int) -> tuple[bytes, str] | None:
+def _fit(data: bytes, mime: str, duration: int, *, failure: dict | None = None) -> tuple[bytes, str] | None:
     """Pass a file that fits; re-encode an oversized one (temp file, always removed)."""
     if len(data) <= settings.VIDEO_MAX_BYTES:
         return data, mime
@@ -143,13 +146,14 @@ def _fit(data: bytes, mime: str, duration: int) -> tuple[bytes, str] | None:
         path = os.path.join(workdir, "in")
         with open(path, "wb") as f:
             f.write(data)
-        small = _reencode(path, duration)
+        small = _reencode(path, duration, failure=failure)
         return (small, "video/mp4") if small else None
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-async def download_video(media_url: str, duration: int = 0) -> tuple[bytes, str] | None:
+async def download_video(media_url: str, duration: int = 0, *,
+                         failure: dict | None = None) -> tuple[bytes, str] | None:
     """Fetch one video into memory (net-guarded, streamed, capped at raw_cap()), re-encoding it
     down to VIDEO_MAX_BYTES when it's bigger. Apify key-value-store URLs need the token as a
     header (never in the URL, which httpx logs). None on any failure (expired/403/404 CDN link,
@@ -166,7 +170,8 @@ async def download_video(media_url: str, duration: int = 0) -> tuple[bytes, str]
             async with client.stream("GET", media_url, headers=headers) as resp:
                 resp.raise_for_status()
                 ct = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
-                if ct.startswith("text/"):  # an HTML login wall / error page, not a video
+                if ct and not (ct.startswith("video/") or ct in (
+                        "application/octet-stream", "binary/octet-stream")):
                     raise ValueError(f"not a video ({ct})")
                 if int(resp.headers.get("content-length") or 0) > cap:
                     raise ValueError(f"video exceeds {cap} bytes")
@@ -178,19 +183,47 @@ async def download_video(media_url: str, duration: int = 0) -> tuple[bytes, str]
             raise ValueError("empty video")
         return bytes(buf), ct if ct.startswith("video/") else "video/mp4"
 
+    async def _with_retry() -> tuple[bytes, str]:
+        for attempt in range(2):
+            try:
+                return await _go()
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                transient = (isinstance(exc, httpx.TransportError)
+                             or exc.response.status_code in (408, 429, 500, 502, 503, 504))
+                if attempt or not transient:
+                    raise
+                await asyncio.sleep(0.5)
+
     try:
-        data, mime = await asyncio.wait_for(_go(), timeout=DOWNLOAD_TIMEOUT_SECONDS)
+        # Both attempts share the original acquisition deadline and reuse the paid URL.
+        data, mime = await asyncio.wait_for(_with_retry(), timeout=DOWNLOAD_TIMEOUT_SECONDS)
     except Exception as e:  # noqa: BLE001
+        if isinstance(e, BlockedURLError):
+            raise
+        if failure is not None:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (403, 404, 410):
+                failure["reason"] = "expired"
+            elif isinstance(e, (httpx.TransportError, TimeoutError)) or (
+                    isinstance(e, httpx.HTTPStatusError)
+                    and e.response.status_code in (408, 429, 500, 502, 503, 504)):
+                failure["reason"] = "transient"
+            else:
+                failure["reason"] = "permanent"
         log.info("video download failed: %s: %s", type(e).__name__, str(e)[:160])
         return None
     if len(data) <= settings.VIDEO_MAX_BYTES:
         return data, mime
-    return await asyncio.to_thread(_fit, data, mime, duration)
+    fitted = await asyncio.to_thread(_fit, data, mime, duration, failure=failure)
+    if fitted is None and failure is not None:
+        failure.setdefault("reason", "permanent")
+    return fitted
 
 
-async def _download(media_url: str, duration: int) -> tuple[bytes, str] | None:
+async def _download(media_url: str, duration: int) -> tuple[tuple[bytes, str] | None, str | None]:
     # Duration only when known — it's what makes an oversized file re-encodable.
-    return await (download_video(media_url, duration) if duration else download_video(media_url))
+    failure = {}
+    video = await download_video(media_url, duration, failure=failure)
+    return video, failure.get("reason", "transient" if video is None else None)
 
 
 def _ydl_opts(workdir: str) -> dict:
@@ -310,6 +343,7 @@ async def _apify_entry(url: str) -> dict | None:
              "media_url": result.get("video_url") if is_video else None,
              "thumbnail": result.get("thumbnail") or (images[0] if images else None),
              "images": [] if is_video else images[:MAX_SLIDES],
+             "image_count": 0 if is_video else result.get("image_count", len(images)),
              "title": result.get("title"), "author": result.get("author"), "via": "apify",
              "duration": to_seconds(result.get("duration"))}
     if is_video:
@@ -347,6 +381,10 @@ async def _bundle(url: str, entry: dict, video: tuple[bytes, str] | None) -> Con
     if entry.get("images"):
         parts = await _fetch_image_parts(entry["images"])
         meta["slides"] = len(parts)
+        meta["slides_expected"] = len(entry["images"][:MAX_SLIDES])
+        meta["slides_available"] = entry.get("image_count", len(entry["images"]))
+        if len(parts) < meta["slides_available"]:
+            meta["thin"] = True
         return ContentBundle(kind="text", text=_text(entry) or None, images=entry["images"][:1],
                              image_parts=parts, metadata=meta, strategy=entry["strategy"])
     if video:
@@ -389,11 +427,11 @@ async def _ladder(url: str) -> tuple[dict | None, tuple[bytes, str] | None]:
             # The paid run already happened (it counts); just don't download hours of video.
             entry = {**entry, "too_long": True, "strategy": "reel_caption", "media_url": None}
         if entry.get("media_url"):
-            video = await _download(entry["media_url"], entry["duration"])
-            if video is None:
-                # A fresh Apify URL that won't download won't on a retry either: cache it as
-                # caption-only so a retry reuses the paid scrape instead of re-running Apify.
-                entry = {**entry, "strategy": "reel_caption", "media_url": None}
+            video, reason = await _download(entry["media_url"], entry["duration"])
+            if reason:
+                entry["download_failure"] = reason
+            # Keep scraped media metadata even when this download fails. Timeouts and
+            # CDN throttling are recoverable; the current bundle can still be thin.
         return entry, video
     if leftover and leftover.get("caption"):
         return {**leftover, "strategy": "reel_caption", "media_url": None}, None
@@ -402,16 +440,33 @@ async def _ladder(url: str) -> tuple[dict | None, tuple[bytes, str] | None]:
 
 async def acquire(url: str) -> ContentBundle:
     """Never raises for a blocked source — the last rung returns `private_or_blocked`."""
-    if cached := await acq_cache.get(url):
+    cached = await acq_cache.get(url)
+    if cached:
         if cached.get("strategy") != "reel_video":
+            bundle = await _bundle(url, cached, None)
+            if not cached.get("images") or bundle.image_parts:
+                return bundle
+            # All cached slide URLs failed: refresh once through the capped ladder.
+            entry, video = await _ladder(url)
+            if entry is not None:
+                await acq_cache.put(url, entry)
+                return await _bundle(url, entry, video)
+            return bundle
+        if cached.get("download_failure") == "permanent":
             return await _bundle(url, cached, None)
-        if cached.get("media_url") and (video := await _download(
-                cached["media_url"], to_seconds(cached.get("duration")))):
-            return await _bundle(url, cached, video)
+        if cached.get("media_url"):
+            video, reason = await _download(cached["media_url"], to_seconds(cached.get("duration")))
+            if video:
+                return await _bundle(url, cached, video)
+            if reason != "expired":
+                await acq_cache.put(url, {**cached, "download_failure": reason})
+                return await _bundle(url, cached, None)
         log.info("cached media url unusable; re-running the ladder", extra={"url": url})
 
     entry, video = await _ladder(url)
     if entry is None:
+        if cached:
+            return await _bundle(url, cached, None)
         return await _caption_fallback(url)
     # Cache only what a real acquisition produced (a media URL or a paid scrape). A caption-only
     # result after an Apify cap/failure must not freeze a re-extract thin for 6 h.

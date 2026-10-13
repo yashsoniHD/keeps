@@ -145,3 +145,14 @@ def test_youtube_input_requests_subtitles():
     from services.apify import _youtube_input
     i = _youtube_input("https://youtu.be/x")
     assert i["downloadSubtitles"] is True and i["subtitlesLanguage"] == "en"
+
+
+def test_normalize_preserves_actual_title_instead_of_description_line():
+    result = apify._normalize({"title": "Video title", "text": "Description line\nMore"})
+    assert result["title"] == "Video title"
+    assert result["caption"] == "Description line\nMore"
+
+
+def test_normalize_retains_total_carousel_count_while_capping_fetches():
+    result = apify._normalize({"images": [f"https://cdn/{i}" for i in range(10)]})
+    assert len(result["images"]) == 6 and result["image_count"] == 10

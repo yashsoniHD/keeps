@@ -11,7 +11,7 @@ log = logging.getLogger("keeps.acq_cache")
 
 TTL = timedelta(hours=6)
 FIELDS = ("caption", "comments", "media_url", "thumbnail", "images", "title", "author",
-          "strategy", "via", "duration", "too_long")
+          "strategy", "via", "duration", "too_long", "image_count", "download_failure")
 
 
 def _ref(url: str):

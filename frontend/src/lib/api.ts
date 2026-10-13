@@ -144,6 +144,7 @@ export interface SearchResult {
   ai_summary: string;
   source_domain: string;
   cover_image_url: string | null;
+  cover_thumb?: string | null;
   ref_id?: string | null; // the underlying note id (same as id)
 }
 

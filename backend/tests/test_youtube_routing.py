@@ -143,3 +143,21 @@ async def test_fallback_skips_mp4_over_the_file_limit(stubs, monkeypatch):
     b = await yt.acquire(URL)                   # 3 h > direct limit → fallback, no mp4
     assert "video_bytes" not in b.metadata and b.text == "desc"
     assert b.metadata["too_long"] is True and b.metadata["built_from"] == "description"
+
+
+async def test_apify_metadata_salvages_missing_page_metadata(stubs):
+    stubs["apify"] = {"title": "Real title", "caption": "Actual description",
+                      "author": "Creator", "thumbnail": "https://cdn/poster.jpg"}
+    b = await yt.fallback(URL, metadata={"title": "Untitled", "description": "",
+                                       "author": None, "platform": "youtube"}, tracks=[], images=[])
+    assert b.kind == "text" and b.text == "Actual description"
+    assert b.metadata["title"] == "Real title" and b.metadata["author"] == "Creator"
+    assert b.images == ["https://cdn/poster.jpg"] and b.metadata["thin"] is True
+
+
+async def test_apify_metadata_preserves_existing_page_values(stubs):
+    stubs["apify"] = {"title": "Other", "caption": "Other description",
+                      "thumbnail": "https://cdn/other.jpg", "subtitles": LONG_TX}
+    b = await yt.fallback(URL, await yt.acquire(URL))
+    assert b.metadata["title"] == "T" and b.metadata["description"] == "desc"
+    assert b.images == ["https://i.ytimg.com/x.jpg"]

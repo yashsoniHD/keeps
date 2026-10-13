@@ -30,8 +30,10 @@ def s(monkeypatch):
         st["apify_calls"] += 1
         return st["apify"]
 
-    async def download(u, duration=0):
+    async def download(u, duration=0, *, failure=None):
         st["downloads"].append(u)
+        if u in st["dead"] and failure is not None:
+            failure["reason"] = "expired"
         return None if u in st["dead"] else (b"MP4:" + u.encode(), "video/mp4")
 
     def ytdlp(url):
@@ -257,7 +259,7 @@ async def test_ytdlp_oversized_file_is_reencoded(monkeypatch, tmp_path):
     monkeypatch.setattr(sv.settings, "VIDEO_MAX_BYTES", 10)
     monkeypatch.setattr(sv.yt_dlp, "YoutubeDL", _fake_ydl(30, 11))
     calls = []
-    monkeypatch.setattr(sv, "_reencode", lambda path, d: calls.append(d) or b"small")
+    monkeypatch.setattr(sv, "_reencode", lambda path, d, **kw: calls.append(d) or b"small")
     assert sv._ytdlp_download(TIKTOK)[1:] == (b"small", "video/mp4") and calls == [30]
     monkeypatch.setattr(sv.settings, "VIDEO_MAX_BYTES", 100)
     assert sv._ytdlp_download(TIKTOK)[1] == b"0" * 11      # fits → untouched
@@ -286,7 +288,7 @@ async def test_oversized_download_with_unknown_duration_is_dropped(monkeypatch):
     monkeypatch.setattr(sv, "guarded_async_client",
                         lambda **kw: _StreamClient(_StreamResp("video/mp4", b"12345"), seen))
     assert await sv.download_video("https://cdn/v.mp4") is None
-    monkeypatch.setattr(sv, "_reencode", lambda path, d: b"ok")
+    monkeypatch.setattr(sv, "_reencode", lambda path, d, **kw: b"ok")
     assert await sv.download_video("https://cdn/v.mp4", 30) == (b"ok", "video/mp4")
 
 
@@ -354,3 +356,130 @@ async def test_download_rejects_html_and_scopes_apify_token(monkeypatch):
     assert "Authorization" not in seen["headers"]                        # host check, not substring
     await sv.download_video("https://api.apify.com/v2/key-value-stores/s/records/v")
     assert seen["headers"]["Authorization"] == "Bearer sekret"
+
+
+async def test_failed_fresh_download_keeps_media_for_next_acquisition(s):
+    s["apify"] = _apify_video()
+    s["dead"].add("https://api.apify.com/v")
+    first = await sv.acquire(IG_REEL)
+    assert first.metadata["thin"] is True
+    cached = s["puts"][0]
+    assert cached["media_url"] == "https://api.apify.com/v"
+    assert cached["strategy"] == "reel_video"
+    s["cache"] = cached
+    s["dead"].clear()
+    second = await sv.acquire(IG_REEL)
+    assert second.metadata["video_bytes"]
+    assert s["apify_calls"] == 1
+
+
+async def test_partial_carousel_marks_missing_visual_evidence(s, monkeypatch):
+    s["apify"] = {"caption": "cafes", "images": ["https://cdn/a", "https://cdn/b"]}
+    async def partial(urls):
+        return [{"mime_type": "image/jpeg", "data": b"a"}]
+    monkeypatch.setattr(sv, "_fetch_image_parts", partial)
+    b = await sv.acquire(IG_REEL)
+    assert b.metadata["thin"] is True
+    assert b.metadata["slides"] == 1 and b.metadata["slides_expected"] == 2
+
+
+async def test_zero_cached_slides_refreshes_once_and_remains_thin(s, monkeypatch):
+    s["cache"] = {"caption": "cached", "images": ["https://cdn/expired"],
+                  "strategy": "apify_caption"}
+    s["apify"] = {"caption": "fresh", "images": ["https://cdn/new"]}
+    async def missing(urls):
+        return []
+    monkeypatch.setattr(sv, "_fetch_image_parts", missing)
+    b = await sv.acquire(IG_REEL)
+    assert s["apify_calls"] == 1
+    assert b.metadata["thin"] is True and b.metadata["slides"] == 0
+
+
+async def test_download_rejects_json_success_response(monkeypatch):
+    monkeypatch.setattr(sv, "guarded_async_client",
+                        lambda **kw: _StreamClient(_StreamResp("application/json", b'{"error":1}'), {}))
+    assert await sv.download_video("https://cdn/v.mp4") is None
+
+
+@pytest.mark.parametrize("status, expected_attempts", [(429, 2), (503, 2), (403, 1), (404, 1)])
+async def test_download_retries_only_transient_http_failure(monkeypatch, status, expected_attempts):
+    import httpx
+    attempts = []
+    class Response(_StreamResp):
+        def raise_for_status(self):
+            if len(attempts) == 1:
+                raise httpx.HTTPStatusError("failure", request=httpx.Request("GET", "https://cdn/v"),
+                                            response=httpx.Response(status))
+    def client(**kwargs):
+        attempts.append(1)
+        return _StreamClient(Response("video/mp4", b"MP4"), {})
+    monkeypatch.setattr(sv, "guarded_async_client", client)
+    result = await sv.download_video("https://cdn/v")
+    assert len(attempts) == expected_attempts
+    assert bool(result) == (expected_attempts == 2)
+
+
+async def test_failed_cached_media_refresh_keeps_cached_caption(s):
+    s["cache"] = {"caption": "Useful cached recipe", "media_url": "https://cdn/expired",
+                  "thumbnail": "https://cdn/cover", "strategy": "reel_video"}
+    s["dead"].add("https://cdn/expired")
+    b = await sv.acquire(IG_REEL)
+    assert b.metadata["thin"] is True and "Useful cached recipe" in b.text
+    assert b.images == ["https://cdn/cover"] and s["apify_calls"] == 1
+
+
+async def test_capped_carousel_marks_unseen_slides_thin(s):
+    s["apify"] = {"caption": "10 cafes", "images": [f"https://cdn/{i}" for i in range(6)],
+                  "image_count": 10}
+    b = await sv.acquire(IG_REEL)
+    assert len(b.image_parts) == 6
+    assert b.metadata["slides_available"] == 10 and b.metadata["slides_expected"] == 6
+    assert b.metadata["thin"] is True
+
+
+async def test_cached_transient_retries_url_without_paid_refresh(s, monkeypatch):
+    s["cache"] = {"caption": "cached", "media_url": "https://cdn/v",
+                  "strategy": "reel_video", "download_failure": "transient"}
+    async def transient(u, duration=0, *, failure=None):
+        failure["reason"] = "transient"
+        return None
+    monkeypatch.setattr(sv, "download_video", transient)
+    b = await sv.acquire(IG_REEL)
+    assert b.metadata["thin"] is True and s["apify_calls"] == 0
+    assert s["puts"][-1]["media_url"] == "https://cdn/v"
+
+
+@pytest.mark.parametrize("content_type,body", [("application/json", b'{}'), ("video/mp4", b'12345')])
+async def test_terminal_type_or_size_failure_never_rescrapes(s, monkeypatch, content_type, body):
+    monkeypatch.setattr(sv.settings, "VIDEO_MAX_BYTES", 2)
+    monkeypatch.setattr(sv, "download_video", sv_download_original)
+    monkeypatch.setattr(sv, "guarded_async_client",
+                        lambda **kw: _StreamClient(_StreamResp(content_type, body), {}))
+    s["apify"] = _apify_video()
+    b = await sv.acquire(IG_REEL)
+    assert b.metadata["thin"] is True
+    s["cache"] = s["puts"][-1]
+    assert s["cache"]["download_failure"] == "permanent"
+    await sv.acquire(IG_REEL)
+    assert s["apify_calls"] == 1
+
+
+sv_download_original = sv.download_video
+
+
+async def test_reencode_environment_failure_is_transient(monkeypatch, tmp_path):
+    monkeypatch.setattr(sv.subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError()))
+    failure = {}
+    assert sv._reencode(str(tmp_path / "video"), 60, failure=failure) is None
+    assert failure["reason"] == "transient"
+
+
+async def test_download_deadline_expiry_is_transient(monkeypatch):
+    import asyncio
+    async def wait(*a, **kw):
+        a[0].close()
+        raise asyncio.TimeoutError()
+    monkeypatch.setattr(sv.asyncio, "wait_for", wait)
+    failure = {}
+    assert await sv.download_video("https://cdn/v", failure=failure) is None
+    assert failure["reason"] == "transient"

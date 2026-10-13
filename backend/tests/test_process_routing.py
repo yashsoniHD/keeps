@@ -317,3 +317,125 @@ async def test_cover_thumb_host_match_and_timeout(monkeypatch):
     monkeypatch.setattr(process, "_fetch_thumb", hang)
     monkeypatch.setattr(process, "COVER_THUMB_TIMEOUT_S", 0.01)
     assert await process._cover_thumb("https://scontent.cdninstagram.com/a.jpg") is None
+
+
+async def test_transient_video_retries_before_accepting_caption(fake_db, monkeypatch):
+    from services.gemini import ProviderError
+    _wire(monkeypatch, fake_db, content_type="summary")
+    calls = []
+    async def acquire(url):
+        return _reel_bundle()
+    async def video(*args, **kwargs):
+        calls.append("video")
+        if len(calls) == 1:
+            raise ProviderError("temporary outage")
+        return NoteExtraction(content_type="summary", title="Watched", ai_summary="S",
+                              data={"facts": ["observed narration " * 4]})
+    async def no_sleep(delay):
+        pass
+    monkeypatch.setattr(process.sources, "acquire", acquire)
+    monkeypatch.setattr(process.gemini_service, "extract_from_video", video)
+    monkeypatch.setattr(process.asyncio, "sleep", no_sleep)
+    _seed(fake_db)
+    result = await process.process_job("j", DummyRequest())
+    assert result["status"] == "completed"
+    assert len(calls) == 2
+    assert _notes(fake_db)[0]["title"] == "Watched"
+    assert not _notes(fake_db)[0]["data"].get("thin")
+
+
+async def test_exhausted_transient_video_uses_honest_caption(fake_db, monkeypatch):
+    from services.gemini import ProviderError
+    _wire(monkeypatch, fake_db, content_type="summary", bundle=_reel_bundle())
+    async def video(*args, **kwargs):
+        raise ProviderError("temporary outage")
+    monkeypatch.setattr(process.gemini_service, "extract_from_video", video)
+    _seed(fake_db)
+    fake_db.docs[("jobs", "j")]["attempt_count"] = process.MAX_TRANSIENT_ATTEMPTS - 1
+    result = await process.process_job("j", DummyRequest())
+    assert result["status"] == "completed" and not result.get("salvaged")
+    assert _notes(fake_db)[0]["data"]["thin"] is True
+    assert "ProviderError" in _notes(fake_db)[0]["data"]["_quality"]["video_error"]
+
+
+async def test_video_frame_retained_when_poster_unavailable(fake_db, monkeypatch):
+    _wire(monkeypatch, fake_db, content_type="summary", bundle=_reel_bundle())
+    async def thumbnail(video):
+        assert video == b"MP4"
+        return "data:image/jpeg;base64,frame"
+    async def cover(url):
+        return None
+    async def video(*args, **kwargs):
+        return NoteExtraction(content_type="summary", title="Watched", ai_summary="S",
+                              data={"facts": ["observed narration " * 4]})
+    monkeypatch.setattr(process, "video_thumbnail", thumbnail)
+    monkeypatch.setattr(process, "_cover_thumb", cover)
+    monkeypatch.setattr(process.gemini_service, "extract_from_video", video)
+    _seed(fake_db)
+    await process.process_job("j", DummyRequest())
+    assert _notes(fake_db)[0]["cover_thumb"] == "data:image/jpeg;base64,frame"
+
+
+async def test_youtube_download_fallback_retains_frame(fake_db, monkeypatch):
+    yt = ContentBundle(kind="video_uri", video_uri="https://youtu.be/x", strategy="youtube_direct")
+    _wire(monkeypatch, fake_db, content_type="summary", bundle=yt)
+    async def direct(*args, **kwargs):
+        raise VideoUnreadable("cannot access URL")
+    async def fallback(url, bundle):
+        result = _reel_bundle()
+        result.strategy = "youtube_download"
+        result.images = []
+        return result
+    async def thumbnail(video):
+        return "data:image/jpeg;base64,frame"
+    async def video(*args, **kwargs):
+        return NoteExtraction(content_type="summary", title="Watched", ai_summary="S",
+                              data={"facts": ["observed narration " * 4]})
+    monkeypatch.setattr(process.gemini_service, "extract_async", direct)
+    monkeypatch.setattr(process.sources.youtube, "fallback", fallback)
+    monkeypatch.setattr(process.gemini_service, "extract_from_video", video)
+    monkeypatch.setattr(process, "video_thumbnail", thumbnail)
+    _seed(fake_db, "https://youtu.be/x")
+    await process.process_job("j", DummyRequest())
+    assert _notes(fake_db)[0]["cover_thumb"] == "data:image/jpeg;base64,frame"
+
+
+async def test_youtube_transient_waits_for_retries_before_scraper(fake_db, monkeypatch):
+    from services.gemini import ProviderError
+    _wire(monkeypatch, fake_db, content_type="summary")
+    stages = []
+    async def acquire(url):
+        return ContentBundle(kind="video_uri", video_uri=url, strategy="youtube_direct")
+    async def extract(url, bundle, ct, note_hint=None, **kwargs):
+        stages.append(bundle.strategy)
+        if bundle.strategy == "youtube_direct":
+            raise ProviderError("temporary outage")
+        return NoteExtraction(content_type="summary", title="Caption", ai_summary="S",
+                              data={"facts": ["caption detail " * 5]})
+    async def fallback(url, bundle):
+        return ContentBundle(kind="text", text="caption " * 20, strategy="youtube_fallback", metadata={"thin": True})
+    async def no_sleep(delay):
+        pass
+    monkeypatch.setattr(process.sources, "acquire", acquire)
+    monkeypatch.setattr(process.gemini_service, "extract_async", extract)
+    monkeypatch.setattr(process.sources.youtube, "fallback", fallback)
+    monkeypatch.setattr(process.asyncio, "sleep", no_sleep)
+    _seed(fake_db, "https://youtu.be/x")
+    result = await process.process_job("j", DummyRequest())
+    assert result["status"] == "completed" and not result.get("salvaged")
+    assert stages == ["youtube_direct"] * process.MAX_TRANSIENT_ATTEMPTS + ["youtube_fallback"]
+    assert _notes(fake_db)[0]["data"]["thin"] is True
+
+
+async def test_metadata_only_media_evidence_stays_thin_on_save(fake_db, monkeypatch):
+    _wire(monkeypatch, fake_db, content_type="summary", bundle=_reel_bundle())
+    async def video(*args, **kwargs):
+        return NoteExtraction(content_type="summary", title="Caption", ai_summary="S",
+                              data={"thin": True, "_evidence": [{"source": "caption", "text": "caption detail"}],
+                                    "_quality": {"media_coverage": "caption_only"}})
+    monkeypatch.setattr(process.gemini_service, "extract_from_video", video)
+    _seed(fake_db)
+    await process.process_job("j", DummyRequest())
+    note = _notes(fake_db)[0]
+    assert note["data"]["thin"] is True
+    assert note["data"]["_quality"]["media_coverage"] == "caption_only"

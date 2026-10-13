@@ -181,6 +181,14 @@ async def fallback(url: str, bundle: ContentBundle | None = None, *, metadata: d
         return text_bundle(transcript, "captions")
 
     result = await apify.fetch_capped(url) or {}
+    if meta.get("title") in (None, "", "Untitled") and result.get("title"):
+        meta["title"] = result["title"]
+    if not meta.get("description") and result.get("caption"):
+        meta["description"] = result["caption"]
+    if not meta.get("author") and result.get("author"):
+        meta["author"] = result["author"]
+    if not images and result.get("thumbnail"):
+        images = [result["thumbnail"]]
     duration = to_seconds(meta.get("duration")) or to_seconds(result.get("duration"))
     # The mp4 path obeys the same file limit as reels: no multi-hour downloads.
     if (result.get("video_url") and not too_long(duration)

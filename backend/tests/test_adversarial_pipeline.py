@@ -100,10 +100,10 @@ def test_free_429_handled_by_models_chain_and_paid_model_recorded(calls2, monkey
     assert parsed.content_type == "recipe"
 
 
-def test_single_model_video_chain_sends_no_models_list_and_429_is_unreadable(calls2):
+def test_single_model_video_chain_sends_no_models_list_and_429_is_retryable(calls2):
     assert len(settings.VIDEO_MODELS) == 1
     calls2.replies = [_status(429)]
-    with pytest.raises(VideoUnreadable):
+    with pytest.raises(openai.APIStatusError):
         gemini_service._extract_from_video(b"x" * 10, "video/mp4", "cap", [], None)
     assert len(calls2) == 1
     assert "models" not in calls2[0]["extra_body"]
@@ -126,25 +126,25 @@ def test_timeout_with_29s_left_does_not_retry(calls2, deadline):
     assert len(calls2) == 1
 
 
-def test_timeout_on_both_models_becomes_video_unreadable(calls2, deadline, monkeypatch):
+def test_timeout_on_both_models_remains_retryable(calls2, deadline, monkeypatch):
     deadline(250)
-    # Default single-model chain: one timeout → VideoUnreadable after exactly one call.
+    # Default single-model chain: one timeout remains retryable after exactly one call.
     calls2.replies = [_timeout()]
-    with pytest.raises(VideoUnreadable):
+    with pytest.raises(openai.APITimeoutError):
         gemini_service._extract_from_video(b"x" * 10, "video/mp4", "cap", [], None)
     assert len(calls2) == 1
     # Two-model chain: the timeout walks the rest of the chain once, then gives up.
     monkeypatch.setattr(settings, "VIDEO_MODELS", ["a:free", "b"])
     calls2.clear()
     calls2.replies = [_timeout(), _timeout()]
-    with pytest.raises(VideoUnreadable):
+    with pytest.raises(openai.APITimeoutError):
         gemini_service._extract_from_video(b"x" * 10, "video/mp4", "cap", [], None)
     assert [c["model"] for c in calls2] == ["a:free", "b"]
 
 
-def test_429_on_every_model_becomes_video_unreadable(calls2):
+def test_429_on_every_model_remains_retryable(calls2):
     calls2.replies = [_status(429)]
-    with pytest.raises(VideoUnreadable):
+    with pytest.raises(openai.APIStatusError):
         gemini_service._extract_from_video(b"x" * 10, "video/mp4", "cap", [], None)
 
 
@@ -215,12 +215,12 @@ def test_empty_reply_raises_without_nudge(calls2, empty):
 
 def test_no_choices_is_an_empty_reply(calls2):
     """A 200 with no choices is OpenRouter's provider-error shape: the text path fails loudly
-    with ProviderError (never returns ""), and the video path turns it into VideoUnreadable."""
+    with ProviderError (never returns ""), and the video path preserves it for worker retries."""
     calls2.replies = [SimpleNamespace(choices=[], usage=None)]
     with pytest.raises(gemini.ProviderError, match="empty reply"):
         gemini_service._note_json(settings.TEXT_MODELS[:1], "S", "P")  # no chain → no retry
     calls2.replies = [SimpleNamespace(choices=None, usage=None, error={"message": "down"})]
-    with pytest.raises(VideoUnreadable, match="down"):
+    with pytest.raises(gemini.ProviderError, match="down"):
         gemini_service._extract_from_video(b"x" * 10, "video/mp4", "cap", [], None)
 
 
@@ -566,8 +566,10 @@ def ladder(monkeypatch):
         st["apify_calls"] += 1
         return st["apify"]
 
-    async def download(u):
+    async def download(u, duration=0, *, failure=None):
         st["downloads"].append(u)
+        if u in st["dead"] and failure is not None:
+            failure["reason"] = "permanent" if u.endswith("huge") else "expired"
         return None if u in st["dead"] else (b"MP4", "video/mp4")
 
     async def og(url):
@@ -601,17 +603,15 @@ async def test_expired_cached_media_reruns_full_ladder(ladder):
     assert ladder["puts"][-1]["media_url"] == "https://cdn/new"   # cache refreshed
 
 
-async def test_undownloadable_apify_video_is_cached_as_reel_video_and_reruns_apify(ladder):
-    """BUG (cost): Apify returns a video URL that can't be downloaded (over 25 MB, 403). The note
-    is thin, but the entry is cached with strategy=reel_video, so every re-extract inside 6 h
-    sees an 'expired' video and re-runs the PAID Apify actor for the same dead file.
-    Expected: a cache hit whose video was never obtainable doesn't trigger another Apify run."""
+async def test_permanently_oversized_apify_video_does_not_repeat_paid_scrape(ladder):
+    """A known size rejection stays thin without another download or paid actor run."""
     ladder["apify"] = {"video_url": "https://cdn/huge", "caption": "c", "images": []}
     ladder["dead"].add("https://cdn/huge")
     b1 = await sv.acquire(IG)
     assert b1.metadata.get("thin") is True
     ladder["cache"] = ladder["puts"][-1]
     await sv.acquire(IG)
+    assert ladder["downloads"] == ["https://cdn/huge"]
     assert ladder["apify_calls"] == 1, f"Apify ran {ladder['apify_calls']}x for one dead video"
 
 
